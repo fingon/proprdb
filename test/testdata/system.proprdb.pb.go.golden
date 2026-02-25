@@ -4,158 +4,22 @@ package genexample
 
 import (
 	"context"
-	"crypto/rand"
 	"database/sql"
-	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"strings"
-	"time"
 
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
+	rt "github.com/fingon/proprdb/rt"
 )
 
-type DBTX interface {
-	ExecContext(context.Context, string, ...any) (sql.Result, error)
-	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
-	QueryRowContext(context.Context, string, ...any) *sql.Row
-}
-
-func proprdbNowNs() int64 {
-	return time.Now().UnixNano()
-}
-
-func proprdbUUIDv7() (string, error) {
-	var uuidBytes [16]byte
-	if _, err := rand.Read(uuidBytes[:]); err != nil {
-		return "", fmt.Errorf("generate random bytes for uuidv7: %w", err)
-	}
-	milliseconds := uint64(time.Now().UnixMilli())
-	uuidBytes[0] = byte(milliseconds >> 40)
-	uuidBytes[1] = byte(milliseconds >> 32)
-	uuidBytes[2] = byte(milliseconds >> 24)
-	uuidBytes[3] = byte(milliseconds >> 16)
-	uuidBytes[4] = byte(milliseconds >> 8)
-	uuidBytes[5] = byte(milliseconds)
-	uuidBytes[6] = (uuidBytes[6] & 0x0f) | 0x70
-	uuidBytes[8] = (uuidBytes[8] & 0x3f) | 0x80
-	segment1 := binary.BigEndian.Uint32(uuidBytes[0:4])
-	segment2 := binary.BigEndian.Uint16(uuidBytes[4:6])
-	segment3 := binary.BigEndian.Uint16(uuidBytes[6:8])
-	segment4 := binary.BigEndian.Uint16(uuidBytes[8:10])
-	segment5High := binary.BigEndian.Uint16(uuidBytes[10:12])
-	segment5Low := binary.BigEndian.Uint32(uuidBytes[12:16])
-	segment5 := (uint64(segment5High) << 32) | uint64(segment5Low)
-	return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x", segment1, segment2, segment3, segment4, segment5), nil
-}
-
-type proprdbJSONLRecord struct {
-	ID      string          `json:"id"`
-	Deleted bool            `json:"deleted,omitempty"`
-	AtNs    int64           `json:"at_ns"`
-	Data    json.RawMessage `json:"data"`
-}
-
-func proprdbTypeURL(typeName string) string {
-	return "type.googleapis.com/" + typeName
-}
-
-func proprdbTypeNameFromURL(typeURL string) string {
-	if typeURL == "" {
-		return ""
-	}
-	lastSlash := strings.LastIndex(typeURL, "/")
-	if lastSlash == -1 || lastSlash == len(typeURL)-1 {
-		return typeURL
-	}
-	return typeURL[lastSlash+1:]
-}
-
-func proprdbMarshalAnyJSON(message proto.Message) (json.RawMessage, error) {
-	anyMessage, err := anypb.New(message)
-	if err != nil {
-		return nil, fmt.Errorf("marshal any wrapper: %w", err)
-	}
-	dataJSON, err := protojson.Marshal(anyMessage)
-	if err != nil {
-		return nil, fmt.Errorf("marshal any as json: %w", err)
-	}
-	return json.RawMessage(dataJSON), nil
-}
-
-func proprdbMarshalTypeOnlyAnyJSON(typeName string) (json.RawMessage, error) {
-	anyMessage := &anypb.Any{TypeUrl: proprdbTypeURL(typeName)}
-	dataJSON, err := protojson.Marshal(anyMessage)
-	if err != nil {
-		return nil, fmt.Errorf("marshal type-only any as json: %w", err)
-	}
-	return json.RawMessage(dataJSON), nil
-}
-
-func proprdbSyncNeedsSend(q DBTX, objectID, tableName, remote string, atNs int64) (bool, error) {
-	ctx := context.Background()
-	var syncedAtNs int64
-	err := q.QueryRowContext(ctx, `SELECT at_ns FROM _sync WHERE object_id = ? AND table_name = ? AND remote = ?`, objectID, tableName, remote).Scan(&syncedAtNs)
-	if errors.Is(err, sql.ErrNoRows) {
-		return true, nil
-	}
-	if err != nil {
-		return false, fmt.Errorf("select sync row for %s/%s/%s: %w", tableName, objectID, remote, err)
-	}
-	return syncedAtNs < atNs, nil
-}
-
-func proprdbSyncUpsert(q DBTX, objectID, tableName, remote string, atNs int64) error {
-	ctx := context.Background()
-	if _, err := q.ExecContext(ctx, `INSERT INTO _sync (object_id, table_name, at_ns, remote) VALUES (?, ?, ?, ?) ON CONFLICT(object_id, table_name, remote) DO UPDATE SET at_ns = CASE WHEN excluded.at_ns > at_ns THEN excluded.at_ns ELSE at_ns END`, objectID, tableName, atNs, remote); err != nil {
-		return fmt.Errorf("upsert sync row for %s/%s/%s: %w", tableName, objectID, remote, err)
-	}
-	return nil
-}
-
-func proprdbLocalMaxAtNs(q DBTX, tableName, objectID string) (int64, error) {
-	ctx := context.Background()
-	maxAtNs := int64(-1)
-	var rowAtNs int64
-	rowErr := q.QueryRowContext(ctx, `SELECT at_ns FROM "`+tableName+`" WHERE id = ?`, objectID).Scan(&rowAtNs)
-	if rowErr != nil && !errors.Is(rowErr, sql.ErrNoRows) {
-		return 0, fmt.Errorf("select row timestamp for %s/%s: %w", tableName, objectID, rowErr)
-	}
-	if rowErr == nil && rowAtNs > maxAtNs {
-		maxAtNs = rowAtNs
-	}
-	var tombstoneAtNs int64
-	tombstoneErr := q.QueryRowContext(ctx, `SELECT at_ns FROM _deleted WHERE table_name = ? AND id = ?`, tableName, objectID).Scan(&tombstoneAtNs)
-	if tombstoneErr != nil && !errors.Is(tombstoneErr, sql.ErrNoRows) {
-		return 0, fmt.Errorf("select tombstone timestamp for %s/%s: %w", tableName, objectID, tombstoneErr)
-	}
-	if tombstoneErr == nil && tombstoneAtNs > maxAtNs {
-		maxAtNs = tombstoneAtNs
-	}
-	return maxAtNs, nil
-}
-
-func proprdbReadJSONL(r io.Reader, visit func(proprdbJSONLRecord, int) error) error {
-	decoder := json.NewDecoder(r)
-	lineNumber := 0
-	for {
-		lineNumber++
-		var record proprdbJSONLRecord
-		if err := decoder.Decode(&record); err != nil {
-			if errors.Is(err, io.EOF) {
-				return nil
-			}
-			return fmt.Errorf("decode jsonl line %d: %w", lineNumber, err)
-		}
-		if err := visit(record, lineNumber); err != nil {
-			return err
-		}
-	}
-}
+type DBTX = rt.DBTX
+type proprdbJSONLRecord = rt.JSONLRecord
 
 const PersonTableName = "generatedtest_example_person"
 const PersonTypeName = "generatedtest.example.Person"
@@ -183,16 +47,10 @@ func (t *PersonTable) Init() error {
 	if t.q == nil {
 		return errors.New("nil DBTX")
 	}
+	if err := rt.EnsureCoreTables(t.q); err != nil {
+		return err
+	}
 	ctx := context.Background()
-	if _, err := t.q.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS _deleted (table_name TEXT NOT NULL, id TEXT NOT NULL, at_ns INTEGER NOT NULL, PRIMARY KEY (table_name, id))`); err != nil {
-		return fmt.Errorf("create _deleted table: %w", err)
-	}
-	if _, err := t.q.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS _sync (object_id TEXT NOT NULL, table_name TEXT NOT NULL, at_ns INTEGER NOT NULL, remote TEXT NOT NULL, PRIMARY KEY (object_id, table_name, remote))`); err != nil {
-		return fmt.Errorf("create _sync table: %w", err)
-	}
-	if _, err := t.q.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS _proprdb_schema (table_name TEXT PRIMARY KEY, schema_hash TEXT NOT NULL)`); err != nil {
-		return fmt.Errorf("create _proprdb_schema table: %w", err)
-	}
 	if _, err := t.q.ExecContext(ctx, PersonCreateTableSQL); err != nil {
 		return fmt.Errorf("create table %s: %w", PersonTableName, err)
 	}
@@ -292,11 +150,17 @@ func (t *PersonTable) Insert(data *Person) (PersonRow, error) {
 		return PersonRow{}, errors.New("nil data")
 	}
 	ctx := context.Background()
-	id, err := proprdbUUIDv7()
+	id, err := rt.UUIDv7()
 	if err != nil {
 		return PersonRow{}, fmt.Errorf("generate uuidv7: %w", err)
 	}
-	atNs := proprdbNowNs()
+	if err := rt.ValidateUUID(id); err != nil {
+		return PersonRow{}, fmt.Errorf("validate generated id %s: %w", id, err)
+	}
+	if err := data.Valid(); err != nil {
+		return PersonRow{}, fmt.Errorf("validate Person: %w", err)
+	}
+	atNs := rt.NowNs()
 	dataBytes, err := proto.Marshal(data)
 	if err != nil {
 		return PersonRow{}, fmt.Errorf("marshal Person: %w", err)
@@ -320,11 +184,17 @@ func (t *PersonTable) UpdateByID(id string, data *Person) (PersonRow, error) {
 	if id == "" {
 		return PersonRow{}, errors.New("empty id")
 	}
+	if err := rt.ValidateUUID(id); err != nil {
+		return PersonRow{}, fmt.Errorf("validate id %s: %w", id, err)
+	}
 	if data == nil {
 		return PersonRow{}, errors.New("nil data")
 	}
+	if err := data.Valid(); err != nil {
+		return PersonRow{}, fmt.Errorf("validate Person: %w", err)
+	}
 	ctx := context.Background()
-	atNs := proprdbNowNs()
+	atNs := rt.NowNs()
 	dataBytes, err := proto.Marshal(data)
 	if err != nil {
 		return PersonRow{}, fmt.Errorf("marshal Person: %w", err)
@@ -362,7 +232,7 @@ func (t *PersonTable) DeleteByID(id string) error {
 		return errors.New("empty id")
 	}
 	ctx := context.Background()
-	atNs := proprdbNowNs()
+	atNs := rt.NowNs()
 	if _, err := t.q.ExecContext(ctx, `INSERT INTO _deleted (table_name, id, at_ns) VALUES (?, ?, ?) ON CONFLICT(table_name, id) DO UPDATE SET at_ns = excluded.at_ns`, PersonTableName, id, atNs); err != nil {
 		return fmt.Errorf("insert tombstone for %s/%s: %w", PersonTableName, id, err)
 	}
@@ -495,16 +365,10 @@ func (t *NoteTable) Init() error {
 	if t.q == nil {
 		return errors.New("nil DBTX")
 	}
+	if err := rt.EnsureCoreTables(t.q); err != nil {
+		return err
+	}
 	ctx := context.Background()
-	if _, err := t.q.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS _deleted (table_name TEXT NOT NULL, id TEXT NOT NULL, at_ns INTEGER NOT NULL, PRIMARY KEY (table_name, id))`); err != nil {
-		return fmt.Errorf("create _deleted table: %w", err)
-	}
-	if _, err := t.q.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS _sync (object_id TEXT NOT NULL, table_name TEXT NOT NULL, at_ns INTEGER NOT NULL, remote TEXT NOT NULL, PRIMARY KEY (object_id, table_name, remote))`); err != nil {
-		return fmt.Errorf("create _sync table: %w", err)
-	}
-	if _, err := t.q.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS _proprdb_schema (table_name TEXT PRIMARY KEY, schema_hash TEXT NOT NULL)`); err != nil {
-		return fmt.Errorf("create _proprdb_schema table: %w", err)
-	}
 	if _, err := t.q.ExecContext(ctx, NoteCreateTableSQL); err != nil {
 		return fmt.Errorf("create table %s: %w", NoteTableName, err)
 	}
@@ -599,11 +463,14 @@ func (t *NoteTable) Insert(data *Note) (NoteRow, error) {
 		return NoteRow{}, errors.New("nil data")
 	}
 	ctx := context.Background()
-	id, err := proprdbUUIDv7()
+	id, err := rt.UUIDv7()
 	if err != nil {
 		return NoteRow{}, fmt.Errorf("generate uuidv7: %w", err)
 	}
-	atNs := proprdbNowNs()
+	if err := rt.ValidateUUID(id); err != nil {
+		return NoteRow{}, fmt.Errorf("validate generated id %s: %w", id, err)
+	}
+	atNs := rt.NowNs()
 	dataBytes, err := proto.Marshal(data)
 	if err != nil {
 		return NoteRow{}, fmt.Errorf("marshal Note: %w", err)
@@ -626,11 +493,14 @@ func (t *NoteTable) UpdateByID(id string, data *Note) (NoteRow, error) {
 	if id == "" {
 		return NoteRow{}, errors.New("empty id")
 	}
+	if err := rt.ValidateUUID(id); err != nil {
+		return NoteRow{}, fmt.Errorf("validate id %s: %w", id, err)
+	}
 	if data == nil {
 		return NoteRow{}, errors.New("nil data")
 	}
 	ctx := context.Background()
-	atNs := proprdbNowNs()
+	atNs := rt.NowNs()
 	dataBytes, err := proto.Marshal(data)
 	if err != nil {
 		return NoteRow{}, fmt.Errorf("marshal Note: %w", err)
@@ -667,7 +537,7 @@ func (t *NoteTable) DeleteByID(id string) error {
 		return errors.New("empty id")
 	}
 	ctx := context.Background()
-	atNs := proprdbNowNs()
+	atNs := rt.NowNs()
 	if _, err := t.q.ExecContext(ctx, `INSERT INTO _deleted (table_name, id, at_ns) VALUES (?, ?, ?) ON CONFLICT(table_name, id) DO UPDATE SET at_ns = excluded.at_ns`, NoteTableName, id, atNs); err != nil {
 		return fmt.Errorf("insert tombstone for %s/%s: %w", NoteTableName, id, err)
 	}
@@ -824,14 +694,14 @@ func (c *CRUD) WriteJSONL(remote string, w io.Writer) error {
 		return fmt.Errorf("select Person rows for jsonl write: %w", err)
 	}
 	for _, row := range personRows {
-		needsSend, err := proprdbSyncNeedsSend(q, row.ID, PersonTableName, remote, row.AtNs)
+		needsSend, err := rt.SyncNeedsSend(q, row.ID, PersonTableName, remote, row.AtNs)
 		if err != nil {
 			return err
 		}
 		if !needsSend {
 			continue
 		}
-		dataJSON, err := proprdbMarshalAnyJSON(row.Data)
+		dataJSON, err := rt.MarshalAnyJSON(row.Data)
 		if err != nil {
 			return fmt.Errorf("marshal Person %s for jsonl write: %w", row.ID, err)
 		}
@@ -839,35 +709,11 @@ func (c *CRUD) WriteJSONL(remote string, w io.Writer) error {
 		if err := encoder.Encode(record); err != nil {
 			return fmt.Errorf("write jsonl row for Person %s: %w", row.ID, err)
 		}
-		if err := proprdbSyncUpsert(q, row.ID, PersonTableName, remote, row.AtNs); err != nil {
+		if err := rt.SyncUpsert(q, row.ID, PersonTableName, remote, row.AtNs); err != nil {
 			return err
 		}
 	}
-	noteRows, err := c.Note.Select("")
-	if err != nil {
-		return fmt.Errorf("select Note rows for jsonl write: %w", err)
-	}
-	for _, row := range noteRows {
-		needsSend, err := proprdbSyncNeedsSend(q, row.ID, NoteTableName, remote, row.AtNs)
-		if err != nil {
-			return err
-		}
-		if !needsSend {
-			continue
-		}
-		dataJSON, err := proprdbMarshalAnyJSON(row.Data)
-		if err != nil {
-			return fmt.Errorf("marshal Note %s for jsonl write: %w", row.ID, err)
-		}
-		record := proprdbJSONLRecord{ID: row.ID, AtNs: row.AtNs, Data: dataJSON}
-		if err := encoder.Encode(record); err != nil {
-			return fmt.Errorf("write jsonl row for Note %s: %w", row.ID, err)
-		}
-		if err := proprdbSyncUpsert(q, row.ID, NoteTableName, remote, row.AtNs); err != nil {
-			return err
-		}
-	}
-	tombstoneRows, err := q.QueryContext(context.Background(), `SELECT table_name, id, at_ns FROM _deleted WHERE table_name IN (?,?)`, PersonTableName, NoteTableName)
+	tombstoneRows, err := q.QueryContext(context.Background(), `SELECT table_name, id, at_ns FROM _deleted WHERE table_name IN (?)`, PersonTableName)
 	if err != nil {
 		return fmt.Errorf("select tombstones for jsonl write: %w", err)
 	}
@@ -879,7 +725,7 @@ func (c *CRUD) WriteJSONL(remote string, w io.Writer) error {
 		if err := tombstoneRows.Scan(&tableName, &id, &atNs); err != nil {
 			return fmt.Errorf("scan tombstone row: %w", err)
 		}
-		needsSend, err := proprdbSyncNeedsSend(q, id, tableName, remote, atNs)
+		needsSend, err := rt.SyncNeedsSend(q, id, tableName, remote, atNs)
 		if err != nil {
 			return err
 		}
@@ -890,12 +736,10 @@ func (c *CRUD) WriteJSONL(remote string, w io.Writer) error {
 		switch tableName {
 		case PersonTableName:
 			typeName = PersonTypeName
-		case NoteTableName:
-			typeName = NoteTypeName
 		default:
 			return fmt.Errorf("unsupported tombstone table %s", tableName)
 		}
-		dataJSON, err := proprdbMarshalTypeOnlyAnyJSON(typeName)
+		dataJSON, err := rt.MarshalTypeOnlyAnyJSON(typeName)
 		if err != nil {
 			return fmt.Errorf("marshal tombstone %s/%s for jsonl write: %w", tableName, id, err)
 		}
@@ -903,7 +747,7 @@ func (c *CRUD) WriteJSONL(remote string, w io.Writer) error {
 		if err := encoder.Encode(record); err != nil {
 			return fmt.Errorf("write jsonl tombstone %s/%s: %w", tableName, id, err)
 		}
-		if err := proprdbSyncUpsert(q, id, tableName, remote, atNs); err != nil {
+		if err := rt.SyncUpsert(q, id, tableName, remote, atNs); err != nil {
 			return err
 		}
 	}
@@ -924,7 +768,7 @@ func (c *CRUD) ReadJSONL(remote string, r io.Reader) error {
 	if err != nil {
 		return err
 	}
-	return proprdbReadJSONL(r, func(record proprdbJSONLRecord, lineNumber int) error {
+	return rt.ReadJSONL(r, func(record proprdbJSONLRecord, lineNumber int) error {
 		if record.ID == "" {
 			return fmt.Errorf("jsonl line %d has empty id", lineNumber)
 		}
@@ -935,14 +779,14 @@ func (c *CRUD) ReadJSONL(remote string, r io.Reader) error {
 		if err := protojson.Unmarshal(record.Data, anyMessage); err != nil {
 			return fmt.Errorf("unmarshal jsonl data on line %d: %w", lineNumber, err)
 		}
-		typeName := proprdbTypeNameFromURL(anyMessage.GetTypeUrl())
+		typeName := rt.TypeNameFromURL(anyMessage.GetTypeUrl())
 		switch typeName {
 		case PersonTypeName:
-			localMaxAtNs, err := proprdbLocalMaxAtNs(q, PersonTableName, record.ID)
+			localMaxAtNs, err := rt.LocalMaxAtNs(q, PersonTableName, record.ID)
 			if err != nil {
 				return err
 			}
-			if err := proprdbSyncUpsert(q, record.ID, PersonTableName, remote, record.AtNs); err != nil {
+			if err := rt.SyncUpsert(q, record.ID, PersonTableName, remote, record.AtNs); err != nil {
 				return err
 			}
 			if record.AtNs < localMaxAtNs {
@@ -963,30 +807,8 @@ func (c *CRUD) ReadJSONL(remote string, r io.Reader) error {
 			}
 			return c.Person.upsertWithAtNs(record.ID, record.AtNs, data)
 		case NoteTypeName:
-			localMaxAtNs, err := proprdbLocalMaxAtNs(q, NoteTableName, record.ID)
-			if err != nil {
-				return err
-			}
-			if err := proprdbSyncUpsert(q, record.ID, NoteTableName, remote, record.AtNs); err != nil {
-				return err
-			}
-			if record.AtNs < localMaxAtNs {
-				return nil
-			}
-			if record.Deleted {
-				if c.Note == nil {
-					return errors.New("nil Note table")
-				}
-				return c.Note.tombstoneWithAtNs(record.ID, record.AtNs)
-			}
-			if c.Note == nil {
-				return errors.New("nil Note table")
-			}
-			data := &Note{}
-			if err := anypb.UnmarshalTo(anyMessage, data, proto.UnmarshalOptions{}); err != nil {
-				return fmt.Errorf("unmarshal Note data on line %d: %w", lineNumber, err)
-			}
-			return c.Note.upsertWithAtNs(record.ID, record.AtNs, data)
+			slog.Error("ignoring unsynced jsonl record", "type", typeName, "id", record.ID, "remote", remote, "line", lineNumber)
+			return nil
 		default:
 			return fmt.Errorf("unsupported @type on line %d: %s", lineNumber, typeName)
 		}

@@ -7,10 +7,17 @@ import "proto/proprdb/options.proto";
 option go_package = "generatedtest/gen;genexample";
 
 message Person {
+  option (proprdb.validate_write) = true;
   string name = 1 [(proprdb.external) = true];
   int64 age = 2 [(proprdb.external) = true];
 }
 
 message Note {
+  option (proprdb.omit_sync) = true;
+  string text = 1 [(proprdb.external) = true];
+}
+
+message Hidden {
+  option (proprdb.omit_table) = true;
   string text = 1 [(proprdb.external) = true];
 }

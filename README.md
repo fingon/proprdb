@@ -24,7 +24,7 @@ Object payloads are typed via `protobuf.Any` (`@type` determines the concrete Pr
 
 Updates can be received in any order. Conflict resolution is timestamp-based:
 
-- Newer `at_ns` wins.
+- Newer `atNs` wins.
 - If timestamps are equal, the update should be treated as idempotent and payload-equal.
 
 ## Object model
@@ -33,19 +33,19 @@ Each object update has:
 
 - `id`: unique object identifier which is valid and unique within the type UUID (`string`)
 - `deleted`: whether the object is deleted (optional, `bool`)
-- `at_ns`: last update time as Unix epoch nanoseconds (`int64`)
+- `atNs`: last update time as Unix epoch nanoseconds (`int64`)
 - `data`: object payload as `protobuf.Any`
 
 Example JSONL line:
 
 ```json
-{"id":"person:123","at_ns":1761736535123456789,"data":{"@type":"type.googleapis.com/github.com.fingon.proprdb.v1.example.Person","name":"Ada"}}
+{"id":"person:123","atNs":1761736535123456789,"data":{"@type":"type.googleapis.com/github.com.fingon.proprdb.v1.example.Person","name":"Ada"}}
 ```
 
 Deletion marker example:
 
 ```json
-{"id":"person:123","deleted":true,"at_ns":1761736599000000000,"data":{"@type":"type.googleapis.com/github.com.fingon.proprdb.v1.example.Person"}}
+{"id":"person:123","deleted":true,"atNs":1761736599000000000,"data":{"@type":"type.googleapis.com/github.com.fingon.proprdb.v1.example.Person"}}
 ```
 
 ## Local storage (SQLite backend)

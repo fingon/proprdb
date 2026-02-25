@@ -9,3 +9,9 @@ option go_package = "github.com/fingon/proprdb/proto/proprdb;proprdbpb";
 extend google.protobuf.FieldOptions {
   bool external = 50001;
 }
+
+extend google.protobuf.MessageOptions {
+  bool omit_table = 50002;
+  bool omit_sync = 50003;
+  bool validate_write = 50004;
+}

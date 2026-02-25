@@ -55,8 +55,8 @@ func TestGeneratedJSONLSync(t *testing.T) {
 		t.Fatalf("first source export: %v", err)
 	}
 	firstLines := strings.Split(strings.TrimSpace(firstExport.String()), "\n")
-	if len(firstLines) != 2 {
-		t.Fatalf("expected 2 lines in first export, got %d", len(firstLines))
+	if len(firstLines) != 1 {
+		t.Fatalf("expected 1 line in first export, got %d: %q", len(firstLines), firstExport.String())
 	}
 
 	var secondExport bytes.Buffer
@@ -82,20 +82,31 @@ func TestGeneratedJSONLSync(t *testing.T) {
 		t.Fatalf("unexpected imported person name: %q", targetPeople[0].Data.GetName())
 	}
 
-	var targetNoteTombstones int
-	if err := targetDB.QueryRowContext(ctx, "SELECT COUNT(*) FROM _deleted WHERE table_name = ? AND id = ?", NoteTableName, noteRow.ID).Scan(&targetNoteTombstones); err != nil {
-		t.Fatalf("count imported note tombstones: %v", err)
-	}
-	if targetNoteTombstones != 1 {
-		t.Fatalf("expected 1 imported note tombstone, got %d", targetNoteTombstones)
-	}
-
 	var remoteSyncCount int
 	if err := targetDB.QueryRowContext(ctx, "SELECT COUNT(*) FROM _sync WHERE remote = ?", "remote-a").Scan(&remoteSyncCount); err != nil {
 		t.Fatalf("count remote sync entries: %v", err)
 	}
-	if remoteSyncCount != 2 {
-		t.Fatalf("expected 2 remote sync entries, got %d", remoteSyncCount)
+	if remoteSyncCount != 1 {
+		t.Fatalf("expected 1 remote sync entry, got %d", remoteSyncCount)
+	}
+
+	noteLine := fmt.Sprintf("{\"id\":%q,\"atNs\":%d,\"data\":{\"@type\":%q,\"text\":\"ignored\"}}\n", noteRow.ID, personRow.AtNs+10, "type.googleapis.com/"+NoteTypeName)
+	if err := target.ReadJSONL("remote-a", strings.NewReader(noteLine)); err != nil {
+		t.Fatalf("read note line into target: %v", err)
+	}
+	targetNotes, err := target.Note.Select("id = ?", noteRow.ID)
+	if err != nil {
+		t.Fatalf("select target note after ignored sync line: %v", err)
+	}
+	if len(targetNotes) != 0 {
+		t.Fatalf("expected note sync line to be ignored, got %d rows", len(targetNotes))
+	}
+	var ignoredSyncCount int
+	if err := targetDB.QueryRowContext(ctx, "SELECT COUNT(*) FROM _sync WHERE object_id = ? AND table_name = ? AND remote = ?", noteRow.ID, NoteTableName, "remote-a").Scan(&ignoredSyncCount); err != nil {
+		t.Fatalf("count ignored note sync rows: %v", err)
+	}
+	if ignoredSyncCount != 0 {
+		t.Fatalf("expected no _sync entry for ignored note sync line, got %d", ignoredSyncCount)
 	}
 
 	updatedPerson, err := source.Person.UpdateByID(personRow.ID, &Person{Name: "Ada Updated", Age: 38})
@@ -135,7 +146,7 @@ func TestGeneratedJSONLSync(t *testing.T) {
 	if staleDeleteAtNs < 0 {
 		staleDeleteAtNs = 0
 	}
-	staleDeleteLine := fmt.Sprintf("{\"id\":%q,\"deleted\":true,\"at_ns\":%d,\"data\":{\"@type\":%q}}\n", personRow.ID, staleDeleteAtNs, "type.googleapis.com/"+PersonTypeName)
+	staleDeleteLine := fmt.Sprintf("{\"id\":%q,\"deleted\":true,\"atNs\":%d,\"data\":{\"@type\":%q}}\n", personRow.ID, staleDeleteAtNs, "type.googleapis.com/"+PersonTypeName)
 	if err := target.ReadJSONL("remote-a", strings.NewReader(staleDeleteLine)); err != nil {
 		t.Fatalf("read stale delete line into target: %v", err)
 	}
@@ -151,7 +162,7 @@ func TestGeneratedJSONLSync(t *testing.T) {
 	}
 
 	newerDeleteAtNs := localNewer.AtNs + 1
-	newerDeleteLine := fmt.Sprintf("{\"id\":%q,\"deleted\":true,\"at_ns\":%d,\"data\":{\"@type\":%q}}\n", personRow.ID, newerDeleteAtNs, "type.googleapis.com/"+PersonTypeName)
+	newerDeleteLine := fmt.Sprintf("{\"id\":%q,\"deleted\":true,\"atNs\":%d,\"data\":{\"@type\":%q}}\n", personRow.ID, newerDeleteAtNs, "type.googleapis.com/"+PersonTypeName)
 	if err := target.ReadJSONL("remote-a", strings.NewReader(newerDeleteLine)); err != nil {
 		t.Fatalf("read newer delete line into target: %v", err)
 	}

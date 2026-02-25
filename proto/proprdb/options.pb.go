@@ -30,6 +30,30 @@ var file_proto_proprdb_options_proto_extTypes = []protoimpl.ExtensionInfo{
 		Tag:           "varint,50001,opt,name=external",
 		Filename:      "proto/proprdb/options.proto",
 	},
+	{
+		ExtendedType:  (*descriptorpb.MessageOptions)(nil),
+		ExtensionType: (*bool)(nil),
+		Field:         50002,
+		Name:          "proprdb.omit_table",
+		Tag:           "varint,50002,opt,name=omit_table",
+		Filename:      "proto/proprdb/options.proto",
+	},
+	{
+		ExtendedType:  (*descriptorpb.MessageOptions)(nil),
+		ExtensionType: (*bool)(nil),
+		Field:         50003,
+		Name:          "proprdb.omit_sync",
+		Tag:           "varint,50003,opt,name=omit_sync",
+		Filename:      "proto/proprdb/options.proto",
+	},
+	{
+		ExtendedType:  (*descriptorpb.MessageOptions)(nil),
+		ExtensionType: (*bool)(nil),
+		Field:         50004,
+		Name:          "proprdb.validate_write",
+		Tag:           "varint,50004,opt,name=validate_write",
+		Filename:      "proto/proprdb/options.proto",
+	},
 }
 
 // Extension fields to descriptorpb.FieldOptions.
@@ -38,22 +62,40 @@ var (
 	E_External = &file_proto_proprdb_options_proto_extTypes[0]
 )
 
+// Extension fields to descriptorpb.MessageOptions.
+var (
+	// optional bool omit_table = 50002;
+	E_OmitTable = &file_proto_proprdb_options_proto_extTypes[1]
+	// optional bool omit_sync = 50003;
+	E_OmitSync = &file_proto_proprdb_options_proto_extTypes[2]
+	// optional bool validate_write = 50004;
+	E_ValidateWrite = &file_proto_proprdb_options_proto_extTypes[3]
+)
+
 var File_proto_proprdb_options_proto protoreflect.FileDescriptor
 
 const file_proto_proprdb_options_proto_rawDesc = "" +
 	"\n" +
 	"\x1bproto/proprdb/options.proto\x12\aproprdb\x1a google/protobuf/descriptor.proto:;\n" +
-	"\bexternal\x12\x1d.google.protobuf.FieldOptions\x18ц\x03 \x01(\bR\bexternalB3Z1github.com/fingon/proprdb/proto/proprdb;proprdbpbb\x06proto3"
+	"\bexternal\x12\x1d.google.protobuf.FieldOptions\x18ц\x03 \x01(\bR\bexternal:@\n" +
+	"\n" +
+	"omit_table\x12\x1f.google.protobuf.MessageOptions\x18҆\x03 \x01(\bR\tomitTable:>\n" +
+	"\tomit_sync\x12\x1f.google.protobuf.MessageOptions\x18ӆ\x03 \x01(\bR\bomitSync:H\n" +
+	"\x0evalidate_write\x12\x1f.google.protobuf.MessageOptions\x18Ԇ\x03 \x01(\bR\rvalidateWriteB3Z1github.com/fingon/proprdb/proto/proprdb;proprdbpbb\x06proto3"
 
 var file_proto_proprdb_options_proto_goTypes = []any{
-	(*descriptorpb.FieldOptions)(nil), // 0: google.protobuf.FieldOptions
+	(*descriptorpb.FieldOptions)(nil),   // 0: google.protobuf.FieldOptions
+	(*descriptorpb.MessageOptions)(nil), // 1: google.protobuf.MessageOptions
 }
 var file_proto_proprdb_options_proto_depIdxs = []int32{
 	0, // 0: proprdb.external:extendee -> google.protobuf.FieldOptions
-	1, // [1:1] is the sub-list for method output_type
-	1, // [1:1] is the sub-list for method input_type
-	1, // [1:1] is the sub-list for extension type_name
-	0, // [0:1] is the sub-list for extension extendee
+	1, // 1: proprdb.omit_table:extendee -> google.protobuf.MessageOptions
+	1, // 2: proprdb.omit_sync:extendee -> google.protobuf.MessageOptions
+	1, // 3: proprdb.validate_write:extendee -> google.protobuf.MessageOptions
+	4, // [4:4] is the sub-list for method output_type
+	4, // [4:4] is the sub-list for method input_type
+	4, // [4:4] is the sub-list for extension type_name
+	0, // [0:4] is the sub-list for extension extendee
 	0, // [0:0] is the sub-list for field type_name
 }
 
@@ -69,7 +111,7 @@ func file_proto_proprdb_options_proto_init() {
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_proto_proprdb_options_proto_rawDesc), len(file_proto_proprdb_options_proto_rawDesc)),
 			NumEnums:      0,
 			NumMessages:   0,
-			NumExtensions: 1,
+			NumExtensions: 4,
 			NumServices:   0,
 		},
 		GoTypes:           file_proto_proprdb_options_proto_goTypes,

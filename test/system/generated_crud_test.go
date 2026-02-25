@@ -23,6 +23,10 @@ func TestGeneratedCRUD(t *testing.T) {
 		t.Fatalf("init CRUD: %v", err)
 	}
 
+	if _, err := crud.Person.Insert(&Person{Name: "", Age: 1}); err == nil {
+		t.Fatalf("expected validation error for empty person name")
+	}
+
 	inserted, err := crud.Person.Insert(&Person{Name: "Ada", Age: 37})
 	if err != nil {
 		t.Fatalf("insert person: %v", err)
@@ -70,6 +74,10 @@ func TestGeneratedCRUD(t *testing.T) {
 	}
 	if tombstoneCount != 0 {
 		t.Fatalf("expected 0 tombstones after update, got %d", tombstoneCount)
+	}
+
+	if _, err := crud.Person.UpdateByID("not-a-uuid", &Person{Name: "Nope", Age: 10}); err == nil {
+		t.Fatalf("expected invalid uuid error on update")
 	}
 
 	if _, err := db.ExecContext(ctx, "UPDATE \""+PersonTableName+"\" SET \"age\" = 0 WHERE id = ?", inserted.ID); err != nil {
