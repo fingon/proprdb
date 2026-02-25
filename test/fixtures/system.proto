@@ -8,6 +8,7 @@ option go_package = "generatedtest/gen;genexample";
 
 message Person {
   option (proprdb.validate_write) = true;
+  option (proprdb.allow_custom_id_insert) = true;
   string name = 1 [(proprdb.external) = true];
   int64 age = 2 [(proprdb.external) = true];
 }

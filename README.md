@@ -109,11 +109,16 @@ message Person {
   - Generated `Insert`/`UpdateByID`/`UpdateRow` call `data.Valid() error`.
   - Validation is not applied to data imported through JSONL.
 
+- `proprdb.allow_custom_id_insert` (`bool`, message-level):
+  - Generated table keeps `Insert(data)` and additionally gets `InsertWithID(id, data)`.
+  - `InsertWithID` requires `id` to be a valid UUID.
+
 Example:
 
 ```proto
 message Person {
   option (proprdb.validate_write) = true;
+  option (proprdb.allow_custom_id_insert) = true;
   string name = 1 [(proprdb.external) = true];
 }
 

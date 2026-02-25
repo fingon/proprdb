@@ -46,6 +46,27 @@ func TestGeneratedCRUD(t *testing.T) {
 		t.Fatalf("inserted AtNs is not positive: %d", inserted.AtNs)
 	}
 
+	customID := "018f4f3f-6f9f-7a1b-8f55-1234567890ab"
+	insertedWithID, err := crud.Person.InsertWithID(customID, &Person{Name: "Grace", Age: 30})
+	if err != nil {
+		t.Fatalf("insert person with custom id: %v", err)
+	}
+	if insertedWithID.ID != customID {
+		t.Fatalf("inserted custom ID mismatch: got %q want %q", insertedWithID.ID, customID)
+	}
+	if insertedWithID.AtNs <= 0 {
+		t.Fatalf("inserted-with-id AtNs is not positive: %d", insertedWithID.AtNs)
+	}
+	if _, err := crud.Person.InsertWithID("", &Person{Name: "Empty ID", Age: 1}); err == nil {
+		t.Fatalf("expected empty id error on insert with id")
+	}
+	if _, err := crud.Person.InsertWithID("not-a-uuid", &Person{Name: "Bad ID", Age: 1}); err == nil {
+		t.Fatalf("expected invalid uuid error on insert with id")
+	}
+	if _, err := crud.Person.InsertWithID(customID, nil); err == nil {
+		t.Fatalf("expected nil data error on insert with id")
+	}
+
 	selected, err := crud.Person.Select("name = ?", "Ada")
 	if err != nil {
 		t.Fatalf("select person: %v", err)

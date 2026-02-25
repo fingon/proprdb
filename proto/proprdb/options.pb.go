@@ -54,6 +54,14 @@ var file_proto_proprdb_options_proto_extTypes = []protoimpl.ExtensionInfo{
 		Tag:           "varint,50004,opt,name=validate_write",
 		Filename:      "proto/proprdb/options.proto",
 	},
+	{
+		ExtendedType:  (*descriptorpb.MessageOptions)(nil),
+		ExtensionType: (*bool)(nil),
+		Field:         50005,
+		Name:          "proprdb.allow_custom_id_insert",
+		Tag:           "varint,50005,opt,name=allow_custom_id_insert",
+		Filename:      "proto/proprdb/options.proto",
+	},
 }
 
 // Extension fields to descriptorpb.FieldOptions.
@@ -70,6 +78,8 @@ var (
 	E_OmitSync = &file_proto_proprdb_options_proto_extTypes[2]
 	// optional bool validate_write = 50004;
 	E_ValidateWrite = &file_proto_proprdb_options_proto_extTypes[3]
+	// optional bool allow_custom_id_insert = 50005;
+	E_AllowCustomIdInsert = &file_proto_proprdb_options_proto_extTypes[4]
 )
 
 var File_proto_proprdb_options_proto protoreflect.FileDescriptor
@@ -81,7 +91,8 @@ const file_proto_proprdb_options_proto_rawDesc = "" +
 	"\n" +
 	"omit_table\x12\x1f.google.protobuf.MessageOptions\x18҆\x03 \x01(\bR\tomitTable:>\n" +
 	"\tomit_sync\x12\x1f.google.protobuf.MessageOptions\x18ӆ\x03 \x01(\bR\bomitSync:H\n" +
-	"\x0evalidate_write\x12\x1f.google.protobuf.MessageOptions\x18Ԇ\x03 \x01(\bR\rvalidateWriteB3Z1github.com/fingon/proprdb/proto/proprdb;proprdbpbb\x06proto3"
+	"\x0evalidate_write\x12\x1f.google.protobuf.MessageOptions\x18Ԇ\x03 \x01(\bR\rvalidateWrite:V\n" +
+	"\x16allow_custom_id_insert\x12\x1f.google.protobuf.MessageOptions\x18Ն\x03 \x01(\bR\x13allowCustomIdInsertB3Z1github.com/fingon/proprdb/proto/proprdb;proprdbpbb\x06proto3"
 
 var file_proto_proprdb_options_proto_goTypes = []any{
 	(*descriptorpb.FieldOptions)(nil),   // 0: google.protobuf.FieldOptions
@@ -92,10 +103,11 @@ var file_proto_proprdb_options_proto_depIdxs = []int32{
 	1, // 1: proprdb.omit_table:extendee -> google.protobuf.MessageOptions
 	1, // 2: proprdb.omit_sync:extendee -> google.protobuf.MessageOptions
 	1, // 3: proprdb.validate_write:extendee -> google.protobuf.MessageOptions
-	4, // [4:4] is the sub-list for method output_type
-	4, // [4:4] is the sub-list for method input_type
-	4, // [4:4] is the sub-list for extension type_name
-	0, // [0:4] is the sub-list for extension extendee
+	1, // 4: proprdb.allow_custom_id_insert:extendee -> google.protobuf.MessageOptions
+	5, // [5:5] is the sub-list for method output_type
+	5, // [5:5] is the sub-list for method input_type
+	5, // [5:5] is the sub-list for extension type_name
+	0, // [0:5] is the sub-list for extension extendee
 	0, // [0:0] is the sub-list for field type_name
 }
 
@@ -111,7 +123,7 @@ func file_proto_proprdb_options_proto_init() {
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_proto_proprdb_options_proto_rawDesc), len(file_proto_proprdb_options_proto_rawDesc)),
 			NumEnums:      0,
 			NumMessages:   0,
-			NumExtensions: 4,
+			NumExtensions: 5,
 			NumServices:   0,
 		},
 		GoTypes:           file_proto_proprdb_options_proto_goTypes,

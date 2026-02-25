@@ -149,7 +149,6 @@ func (t *PersonTable) Insert(data *Person) (PersonRow, error) {
 	if data == nil {
 		return PersonRow{}, errors.New("nil data")
 	}
-	ctx := context.Background()
 	id, err := rt.UUIDv7()
 	if err != nil {
 		return PersonRow{}, fmt.Errorf("generate uuidv7: %w", err)
@@ -157,9 +156,36 @@ func (t *PersonTable) Insert(data *Person) (PersonRow, error) {
 	if err := rt.ValidateUUID(id); err != nil {
 		return PersonRow{}, fmt.Errorf("validate generated id %s: %w", id, err)
 	}
+	return t.insertWithID(id, data)
+}
+
+func (t *PersonTable) InsertWithID(id string, data *Person) (PersonRow, error) {
+	if t.q == nil {
+		return PersonRow{}, errors.New("nil DBTX")
+	}
+	if data == nil {
+		return PersonRow{}, errors.New("nil data")
+	}
+	return t.insertWithID(id, data)
+}
+
+func (t *PersonTable) insertWithID(id string, data *Person) (PersonRow, error) {
+	if t.q == nil {
+		return PersonRow{}, errors.New("nil DBTX")
+	}
+	if data == nil {
+		return PersonRow{}, errors.New("nil data")
+	}
+	if id == "" {
+		return PersonRow{}, errors.New("empty id")
+	}
+	if err := rt.ValidateUUID(id); err != nil {
+		return PersonRow{}, fmt.Errorf("validate id %s: %w", id, err)
+	}
 	if err := data.Valid(); err != nil {
 		return PersonRow{}, fmt.Errorf("validate Person: %w", err)
 	}
+	ctx := context.Background()
 	atNs := rt.NowNs()
 	dataBytes, err := proto.Marshal(data)
 	if err != nil {
@@ -462,7 +488,6 @@ func (t *NoteTable) Insert(data *Note) (NoteRow, error) {
 	if data == nil {
 		return NoteRow{}, errors.New("nil data")
 	}
-	ctx := context.Background()
 	id, err := rt.UUIDv7()
 	if err != nil {
 		return NoteRow{}, fmt.Errorf("generate uuidv7: %w", err)
@@ -470,6 +495,23 @@ func (t *NoteTable) Insert(data *Note) (NoteRow, error) {
 	if err := rt.ValidateUUID(id); err != nil {
 		return NoteRow{}, fmt.Errorf("validate generated id %s: %w", id, err)
 	}
+	return t.insertWithID(id, data)
+}
+
+func (t *NoteTable) insertWithID(id string, data *Note) (NoteRow, error) {
+	if t.q == nil {
+		return NoteRow{}, errors.New("nil DBTX")
+	}
+	if data == nil {
+		return NoteRow{}, errors.New("nil data")
+	}
+	if id == "" {
+		return NoteRow{}, errors.New("empty id")
+	}
+	if err := rt.ValidateUUID(id); err != nil {
+		return NoteRow{}, fmt.Errorf("validate id %s: %w", id, err)
+	}
+	ctx := context.Background()
 	atNs := rt.NowNs()
 	dataBytes, err := proto.Marshal(data)
 	if err != nil {

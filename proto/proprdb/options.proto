@@ -14,4 +14,5 @@ extend google.protobuf.MessageOptions {
   bool omit_table = 50002;
   bool omit_sync = 50003;
   bool validate_write = 50004;
+  bool allow_custom_id_insert = 50005;
 }

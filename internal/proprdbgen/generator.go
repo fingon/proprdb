@@ -22,15 +22,16 @@ type projectedField struct {
 }
 
 type messageModel struct {
-	GoName           string
-	TableName        string
-	TypeName         string
-	TableTypeName    string
-	RowTypeName      string
-	ProjectionSchema string
-	ProjectedFields  []projectedField
-	OmitSync         bool
-	ValidateWrite    bool
+	GoName              string
+	TableName           string
+	TypeName            string
+	TableTypeName       string
+	RowTypeName         string
+	ProjectionSchema    string
+	ProjectedFields     []projectedField
+	OmitSync            bool
+	ValidateWrite       bool
+	AllowCustomIDInsert bool
 }
 
 // GenerateFile generates proprdb CRUD code for one .proto file.
@@ -133,6 +134,10 @@ func buildModel(message *protogen.Message) (messageModel, error) {
 	if err != nil {
 		return messageModel{}, fmt.Errorf("message %s validate_write option: %w", message.Desc.FullName(), err)
 	}
+	allowCustomIDInsert, err := messageOptionBool(message, proprdbpb.E_AllowCustomIdInsert)
+	if err != nil {
+		return messageModel{}, fmt.Errorf("message %s allow_custom_id_insert option: %w", message.Desc.FullName(), err)
+	}
 	projected := make([]projectedField, 0)
 	signatures := make([]string, 0)
 
@@ -156,15 +161,16 @@ func buildModel(message *protogen.Message) (messageModel, error) {
 	}
 
 	return messageModel{
-		GoName:           message.GoIdent.GoName,
-		TableName:        tableNameForMessage(message),
-		TypeName:         string(message.Desc.FullName()),
-		TableTypeName:    message.GoIdent.GoName + "Table",
-		RowTypeName:      message.GoIdent.GoName + "Row",
-		ProjectionSchema: strings.Join(signatures, ";"),
-		ProjectedFields:  projected,
-		OmitSync:         omitSync,
-		ValidateWrite:    validateWrite,
+		GoName:              message.GoIdent.GoName,
+		TableName:           tableNameForMessage(message),
+		TypeName:            string(message.Desc.FullName()),
+		TableTypeName:       message.GoIdent.GoName + "Table",
+		RowTypeName:         message.GoIdent.GoName + "Row",
+		ProjectionSchema:    strings.Join(signatures, ";"),
+		ProjectedFields:     projected,
+		OmitSync:            omitSync,
+		ValidateWrite:       validateWrite,
+		AllowCustomIDInsert: allowCustomIDInsert,
 	}, nil
 }
 
@@ -426,7 +432,6 @@ func emitInsertMethod(g *protogen.GeneratedFile, model messageModel, tableNameCo
 	g.P("\tif data == nil {")
 	g.P("\t\treturn ", model.RowTypeName, "{}, errors.New(\"nil data\")")
 	g.P("\t}")
-	g.P("\tctx := context.Background()")
 	g.P("\tid, err := rt.UUIDv7()")
 	g.P("\tif err != nil {")
 	g.P("\t\treturn ", model.RowTypeName, "{}, fmt.Errorf(\"generate uuidv7: %w\", err)")
@@ -434,11 +439,42 @@ func emitInsertMethod(g *protogen.GeneratedFile, model messageModel, tableNameCo
 	g.P("\tif err := rt.ValidateUUID(id); err != nil {")
 	g.P("\t\treturn ", model.RowTypeName, "{}, fmt.Errorf(\"validate generated id %s: %w\", id, err)")
 	g.P("\t}")
+	g.P("\treturn t.insertWithID(id, data)")
+	g.P("}")
+	g.P()
+
+	if model.AllowCustomIDInsert {
+		g.P("func (t *", model.TableTypeName, ") InsertWithID(id string, data *", model.GoName, ") (", model.RowTypeName, ", error) {")
+		g.P("\tif t.q == nil {")
+		g.P("\t\treturn ", model.RowTypeName, "{}, errors.New(\"nil DBTX\")")
+		g.P("\t}")
+		g.P("\tif data == nil {")
+		g.P("\t\treturn ", model.RowTypeName, "{}, errors.New(\"nil data\")")
+		g.P("\t}")
+		g.P("\treturn t.insertWithID(id, data)")
+		g.P("}")
+		g.P()
+	}
+
+	g.P("func (t *", model.TableTypeName, ") insertWithID(id string, data *", model.GoName, ") (", model.RowTypeName, ", error) {")
+	g.P("\tif t.q == nil {")
+	g.P("\t\treturn ", model.RowTypeName, "{}, errors.New(\"nil DBTX\")")
+	g.P("\t}")
+	g.P("\tif data == nil {")
+	g.P("\t\treturn ", model.RowTypeName, "{}, errors.New(\"nil data\")")
+	g.P("\t}")
+	g.P("\tif id == \"\" {")
+	g.P("\t\treturn ", model.RowTypeName, "{}, errors.New(\"empty id\")")
+	g.P("\t}")
+	g.P("\tif err := rt.ValidateUUID(id); err != nil {")
+	g.P("\t\treturn ", model.RowTypeName, "{}, fmt.Errorf(\"validate id %s: %w\", id, err)")
+	g.P("\t}")
 	if model.ValidateWrite {
 		g.P("\tif err := data.Valid(); err != nil {")
 		g.P("\t\treturn ", model.RowTypeName, "{}, fmt.Errorf(\"validate ", model.GoName, ": %w\", err)")
 		g.P("\t}")
 	}
+	g.P("\tctx := context.Background()")
 	g.P("\tatNs := rt.NowNs()")
 	g.P("\tdataBytes, err := proto.Marshal(data)")
 	g.P("\tif err != nil {")
