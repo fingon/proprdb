@@ -1,0 +1,1 @@
+../testdata/system.proprdb.pb.go.golden

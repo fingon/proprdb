@@ -14,7 +14,7 @@
   1. Standard library packages
   2. Third-party packages
   3. Internal packages
-  
+
 - Use blank imports (`_`) only when necessary for side effects
 - Use dot imports (`.`) only in test files (`_test.go`)
 

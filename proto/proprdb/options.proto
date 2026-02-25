@@ -1,0 +1,11 @@
+syntax = "proto3";
+
+package proprdb;
+
+import "google/protobuf/descriptor.proto";
+
+option go_package = "github.com/fingon/proprdb/proto/proprdb;proprdbpb";
+
+extend google.protobuf.FieldOptions {
+  bool external = 50001;
+}

@@ -1,0 +1,16 @@
+syntax = "proto3";
+
+package generatedtest.example;
+
+import "proto/proprdb/options.proto";
+
+option go_package = "generatedtest/gen;genexample";
+
+message Person {
+  string name = 1 [(proprdb.external) = true];
+  int64 age = 2 [(proprdb.external) = true];
+}
+
+message Note {
+  string text = 1 [(proprdb.external) = true];
+}
