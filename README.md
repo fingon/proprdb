@@ -1,0 +1,84 @@
+# proprdb
+
+`proprdb` is the third iteration of a "personal stuff database" concept.
+
+- `prdb` (2014-2019, Python, still in personal use, not open source)
+- `sdb` (used in https://timeatlaslabs.com since 2024, not open source)
+
+## Goals
+
+- Preserve long-term readability of personal metadata and its change history.
+- Keep the interchange format simple and implementation-independent.
+- Use strongly typed schemas for object payloads.
+
+## Non-goals
+
+- Encryption (use external tools such as `gpg` if needed)
+- Compression (use external tools such as `zstd` if needed)
+- Transport protocol design
+
+## High-level design
+
+The shared format is JSON Lines (`.jsonl`) where each line is one object update.
+Object payloads are typed via `protobuf.Any` (`@type` determines the concrete Protobuf message).
+
+Updates can be received in any order. Conflict resolution is timestamp-based:
+
+- Newer `updated_ns` wins.
+- If timestamps are equal, the update should be treated as idempotent and payload-equal.
+
+## Object model
+
+Each object update has:
+
+- `id`: unique object identifier which is valid and unique within the type UUID (`string`)
+- `deleted`: whether the object is deleted (optional, `bool`)
+- `updated_ns`: last update time as Unix epoch nanoseconds (`int64`)
+- `data`: object payload as `protobuf.Any`
+
+Example JSONL line:
+
+```json
+{"id":"person:123","updated_ns":1761736535123456789,"data":{"@type":"github.com/fingon/proprdb.v1.example.Person","name":"Ada"}}
+```
+
+Deletion marker example:
+
+```json
+{"id":"person:123","deleted":true,"updated_ns":1761736599000000000,"data":{"@type":"github.com/fingon/proprdb.v1.example.Person"}}
+```
+
+## Local storage (SQLite backend)
+
+The wire format is JSONL; local storage is implementation-defined.
+This repository uses SQLite with one table per supported object type.
+
+Each object table stores:
+
+- `id` (`TEXT PRIMARY KEY`)
+- `updated_ns` (`INTEGER NOT NULL`)
+- `data` (`BLOB NOT NULL`) as encoded `protobuf.Any`
+
+Additionally, a `_deleted` table stores tombstones:
+
+- `id` (`TEXT NOT NULL`)
+- `table_name` (`TEXT NOT NULL`)
+- `updated_ns` (`INTEGER NOT NULL`)
+- primary key: (`table_name`, `id`)
+
+Implementations may also project selected typed fields from `data` into additional tables for queryability.
+
+That projection should be generator-configurable in the Protobuf-to-CRUD pipeline.
+
+## Getting started
+
+Prerequisites:
+
+- Go `1.25+`
+
+Commands:
+
+```bash
+make test
+make lint
+```
