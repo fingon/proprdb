@@ -1,4 +1,4 @@
-# proprdb
+# PROPRDB (PROtobuf PackRat DataBase) #
 
 `proprdb` is the third iteration of a "personal stuff database" concept.
 
@@ -59,14 +59,14 @@ Each object table stores:
 - `at_ns` (`INTEGER NOT NULL`)
 - `data` (`BLOB NOT NULL`) as encoded `protobuf.Any`
 
-Additionally, a `_deleted` table stores tombstones:
+`_deleted` table stores tombstones:
 
 - `id` (`TEXT NOT NULL`)
 - `table_name` (`TEXT NOT NULL`)
 - `at_ns` (`INTEGER NOT NULL`)
 - primary key: (`table_name`, `id`)
 
-Additionally, a `_sync` table tracks what has been exchanged with each remote:
+`_sync` table tracks what has been exchanged with each remote:
 
 - `object_id` (`TEXT NOT NULL`)
 - `table_name` (`TEXT NOT NULL`)
@@ -76,7 +76,57 @@ Additionally, a `_sync` table tracks what has been exchanged with each remote:
 
 Implementations may also project selected typed fields from `data` into additional tables for queryability.
 
-That projection should be generator-configurable in the Protobuf-to-CRUD pipeline.
+## Protobuf extensions
+
+`proprdb` defines generator options in `proto/proprdb/options.proto`.
+
+### Field option
+
+- `proprdb.external` (`bool`, field-level):
+  - Marks scalar message fields to be projected into SQLite columns in addition to `data`.
+  - If omitted or `false`, field stays only inside serialized protobuf payload.
+
+Example:
+
+```proto
+message Person {
+  string name = 1 [(proprdb.external) = true];
+  int64 age = 2 [(proprdb.external) = true];
+}
+```
+
+### Message options
+
+- `proprdb.omit_table` (`bool`, message-level):
+  - Do not generate table/CRUD code for this message.
+
+- `proprdb.omit_sync` (`bool`, message-level):
+  - Generate table/CRUD code, but exclude the message from JSONL syncing.
+  - `WriteJSONL` will not export it.
+  - `ReadJSONL` will ignore incoming records for the message and log an error.
+
+- `proprdb.validate_write` (`bool`, message-level):
+  - Generated `Insert`/`UpdateByID`/`UpdateRow` call `data.Valid() error`.
+  - Validation is not applied to data imported through JSONL.
+
+Example:
+
+```proto
+message Person {
+  option (proprdb.validate_write) = true;
+  string name = 1 [(proprdb.external) = true];
+}
+
+message Note {
+  option (proprdb.omit_sync) = true;
+  string text = 1 [(proprdb.external) = true];
+}
+
+message InternalOnly {
+  option (proprdb.omit_table) = true;
+  string data = 1;
+}
+```
 
 ## Getting started
 
@@ -89,4 +139,23 @@ Commands:
 ```bash
 make test
 make lint
+```
+
+### Generate from proto (example)
+
+The example schema is in `test/fixtures/system.proto`. To generate both protobuf Go types and `proprdb` CRUD code:
+
+```bash
+# Build plugin
+go build -o /tmp/protoc-gen-proprdb ./cmd/protoc-gen-proprdb
+
+# Generate code
+protoc \
+  -I test/fixtures \
+  -I . \
+  --plugin=protoc-gen-proprdb=/tmp/protoc-gen-proprdb \
+  --go_out=test/system \
+  --go_opt=paths=source_relative \
+  --proprdb_out=paths=source_relative:test/system \
+  test/fixtures/system.proto
 ```

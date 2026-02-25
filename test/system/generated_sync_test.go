@@ -137,6 +137,26 @@ func TestGeneratedJSONLSync(t *testing.T) {
 		t.Fatalf("unexpected target person name after update import: %q", targetPeople[0].Data.GetName())
 	}
 
+	invalidByValidateLine := fmt.Sprintf(
+		"{\"id\":%q,\"atNs\":%d,\"data\":{\"@type\":%q,\"name\":\"\",\"age\":1}}\n",
+		personRow.ID,
+		targetPeople[0].AtNs+1,
+		"type.googleapis.com/"+PersonTypeName,
+	)
+	if err := target.ReadJSONL("remote-a", strings.NewReader(invalidByValidateLine)); err != nil {
+		t.Fatalf("read invalid-by-valid line into target: %v", err)
+	}
+	targetPeople, err = target.Person.Select("id = ?", personRow.ID)
+	if err != nil {
+		t.Fatalf("select target person after invalid-by-valid import: %v", err)
+	}
+	if len(targetPeople) != 1 {
+		t.Fatalf("expected 1 target person after invalid-by-valid import, got %d", len(targetPeople))
+	}
+	if targetPeople[0].Data.GetName() != "" {
+		t.Fatalf("expected empty name to be imported via JSONL despite write validation, got %q", targetPeople[0].Data.GetName())
+	}
+
 	localNewer, err := target.Person.UpdateByID(personRow.ID, &Person{Name: "Local Newer", Age: 99})
 	if err != nil {
 		t.Fatalf("update target person locally: %v", err)

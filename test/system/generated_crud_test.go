@@ -23,6 +23,14 @@ func TestGeneratedCRUD(t *testing.T) {
 		t.Fatalf("init CRUD: %v", err)
 	}
 
+	var hiddenTableCount int
+	if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?", "generatedtest_example_hidden").Scan(&hiddenTableCount); err != nil {
+		t.Fatalf("count hidden tables: %v", err)
+	}
+	if hiddenTableCount != 0 {
+		t.Fatalf("expected no hidden table for omit_table message, got %d", hiddenTableCount)
+	}
+
 	if _, err := crud.Person.Insert(&Person{Name: "", Age: 1}); err == nil {
 		t.Fatalf("expected validation error for empty person name")
 	}
@@ -132,5 +140,17 @@ func TestGeneratedCRUD(t *testing.T) {
 	}
 	if err := tx.Commit(); err != nil {
 		t.Fatalf("commit tx: %v", err)
+	}
+
+	insertedNote, err := crud.Note.Insert(&Note{Text: "Projected note"})
+	if err != nil {
+		t.Fatalf("insert note: %v", err)
+	}
+	var projectedText string
+	if err := db.QueryRowContext(ctx, "SELECT \"text\" FROM \""+NoteTableName+"\" WHERE id = ?", insertedNote.ID).Scan(&projectedText); err != nil {
+		t.Fatalf("read projected note text: %v", err)
+	}
+	if projectedText != "Projected note" {
+		t.Fatalf("expected projected note text %q, got %q", "Projected note", projectedText)
 	}
 }
