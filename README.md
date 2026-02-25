@@ -24,7 +24,7 @@ Object payloads are typed via `protobuf.Any` (`@type` determines the concrete Pr
 
 Updates can be received in any order. Conflict resolution is timestamp-based:
 
-- Newer `updated_ns` wins.
+- Newer `at_ns` wins.
 - If timestamps are equal, the update should be treated as idempotent and payload-equal.
 
 ## Object model
@@ -33,19 +33,19 @@ Each object update has:
 
 - `id`: unique object identifier which is valid and unique within the type UUID (`string`)
 - `deleted`: whether the object is deleted (optional, `bool`)
-- `updated_ns`: last update time as Unix epoch nanoseconds (`int64`)
+- `at_ns`: last update time as Unix epoch nanoseconds (`int64`)
 - `data`: object payload as `protobuf.Any`
 
 Example JSONL line:
 
 ```json
-{"id":"person:123","updated_ns":1761736535123456789,"data":{"@type":"github.com/fingon/proprdb.v1.example.Person","name":"Ada"}}
+{"id":"person:123","at_ns":1761736535123456789,"data":{"@type":"type.googleapis.com/github.com.fingon.proprdb.v1.example.Person","name":"Ada"}}
 ```
 
 Deletion marker example:
 
 ```json
-{"id":"person:123","deleted":true,"updated_ns":1761736599000000000,"data":{"@type":"github.com/fingon/proprdb.v1.example.Person"}}
+{"id":"person:123","deleted":true,"at_ns":1761736599000000000,"data":{"@type":"type.googleapis.com/github.com.fingon.proprdb.v1.example.Person"}}
 ```
 
 ## Local storage (SQLite backend)
@@ -56,15 +56,23 @@ This repository uses SQLite with one table per supported object type.
 Each object table stores:
 
 - `id` (`TEXT PRIMARY KEY`)
-- `updated_ns` (`INTEGER NOT NULL`)
+- `at_ns` (`INTEGER NOT NULL`)
 - `data` (`BLOB NOT NULL`) as encoded `protobuf.Any`
 
 Additionally, a `_deleted` table stores tombstones:
 
 - `id` (`TEXT NOT NULL`)
 - `table_name` (`TEXT NOT NULL`)
-- `updated_ns` (`INTEGER NOT NULL`)
+- `at_ns` (`INTEGER NOT NULL`)
 - primary key: (`table_name`, `id`)
+
+Additionally, a `_sync` table tracks what has been exchanged with each remote:
+
+- `object_id` (`TEXT NOT NULL`)
+- `table_name` (`TEXT NOT NULL`)
+- `at_ns` (`INTEGER NOT NULL`)
+- `remote` (`TEXT NOT NULL`)
+- primary key: (`object_id`, `table_name`, `remote`)
 
 Implementations may also project selected typed fields from `data` into additional tables for queryability.
 
