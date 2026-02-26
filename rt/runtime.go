@@ -48,6 +48,16 @@ func EnsureCoreTables(q DBTX) error {
 	return nil
 }
 
+func CloseRows(rows *sql.Rows, operation string) error {
+	if rows == nil {
+		return nil
+	}
+	if err := rows.Close(); err != nil {
+		return fmt.Errorf("close %s rows: %w", operation, err)
+	}
+	return nil
+}
+
 func NowNs() int64 {
 	return time.Now().UnixNano()
 }
