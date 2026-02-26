@@ -11,6 +11,7 @@ import (
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	descriptorpb "google.golang.org/protobuf/types/descriptorpb"
 	reflect "reflect"
+	sync "sync"
 	unsafe "unsafe"
 )
 
@@ -20,6 +21,50 @@ const (
 	// Verify that runtime/protoimpl is sufficiently up-to-date.
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
+
+type Index struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Fields        []string               `protobuf:"bytes,1,rep,name=fields,proto3" json:"fields,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *Index) Reset() {
+	*x = Index{}
+	mi := &file_proto_proprdb_options_proto_msgTypes[0]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Index) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Index) ProtoMessage() {}
+
+func (x *Index) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_proprdb_options_proto_msgTypes[0]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Index.ProtoReflect.Descriptor instead.
+func (*Index) Descriptor() ([]byte, []int) {
+	return file_proto_proprdb_options_proto_rawDescGZIP(), []int{0}
+}
+
+func (x *Index) GetFields() []string {
+	if x != nil {
+		return x.Fields
+	}
+	return nil
+}
 
 var file_proto_proprdb_options_proto_extTypes = []protoimpl.ExtensionInfo{
 	{
@@ -62,6 +107,14 @@ var file_proto_proprdb_options_proto_extTypes = []protoimpl.ExtensionInfo{
 		Tag:           "varint,50005,opt,name=allow_custom_id_insert",
 		Filename:      "proto/proprdb/options.proto",
 	},
+	{
+		ExtendedType:  (*descriptorpb.MessageOptions)(nil),
+		ExtensionType: ([]*Index)(nil),
+		Field:         50006,
+		Name:          "proprdb.indexes",
+		Tag:           "bytes,50006,rep,name=indexes",
+		Filename:      "proto/proprdb/options.proto",
+	},
 }
 
 // Extension fields to descriptorpb.FieldOptions.
@@ -80,34 +133,55 @@ var (
 	E_ValidateWrite = &file_proto_proprdb_options_proto_extTypes[3]
 	// optional bool allow_custom_id_insert = 50005;
 	E_AllowCustomIdInsert = &file_proto_proprdb_options_proto_extTypes[4]
+	// repeated proprdb.Index indexes = 50006;
+	E_Indexes = &file_proto_proprdb_options_proto_extTypes[5]
 )
 
 var File_proto_proprdb_options_proto protoreflect.FileDescriptor
 
 const file_proto_proprdb_options_proto_rawDesc = "" +
 	"\n" +
-	"\x1bproto/proprdb/options.proto\x12\aproprdb\x1a google/protobuf/descriptor.proto:;\n" +
+	"\x1bproto/proprdb/options.proto\x12\aproprdb\x1a google/protobuf/descriptor.proto\"\x1f\n" +
+	"\x05Index\x12\x16\n" +
+	"\x06fields\x18\x01 \x03(\tR\x06fields:;\n" +
 	"\bexternal\x12\x1d.google.protobuf.FieldOptions\x18ц\x03 \x01(\bR\bexternal:@\n" +
 	"\n" +
 	"omit_table\x12\x1f.google.protobuf.MessageOptions\x18҆\x03 \x01(\bR\tomitTable:>\n" +
 	"\tomit_sync\x12\x1f.google.protobuf.MessageOptions\x18ӆ\x03 \x01(\bR\bomitSync:H\n" +
 	"\x0evalidate_write\x12\x1f.google.protobuf.MessageOptions\x18Ԇ\x03 \x01(\bR\rvalidateWrite:V\n" +
-	"\x16allow_custom_id_insert\x12\x1f.google.protobuf.MessageOptions\x18Ն\x03 \x01(\bR\x13allowCustomIdInsertB3Z1github.com/fingon/proprdb/proto/proprdb;proprdbpbb\x06proto3"
+	"\x16allow_custom_id_insert\x12\x1f.google.protobuf.MessageOptions\x18Ն\x03 \x01(\bR\x13allowCustomIdInsert:K\n" +
+	"\aindexes\x12\x1f.google.protobuf.MessageOptions\x18ֆ\x03 \x03(\v2\x0e.proprdb.IndexR\aindexesB3Z1github.com/fingon/proprdb/proto/proprdb;proprdbpbb\x06proto3"
 
+var (
+	file_proto_proprdb_options_proto_rawDescOnce sync.Once
+	file_proto_proprdb_options_proto_rawDescData []byte
+)
+
+func file_proto_proprdb_options_proto_rawDescGZIP() []byte {
+	file_proto_proprdb_options_proto_rawDescOnce.Do(func() {
+		file_proto_proprdb_options_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_proto_proprdb_options_proto_rawDesc), len(file_proto_proprdb_options_proto_rawDesc)))
+	})
+	return file_proto_proprdb_options_proto_rawDescData
+}
+
+var file_proto_proprdb_options_proto_msgTypes = make([]protoimpl.MessageInfo, 1)
 var file_proto_proprdb_options_proto_goTypes = []any{
-	(*descriptorpb.FieldOptions)(nil),   // 0: google.protobuf.FieldOptions
-	(*descriptorpb.MessageOptions)(nil), // 1: google.protobuf.MessageOptions
+	(*Index)(nil),                       // 0: proprdb.Index
+	(*descriptorpb.FieldOptions)(nil),   // 1: google.protobuf.FieldOptions
+	(*descriptorpb.MessageOptions)(nil), // 2: google.protobuf.MessageOptions
 }
 var file_proto_proprdb_options_proto_depIdxs = []int32{
-	0, // 0: proprdb.external:extendee -> google.protobuf.FieldOptions
-	1, // 1: proprdb.omit_table:extendee -> google.protobuf.MessageOptions
-	1, // 2: proprdb.omit_sync:extendee -> google.protobuf.MessageOptions
-	1, // 3: proprdb.validate_write:extendee -> google.protobuf.MessageOptions
-	1, // 4: proprdb.allow_custom_id_insert:extendee -> google.protobuf.MessageOptions
-	5, // [5:5] is the sub-list for method output_type
-	5, // [5:5] is the sub-list for method input_type
-	5, // [5:5] is the sub-list for extension type_name
-	0, // [0:5] is the sub-list for extension extendee
+	1, // 0: proprdb.external:extendee -> google.protobuf.FieldOptions
+	2, // 1: proprdb.omit_table:extendee -> google.protobuf.MessageOptions
+	2, // 2: proprdb.omit_sync:extendee -> google.protobuf.MessageOptions
+	2, // 3: proprdb.validate_write:extendee -> google.protobuf.MessageOptions
+	2, // 4: proprdb.allow_custom_id_insert:extendee -> google.protobuf.MessageOptions
+	2, // 5: proprdb.indexes:extendee -> google.protobuf.MessageOptions
+	0, // 6: proprdb.indexes:type_name -> proprdb.Index
+	7, // [7:7] is the sub-list for method output_type
+	7, // [7:7] is the sub-list for method input_type
+	6, // [6:7] is the sub-list for extension type_name
+	0, // [0:6] is the sub-list for extension extendee
 	0, // [0:0] is the sub-list for field type_name
 }
 
@@ -122,12 +196,13 @@ func file_proto_proprdb_options_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_proto_proprdb_options_proto_rawDesc), len(file_proto_proprdb_options_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   0,
-			NumExtensions: 5,
+			NumMessages:   1,
+			NumExtensions: 6,
 			NumServices:   0,
 		},
 		GoTypes:           file_proto_proprdb_options_proto_goTypes,
 		DependencyIndexes: file_proto_proprdb_options_proto_depIdxs,
+		MessageInfos:      file_proto_proprdb_options_proto_msgTypes,
 		ExtensionInfos:    file_proto_proprdb_options_proto_extTypes,
 	}.Build()
 	File_proto_proprdb_options_proto = out.File

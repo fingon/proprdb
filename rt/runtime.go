@@ -48,6 +48,59 @@ func EnsureCoreTables(q DBTX) error {
 	return nil
 }
 
+func EnsureManagedIndexes(q DBTX, tableName, generatedIndexPrefix string, createIndexSQL, desiredIndexNames []string) error {
+	if q == nil {
+		return errors.New("nil DBTX")
+	}
+	ctx := context.Background()
+	for _, createSQL := range createIndexSQL {
+		if _, err := q.ExecContext(ctx, createSQL); err != nil {
+			return fmt.Errorf("create index for %s: %w", tableName, err)
+		}
+	}
+	indexRows, err := q.QueryContext(ctx, `SELECT name FROM pragma_index_list("`+tableName+`")`)
+	if err != nil {
+		return fmt.Errorf("read indexes for %s: %w", tableName, err)
+	}
+	desiredIndexes := make(map[string]bool, len(desiredIndexNames))
+	for _, indexName := range desiredIndexNames {
+		desiredIndexes[indexName] = true
+	}
+	staleGeneratedIndexes := make([]string, 0)
+	for indexRows.Next() {
+		var indexName string
+		if err := indexRows.Scan(&indexName); err != nil {
+			if closeErr := CloseRows(indexRows, "index metadata"); closeErr != nil {
+				return fmt.Errorf("scan index row: %w (additionally, %v)", err, closeErr)
+			}
+			return fmt.Errorf("scan index row: %w", err)
+		}
+		if !strings.HasPrefix(indexName, generatedIndexPrefix) {
+			continue
+		}
+		if desiredIndexes[indexName] {
+			continue
+		}
+		staleGeneratedIndexes = append(staleGeneratedIndexes, indexName)
+	}
+	if err := indexRows.Err(); err != nil {
+		if closeErr := CloseRows(indexRows, "index metadata"); closeErr != nil {
+			return fmt.Errorf("iterate index rows for %s: %w (additionally, %v)", tableName, err, closeErr)
+		}
+		return fmt.Errorf("iterate index rows for %s: %w", tableName, err)
+	}
+	if err := CloseRows(indexRows, "index metadata"); err != nil {
+		return err
+	}
+	for _, indexName := range staleGeneratedIndexes {
+		dropSQL := `DROP INDEX IF EXISTS "` + strings.ReplaceAll(indexName, `"`, `""`) + `"`
+		if _, err := q.ExecContext(ctx, dropSQL); err != nil {
+			return fmt.Errorf("drop stale index %s for %s: %w", indexName, tableName, err)
+		}
+	}
+	return nil
+}
+
 func CloseRows(rows *sql.Rows, operation string) error {
 	if rows == nil {
 		return nil

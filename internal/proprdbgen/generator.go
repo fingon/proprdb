@@ -21,6 +21,12 @@ type projectedField struct {
 	SchemaSignature string
 }
 
+type messageIndex struct {
+	ColumnNames []string
+	IndexName   string
+	Signature   string
+}
+
 type messageModel struct {
 	GoName              string
 	TableName           string
@@ -29,6 +35,7 @@ type messageModel struct {
 	RowTypeName         string
 	ProjectionSchema    string
 	ProjectedFields     []projectedField
+	Indexes             []messageIndex
 	OmitSync            bool
 	ValidateWrite       bool
 	AllowCustomIDInsert bool
@@ -154,6 +161,12 @@ func (c modelCollector) buildModel(message *protogen.Message) (messageModel, err
 	}
 	projected := make([]projectedField, 0)
 	signatures := make([]string, 0)
+	fieldsByName := make(map[string]*protogen.Field)
+	projectedByName := make(map[string]bool)
+
+	for _, field := range message.Fields {
+		fieldsByName[string(field.Desc.Name())] = field
+	}
 
 	for _, field := range message.Fields {
 		external, err := c.fieldExternal(field)
@@ -171,7 +184,16 @@ func (c modelCollector) buildModel(message *protogen.Message) (messageModel, err
 		}
 
 		projected = append(projected, projection)
+		projectedByName[projection.ColumnName] = true
 		signatures = append(signatures, projection.SchemaSignature)
+	}
+
+	indexes, err := c.messageOptionIndexes(message, fieldsByName, projectedByName)
+	if err != nil {
+		return messageModel{}, fmt.Errorf("message %s indexes option: %w", message.Desc.FullName(), err)
+	}
+	for _, indexModel := range indexes {
+		signatures = append(signatures, indexModel.Signature)
 	}
 
 	return messageModel{
@@ -182,10 +204,78 @@ func (c modelCollector) buildModel(message *protogen.Message) (messageModel, err
 		RowTypeName:         message.GoIdent.GoName + "Row",
 		ProjectionSchema:    strings.Join(signatures, ";"),
 		ProjectedFields:     projected,
+		Indexes:             indexes,
 		OmitSync:            omitSync,
 		ValidateWrite:       validateWrite,
 		AllowCustomIDInsert: allowCustomIDInsert,
 	}, nil
+}
+
+func (c modelCollector) messageOptionIndexes(message *protogen.Message, fieldsByName map[string]*protogen.Field, projectedByName map[string]bool) ([]messageIndex, error) {
+	messageOptions, ok := message.Desc.Options().(*descriptorpb.MessageOptions)
+	if !ok || messageOptions == nil {
+		return nil, nil
+	}
+	if !proto.HasExtension(messageOptions, proprdbpb.E_Indexes) {
+		return nil, nil
+	}
+
+	value := proto.GetExtension(messageOptions, proprdbpb.E_Indexes)
+	indexDefs, ok := value.([]*proprdbpb.Index)
+	if !ok {
+		return nil, fmt.Errorf("unexpected proprdb.indexes type %T", value)
+	}
+
+	indexes := make([]messageIndex, 0, len(indexDefs))
+	signatureSeen := make(map[string]bool)
+	nameSeen := make(map[string]bool)
+	tableName := c.tableNameForMessage(message)
+	for indexPosition, indexDef := range indexDefs {
+		if indexDef == nil {
+			return nil, fmt.Errorf("index %d is nil", indexPosition+1)
+		}
+		if len(indexDef.Fields) == 0 {
+			return nil, fmt.Errorf("index %d must include at least one field", indexPosition+1)
+		}
+		columnNames := make([]string, 0, len(indexDef.Fields))
+		columnSeen := make(map[string]bool)
+		for fieldPosition, rawFieldName := range indexDef.Fields {
+			fieldName := strings.TrimSpace(rawFieldName)
+			if fieldName == "" {
+				return nil, fmt.Errorf("index %d field %d is empty", indexPosition+1, fieldPosition+1)
+			}
+			if columnSeen[fieldName] {
+				return nil, fmt.Errorf("index %d has duplicate field %q", indexPosition+1, fieldName)
+			}
+			if _, ok := fieldsByName[fieldName]; !ok {
+				return nil, fmt.Errorf("index %d references unknown field %q", indexPosition+1, fieldName)
+			}
+			if !projectedByName[fieldName] {
+				return nil, fmt.Errorf("index %d field %q must be marked (proprdb.external)=true", indexPosition+1, fieldName)
+			}
+			columnSeen[fieldName] = true
+			columnNames = append(columnNames, fieldName)
+		}
+		signature := "idx:" + strings.Join(columnNames, ",")
+		if signatureSeen[signature] {
+			return nil, fmt.Errorf("duplicate index declaration for fields %q", strings.Join(columnNames, ","))
+		}
+		signatureSeen[signature] = true
+
+		indexName := c.generatedIndexName(tableName, columnNames)
+		if nameSeen[indexName] {
+			return nil, fmt.Errorf("index name collision for generated name %q", indexName)
+		}
+		nameSeen[indexName] = true
+
+		indexes = append(indexes, messageIndex{
+			ColumnNames: columnNames,
+			IndexName:   indexName,
+			Signature:   signature,
+		})
+	}
+
+	return indexes, nil
 }
 
 func (c modelCollector) messageOptionBool(message *protogen.Message, extension protoreflect.ExtensionType) (bool, error) {
@@ -276,6 +366,39 @@ func (c modelCollector) tableNameForMessage(message *protogen.Message) string {
 	return strings.ToLower(fullName)
 }
 
+func (c modelCollector) generatedIndexName(tableName string, columnNames []string) string {
+	prefix := "idx_" + sanitizeSQLName(tableName) + "__"
+	sanitizedColumns := make([]string, 0, len(columnNames))
+	for _, columnName := range columnNames {
+		sanitizedColumns = append(sanitizedColumns, sanitizeSQLName(columnName))
+	}
+	return prefix + strings.Join(sanitizedColumns, "_")
+}
+
+func sanitizeSQLName(value string) string {
+	builder := strings.Builder{}
+	lastUnderscore := false
+	for _, character := range strings.ToLower(value) {
+		isLower := character >= 'a' && character <= 'z'
+		isDigit := character >= '0' && character <= '9'
+		if isLower || isDigit {
+			builder.WriteRune(character)
+			lastUnderscore = false
+			continue
+		}
+		if lastUnderscore {
+			continue
+		}
+		builder.WriteByte('_')
+		lastUnderscore = true
+	}
+	result := strings.Trim(builder.String(), "_")
+	if result == "" {
+		return "idx"
+	}
+	return result
+}
+
 func (e generatorEmitter) emitShared() {
 	g := e.g
 	g.P("type DBTX = rt.DBTX")
@@ -292,6 +415,8 @@ func (e generatorEmitter) emitModel(model messageModel) {
 	insertConst := model.GoName + "InsertSQL"
 	upsertConst := model.GoName + "UpsertSQL"
 	reprojectConst := model.GoName + "ReprojectSQL"
+	indexPrefixConst := model.GoName + "GeneratedIndexPrefix"
+	indexCreateConstPrefix := model.GoName + "CreateIndexSQL"
 
 	g.P("const ", tableNameConst, " = ", strconv.Quote(model.TableName))
 	g.P("const ", typeNameConst, " = ", strconv.Quote(model.TypeName))
@@ -299,6 +424,10 @@ func (e generatorEmitter) emitModel(model messageModel) {
 	g.P("const ", createTableConst, " = ", strconv.Quote(model.createTableSQL()))
 	g.P("const ", insertConst, " = ", strconv.Quote(model.insertSQL(false)))
 	g.P("const ", upsertConst, " = ", strconv.Quote(model.insertSQL(true)))
+	g.P("const ", indexPrefixConst, " = ", strconv.Quote(model.generatedIndexPrefix()))
+	for indexPosition, indexModel := range model.Indexes {
+		g.P("const ", indexCreateConstPrefix, strconv.Itoa(indexPosition+1), " = ", strconv.Quote(model.createIndexSQL(indexModel)))
+	}
 	if len(model.ProjectedFields) > 0 {
 		g.P("const ", reprojectConst, " = ", strconv.Quote(model.reprojectSQL()))
 	}
@@ -321,7 +450,7 @@ func (e generatorEmitter) emitModel(model messageModel) {
 	g.P("}")
 	g.P()
 
-	e.emitInitMethod(model, tableNameConst, schemaConst, createTableConst)
+	e.emitInitMethod(model, tableNameConst, schemaConst, createTableConst, indexPrefixConst, indexCreateConstPrefix)
 	e.emitSelectMethod(model, tableNameConst)
 	e.emitInsertMethod(model, tableNameConst, insertConst)
 	e.emitUpdateMethod(model, tableNameConst, upsertConst)
@@ -332,7 +461,7 @@ func (e generatorEmitter) emitModel(model messageModel) {
 	}
 }
 
-func (e generatorEmitter) emitInitMethod(model messageModel, tableNameConst, schemaConst, createTableConst string) {
+func (e generatorEmitter) emitInitMethod(model messageModel, tableNameConst, schemaConst, createTableConst, indexPrefixConst, indexCreateConstPrefix string) {
 	g := e.g
 	g.P("func (t *", model.TableTypeName, ") Init() error {")
 	g.P("\tif t.q == nil {")
@@ -384,6 +513,18 @@ func (e generatorEmitter) emitInitMethod(model messageModel, tableNameConst, sch
 			g.P("\t}")
 		}
 	}
+
+	g.P("\tif err := rt.EnsureManagedIndexes(t.q, ", tableNameConst, ", ", indexPrefixConst, ", []string{")
+	for indexPosition := range model.Indexes {
+		g.P("\t\t", indexCreateConstPrefix, strconv.Itoa(indexPosition+1), ",")
+	}
+	g.P("\t}, []string{")
+	for _, indexModel := range model.Indexes {
+		g.P("\t\t", strconv.Quote(indexModel.IndexName), ",")
+	}
+	g.P("\t}); err != nil {")
+	g.P("\t\treturn err")
+	g.P("\t}")
 
 	g.P("\tvar currentSchema string")
 	g.P("\tschemaErr := t.q.QueryRowContext(ctx, `SELECT schema_hash FROM _proprdb_schema WHERE table_name = ?`, ", tableNameConst, ").Scan(&currentSchema)")
@@ -1001,4 +1142,16 @@ func (m messageModel) reprojectSQL() string {
 		m.TableName,
 		strings.Join(updates, ", "),
 	)
+}
+
+func (m messageModel) generatedIndexPrefix() string {
+	return "idx_" + sanitizeSQLName(m.TableName) + "__"
+}
+
+func (m messageModel) createIndexSQL(indexModel messageIndex) string {
+	quotedColumns := make([]string, 0, len(indexModel.ColumnNames))
+	for _, columnName := range indexModel.ColumnNames {
+		quotedColumns = append(quotedColumns, fmt.Sprintf(`"%s"`, columnName))
+	}
+	return fmt.Sprintf(`CREATE INDEX IF NOT EXISTS "%s" ON "%s" (%s)`, indexModel.IndexName, m.TableName, strings.Join(quotedColumns, ", "))
 }

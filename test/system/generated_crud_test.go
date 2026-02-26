@@ -11,6 +11,9 @@ import (
 )
 
 const countTombstoneByIDSQL = "SELECT COUNT(*) FROM _deleted WHERE table_name = ? AND id = ?"
+const personNameIndex = "idx_generatedtest_example_person__name"
+const personNameAgeIndex = "idx_generatedtest_example_person__name_age"
+const personStaleIndex = "idx_generatedtest_example_person__stale"
 
 func TestGeneratedCRUD(t *testing.T) {
 	ctx := context.Background()
@@ -22,6 +25,27 @@ func TestGeneratedCRUD(t *testing.T) {
 
 	crud := NewCRUD(db)
 	assert.NilError(t, crud.Init())
+
+	indexesAfterInit := tableIndexNamesByName(t, ctx, db, PersonTableName)
+	expectedIndexes := []string{personNameIndex, personNameAgeIndex}
+	for _, indexName := range expectedIndexes {
+		assert.Check(t, indexesAfterInit[indexName])
+	}
+
+	assert.NilError(t, crud.Person.Init())
+	indexesAfterSecondInit := tableIndexNamesByName(t, ctx, db, PersonTableName)
+	for _, indexName := range expectedIndexes {
+		assert.Check(t, indexesAfterSecondInit[indexName])
+	}
+
+	_, err = db.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS "`+personStaleIndex+`" ON "`+PersonTableName+`" ("name")`)
+	assert.NilError(t, err)
+	indexesWithStale := tableIndexNamesByName(t, ctx, db, PersonTableName)
+	assert.Check(t, indexesWithStale[personStaleIndex])
+
+	assert.NilError(t, crud.Person.Init())
+	indexesAfterCleanup := tableIndexNamesByName(t, ctx, db, PersonTableName)
+	assert.Check(t, !indexesAfterCleanup[personStaleIndex])
 
 	var hiddenTableCount int
 	err = db.QueryRowContext(ctx, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?", "generatedtest_example_hidden").Scan(&hiddenTableCount)
@@ -122,4 +146,24 @@ func TestGeneratedCRUD(t *testing.T) {
 	err = db.QueryRowContext(ctx, "SELECT \"text\" FROM \""+NoteTableName+"\" WHERE id = ?", insertedNote.ID).Scan(&projectedText)
 	assert.NilError(t, err)
 	assert.Check(t, is.Equal(projectedText, "Projected note"))
+}
+
+func tableIndexNamesByName(t *testing.T, ctx context.Context, db *sql.DB, tableName string) map[string]bool {
+	t.Helper()
+
+	rows, err := db.QueryContext(ctx, `SELECT name FROM pragma_index_list("`+tableName+`")`)
+	assert.NilError(t, err)
+	defer func() {
+		assert.NilError(t, rows.Close())
+	}()
+
+	indexesByName := make(map[string]bool)
+	for rows.Next() {
+		var name string
+		assert.NilError(t, rows.Scan(&name))
+		indexesByName[name] = true
+	}
+	assert.NilError(t, rows.Err())
+
+	return indexesByName
 }

@@ -113,13 +113,20 @@ message Person {
   - Generated table keeps `Insert(data)` and additionally gets `InsertWithID(id, data)`.
   - `InsertWithID` requires `id` to be a valid UUID.
 
+- `proprdb.indexes` (`repeated proprdb.Index`, message-level):
+  - Declares non-unique SQLite indexes for projected fields (`(proprdb.external)=true`).
+  - Supports both single-field and multi-field indexes.
+
 Example:
 
 ```proto
 message Person {
   option (proprdb.validate_write) = true;
   option (proprdb.allow_custom_id_insert) = true;
+  option (proprdb.indexes) = { fields: "name" };
+  option (proprdb.indexes) = { fields: "name" fields: "age" };
   string name = 1 [(proprdb.external) = true];
+  int64 age = 2 [(proprdb.external) = true];
 }
 
 message Note {
