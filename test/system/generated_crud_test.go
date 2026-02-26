@@ -6,172 +6,120 @@ import (
 	"testing"
 
 	_ "github.com/mattn/go-sqlite3"
+	"gotest.tools/v3/assert"
+	is "gotest.tools/v3/assert/cmp"
 )
+
+const countTombstoneByIDSQL = "SELECT COUNT(*) FROM _deleted WHERE table_name = ? AND id = ?"
 
 func TestGeneratedCRUD(t *testing.T) {
 	ctx := context.Background()
 	db, err := sql.Open("sqlite3", "file::memory:?cache=shared")
-	if err != nil {
-		t.Fatalf("open sqlite: %v", err)
-	}
-	defer func() {
-		_ = db.Close()
-	}()
+	assert.NilError(t, err)
+	t.Cleanup(func() {
+		assert.NilError(t, db.Close())
+	})
 
 	crud := NewCRUD(db)
-	if err := crud.Init(); err != nil {
-		t.Fatalf("init CRUD: %v", err)
-	}
+	assert.NilError(t, crud.Init())
 
 	var hiddenTableCount int
-	if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?", "generatedtest_example_hidden").Scan(&hiddenTableCount); err != nil {
-		t.Fatalf("count hidden tables: %v", err)
-	}
-	if hiddenTableCount != 0 {
-		t.Fatalf("expected no hidden table for omit_table message, got %d", hiddenTableCount)
-	}
+	err = db.QueryRowContext(ctx, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?", "generatedtest_example_hidden").Scan(&hiddenTableCount)
+	assert.NilError(t, err)
+	assert.Check(t, is.Equal(hiddenTableCount, 0))
 
-	if _, err := crud.Person.Insert(&Person{Name: "", Age: 1}); err == nil {
-		t.Fatalf("expected validation error for empty person name")
-	}
+	_, err = crud.Person.Insert(&Person{Name: "", Age: 1})
+	assert.Check(t, err != nil)
 
 	inserted, err := crud.Person.Insert(&Person{Name: "Ada", Age: 37})
-	if err != nil {
-		t.Fatalf("insert person: %v", err)
-	}
-	if inserted.ID == "" {
-		t.Fatalf("inserted ID is empty")
-	}
-	if inserted.AtNs <= 0 {
-		t.Fatalf("inserted AtNs is not positive: %d", inserted.AtNs)
-	}
+	assert.NilError(t, err)
+	assert.Check(t, inserted.ID != "")
+	assert.Check(t, inserted.AtNs > 0)
 
 	customID := "018f4f3f-6f9f-7a1b-8f55-1234567890ab"
 	insertedWithID, err := crud.Person.InsertWithID(customID, &Person{Name: "Grace", Age: 30})
-	if err != nil {
-		t.Fatalf("insert person with custom id: %v", err)
+	assert.NilError(t, err)
+	assert.Check(t, is.Equal(insertedWithID.ID, customID))
+	assert.Check(t, insertedWithID.AtNs > 0)
+
+	insertWithIDCases := []struct {
+		name string
+		id   string
+		data *Person
+	}{
+		{name: "empty ID", id: "", data: &Person{Name: "Empty ID", Age: 1}},
+		{name: "invalid UUID", id: "not-a-uuid", data: &Person{Name: "Bad ID", Age: 1}},
+		{name: "nil data", id: customID, data: nil},
 	}
-	if insertedWithID.ID != customID {
-		t.Fatalf("inserted custom ID mismatch: got %q want %q", insertedWithID.ID, customID)
-	}
-	if insertedWithID.AtNs <= 0 {
-		t.Fatalf("inserted-with-id AtNs is not positive: %d", insertedWithID.AtNs)
-	}
-	if _, err := crud.Person.InsertWithID("", &Person{Name: "Empty ID", Age: 1}); err == nil {
-		t.Fatalf("expected empty id error on insert with id")
-	}
-	if _, err := crud.Person.InsertWithID("not-a-uuid", &Person{Name: "Bad ID", Age: 1}); err == nil {
-		t.Fatalf("expected invalid uuid error on insert with id")
-	}
-	if _, err := crud.Person.InsertWithID(customID, nil); err == nil {
-		t.Fatalf("expected nil data error on insert with id")
+	for _, testCase := range insertWithIDCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			_, caseErr := crud.Person.InsertWithID(testCase.id, testCase.data)
+			assert.Check(t, caseErr != nil)
+		})
 	}
 
 	selected, err := crud.Person.Select("name = ?", "Ada")
-	if err != nil {
-		t.Fatalf("select person: %v", err)
-	}
-	if len(selected) != 1 {
-		t.Fatalf("expected 1 selected person, got %d", len(selected))
-	}
-	if selected[0].ID != inserted.ID {
-		t.Fatalf("selected ID mismatch: got %q want %q", selected[0].ID, inserted.ID)
-	}
+	assert.NilError(t, err)
+	assert.Check(t, is.Len(selected, 1))
+	assert.Check(t, is.Equal(selected[0].ID, inserted.ID))
 
-	if err := crud.Person.DeleteByID(inserted.ID); err != nil {
-		t.Fatalf("delete person by id: %v", err)
-	}
+	assert.NilError(t, crud.Person.DeleteByID(inserted.ID))
 
 	var tombstoneCount int
-	if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM _deleted WHERE table_name = ? AND id = ?", PersonTableName, inserted.ID).Scan(&tombstoneCount); err != nil {
-		t.Fatalf("count tombstones: %v", err)
-	}
-	if tombstoneCount != 1 {
-		t.Fatalf("expected 1 tombstone, got %d", tombstoneCount)
-	}
+	err = db.QueryRowContext(ctx, countTombstoneByIDSQL, PersonTableName, inserted.ID).Scan(&tombstoneCount)
+	assert.NilError(t, err)
+	assert.Check(t, is.Equal(tombstoneCount, 1))
 
 	updated, err := crud.Person.UpdateByID(inserted.ID, &Person{Name: "Ada Lovelace", Age: 38})
-	if err != nil {
-		t.Fatalf("update person by id: %v", err)
-	}
-	if updated.ID != inserted.ID {
-		t.Fatalf("updated ID mismatch: got %q want %q", updated.ID, inserted.ID)
-	}
+	assert.NilError(t, err)
+	assert.Check(t, is.Equal(updated.ID, inserted.ID))
 
-	if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM _deleted WHERE table_name = ? AND id = ?", PersonTableName, inserted.ID).Scan(&tombstoneCount); err != nil {
-		t.Fatalf("count tombstones after update: %v", err)
-	}
-	if tombstoneCount != 0 {
-		t.Fatalf("expected 0 tombstones after update, got %d", tombstoneCount)
-	}
+	err = db.QueryRowContext(ctx, countTombstoneByIDSQL, PersonTableName, inserted.ID).Scan(&tombstoneCount)
+	assert.NilError(t, err)
+	assert.Check(t, is.Equal(tombstoneCount, 0))
 
-	if _, err := crud.Person.UpdateByID("not-a-uuid", &Person{Name: "Nope", Age: 10}); err == nil {
-		t.Fatalf("expected invalid uuid error on update")
-	}
+	_, err = crud.Person.UpdateByID("not-a-uuid", &Person{Name: "Nope", Age: 10})
+	assert.Check(t, err != nil)
 
-	if _, err := db.ExecContext(ctx, "UPDATE \""+PersonTableName+"\" SET \"age\" = 0 WHERE id = ?", inserted.ID); err != nil {
-		t.Fatalf("degrade projection column: %v", err)
-	}
-	if _, err := db.ExecContext(ctx, "UPDATE _proprdb_schema SET schema_hash = ? WHERE table_name = ?", "stale", PersonTableName); err != nil {
-		t.Fatalf("set stale schema hash: %v", err)
-	}
-	if err := crud.Person.Init(); err != nil {
-		t.Fatalf("re-init person table: %v", err)
-	}
+	_, err = db.ExecContext(ctx, "UPDATE \""+PersonTableName+"\" SET \"age\" = 0 WHERE id = ?", inserted.ID)
+	assert.NilError(t, err)
+	_, err = db.ExecContext(ctx, "UPDATE _proprdb_schema SET schema_hash = ? WHERE table_name = ?", "stale", PersonTableName)
+	assert.NilError(t, err)
+	assert.NilError(t, crud.Person.Init())
 
 	var projectedAge int64
-	if err := db.QueryRowContext(ctx, "SELECT \"age\" FROM \""+PersonTableName+"\" WHERE id = ?", inserted.ID).Scan(&projectedAge); err != nil {
-		t.Fatalf("read projected age: %v", err)
-	}
-	if projectedAge != 38 {
-		t.Fatalf("expected projected age=38 after reprojection, got %d", projectedAge)
-	}
+	err = db.QueryRowContext(ctx, "SELECT \"age\" FROM \""+PersonTableName+"\" WHERE id = ?", inserted.ID).Scan(&projectedAge)
+	assert.NilError(t, err)
+	assert.Check(t, is.Equal(projectedAge, int64(38)))
 
 	updatedByRow, err := crud.Person.UpdateRow(PersonRow{
 		ID:   inserted.ID,
 		Data: &Person{Name: "Countess of Lovelace", Age: 39},
 	})
-	if err != nil {
-		t.Fatalf("update person by row: %v", err)
-	}
-	if updatedByRow.ID != inserted.ID {
-		t.Fatalf("updated-by-row ID mismatch: got %q want %q", updatedByRow.ID, inserted.ID)
-	}
+	assert.NilError(t, err)
+	assert.Check(t, is.Equal(updatedByRow.ID, inserted.ID))
 
-	if err := crud.Person.DeleteRow(PersonRow{ID: inserted.ID}); err != nil {
-		t.Fatalf("delete person by row: %v", err)
-	}
+	assert.NilError(t, crud.Person.DeleteRow(PersonRow{ID: inserted.ID}))
 
-	if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM _deleted WHERE table_name = ? AND id = ?", PersonTableName, inserted.ID).Scan(&tombstoneCount); err != nil {
-		t.Fatalf("count tombstones after row delete: %v", err)
-	}
-	if tombstoneCount != 1 {
-		t.Fatalf("expected 1 tombstone after row delete, got %d", tombstoneCount)
-	}
+	err = db.QueryRowContext(ctx, countTombstoneByIDSQL, PersonTableName, inserted.ID).Scan(&tombstoneCount)
+	assert.NilError(t, err)
+	assert.Check(t, is.Equal(tombstoneCount, 1))
 
 	tx, err := db.BeginTx(ctx, nil)
-	if err != nil {
-		t.Fatalf("begin tx: %v", err)
-	}
+	assert.NilError(t, err)
 
 	txTable := NewPersonTable(tx)
 	if _, err := txTable.Insert(&Person{Name: "Tx User", Age: 41}); err != nil {
-		_ = tx.Rollback()
+		rollbackErr := tx.Rollback()
+		assert.NilError(t, rollbackErr)
 		t.Fatalf("insert using tx table: %v", err)
 	}
-	if err := tx.Commit(); err != nil {
-		t.Fatalf("commit tx: %v", err)
-	}
+	assert.NilError(t, tx.Commit())
 
 	insertedNote, err := crud.Note.Insert(&Note{Text: "Projected note"})
-	if err != nil {
-		t.Fatalf("insert note: %v", err)
-	}
+	assert.NilError(t, err)
 	var projectedText string
-	if err := db.QueryRowContext(ctx, "SELECT \"text\" FROM \""+NoteTableName+"\" WHERE id = ?", insertedNote.ID).Scan(&projectedText); err != nil {
-		t.Fatalf("read projected note text: %v", err)
-	}
-	if projectedText != "Projected note" {
-		t.Fatalf("expected projected note text %q, got %q", "Projected note", projectedText)
-	}
+	err = db.QueryRowContext(ctx, "SELECT \"text\" FROM \""+NoteTableName+"\" WHERE id = ?", insertedNote.ID).Scan(&projectedText)
+	assert.NilError(t, err)
+	assert.Check(t, is.Equal(projectedText, "Projected note"))
 }

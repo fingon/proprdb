@@ -21,6 +21,16 @@ import (
 type DBTX = rt.DBTX
 type proprdbJSONLRecord = rt.JSONLRecord
 
+func closeRows(rows *sql.Rows, operation string) error {
+	if rows == nil {
+		return nil
+	}
+	if err := rows.Close(); err != nil {
+		return fmt.Errorf("close %s rows: %w", operation, err)
+	}
+	return nil
+}
+
 const PersonTableName = "generatedtest_example_person"
 const PersonTypeName = "generatedtest.example.Person"
 const PersonProjectionSchema = "name:string;age:int64"
@@ -58,7 +68,6 @@ func (t *PersonTable) Init() error {
 	if err != nil {
 		return fmt.Errorf("read columns for %s: %w", PersonTableName, err)
 	}
-	defer func() { _ = columnRows.Close() }()
 	existingColumns := make(map[string]bool)
 	for columnRows.Next() {
 		var cid int
@@ -68,12 +77,21 @@ func (t *PersonTable) Init() error {
 		var defaultValue any
 		var pk int
 		if err := columnRows.Scan(&cid, &name, &colType, &notNull, &defaultValue, &pk); err != nil {
+			if closeErr := closeRows(columnRows, "projection metadata"); closeErr != nil {
+				return fmt.Errorf("scan pragma row: %w (additionally, %v)", err, closeErr)
+			}
 			return fmt.Errorf("scan pragma row: %w", err)
 		}
 		existingColumns[name] = true
 	}
 	if err := columnRows.Err(); err != nil {
+		if closeErr := closeRows(columnRows, "projection metadata"); closeErr != nil {
+			return fmt.Errorf("iterate pragma rows: %w (additionally, %v)", err, closeErr)
+		}
 		return fmt.Errorf("iterate pragma rows: %w", err)
+	}
+	if err := closeRows(columnRows, "projection metadata"); err != nil {
+		return err
 	}
 	if !existingColumns["name"] {
 		if _, err := t.q.ExecContext(ctx, `ALTER TABLE "`+PersonTableName+`" ADD COLUMN "name" TEXT NOT NULL DEFAULT ''`); err != nil {
@@ -121,23 +139,34 @@ func (t *PersonTable) Select(where string, args ...any) ([]PersonRow, error) {
 	if err != nil {
 		return nil, fmt.Errorf("select from %s: %w", PersonTableName, err)
 	}
-	defer func() { _ = rows.Close() }()
 	result := make([]PersonRow, 0)
 	for rows.Next() {
 		var id string
 		var atNs int64
 		var dataBytes []byte
 		if err := rows.Scan(&id, &atNs, &dataBytes); err != nil {
+			if closeErr := closeRows(rows, "select"); closeErr != nil {
+				return nil, fmt.Errorf("scan row from %s: %w (additionally, %v)", PersonTableName, err, closeErr)
+			}
 			return nil, fmt.Errorf("scan row from %s: %w", PersonTableName, err)
 		}
 		data := &Person{}
 		if err := proto.Unmarshal(dataBytes, data); err != nil {
+			if closeErr := closeRows(rows, "select"); closeErr != nil {
+				return nil, fmt.Errorf("unmarshal Person row: %w (additionally, %v)", err, closeErr)
+			}
 			return nil, fmt.Errorf("unmarshal Person row: %w", err)
 		}
 		result = append(result, PersonRow{ID: id, AtNs: atNs, Data: data})
 	}
 	if err := rows.Err(); err != nil {
+		if closeErr := closeRows(rows, "select"); closeErr != nil {
+			return nil, fmt.Errorf("iterate rows from %s: %w (additionally, %v)", PersonTableName, err, closeErr)
+		}
 		return nil, fmt.Errorf("iterate rows from %s: %w", PersonTableName, err)
+	}
+	if err := closeRows(rows, "select"); err != nil {
+		return nil, err
 	}
 	return result, nil
 }
@@ -402,7 +431,6 @@ func (t *NoteTable) Init() error {
 	if err != nil {
 		return fmt.Errorf("read columns for %s: %w", NoteTableName, err)
 	}
-	defer func() { _ = columnRows.Close() }()
 	existingColumns := make(map[string]bool)
 	for columnRows.Next() {
 		var cid int
@@ -412,12 +440,21 @@ func (t *NoteTable) Init() error {
 		var defaultValue any
 		var pk int
 		if err := columnRows.Scan(&cid, &name, &colType, &notNull, &defaultValue, &pk); err != nil {
+			if closeErr := closeRows(columnRows, "projection metadata"); closeErr != nil {
+				return fmt.Errorf("scan pragma row: %w (additionally, %v)", err, closeErr)
+			}
 			return fmt.Errorf("scan pragma row: %w", err)
 		}
 		existingColumns[name] = true
 	}
 	if err := columnRows.Err(); err != nil {
+		if closeErr := closeRows(columnRows, "projection metadata"); closeErr != nil {
+			return fmt.Errorf("iterate pragma rows: %w (additionally, %v)", err, closeErr)
+		}
 		return fmt.Errorf("iterate pragma rows: %w", err)
+	}
+	if err := closeRows(columnRows, "projection metadata"); err != nil {
+		return err
 	}
 	if !existingColumns["text"] {
 		if _, err := t.q.ExecContext(ctx, `ALTER TABLE "`+NoteTableName+`" ADD COLUMN "text" TEXT NOT NULL DEFAULT ''`); err != nil {
@@ -460,23 +497,34 @@ func (t *NoteTable) Select(where string, args ...any) ([]NoteRow, error) {
 	if err != nil {
 		return nil, fmt.Errorf("select from %s: %w", NoteTableName, err)
 	}
-	defer func() { _ = rows.Close() }()
 	result := make([]NoteRow, 0)
 	for rows.Next() {
 		var id string
 		var atNs int64
 		var dataBytes []byte
 		if err := rows.Scan(&id, &atNs, &dataBytes); err != nil {
+			if closeErr := closeRows(rows, "select"); closeErr != nil {
+				return nil, fmt.Errorf("scan row from %s: %w (additionally, %v)", NoteTableName, err, closeErr)
+			}
 			return nil, fmt.Errorf("scan row from %s: %w", NoteTableName, err)
 		}
 		data := &Note{}
 		if err := proto.Unmarshal(dataBytes, data); err != nil {
+			if closeErr := closeRows(rows, "select"); closeErr != nil {
+				return nil, fmt.Errorf("unmarshal Note row: %w (additionally, %v)", err, closeErr)
+			}
 			return nil, fmt.Errorf("unmarshal Note row: %w", err)
 		}
 		result = append(result, NoteRow{ID: id, AtNs: atNs, Data: data})
 	}
 	if err := rows.Err(); err != nil {
+		if closeErr := closeRows(rows, "select"); closeErr != nil {
+			return nil, fmt.Errorf("iterate rows from %s: %w (additionally, %v)", NoteTableName, err, closeErr)
+		}
 		return nil, fmt.Errorf("iterate rows from %s: %w", NoteTableName, err)
+	}
+	if err := closeRows(rows, "select"); err != nil {
+		return nil, err
 	}
 	return result, nil
 }
@@ -759,12 +807,14 @@ func (c *CRUD) WriteJSONL(remote string, w io.Writer) error {
 	if err != nil {
 		return fmt.Errorf("select tombstones for jsonl write: %w", err)
 	}
-	defer func() { _ = tombstoneRows.Close() }()
 	for tombstoneRows.Next() {
 		var tableName string
 		var id string
 		var atNs int64
 		if err := tombstoneRows.Scan(&tableName, &id, &atNs); err != nil {
+			if closeErr := closeRows(tombstoneRows, "tombstone sync"); closeErr != nil {
+				return fmt.Errorf("scan tombstone row: %w (additionally, %v)", err, closeErr)
+			}
 			return fmt.Errorf("scan tombstone row: %w", err)
 		}
 		needsSend, err := rt.SyncNeedsSend(q, id, tableName, remote, atNs)
@@ -790,11 +840,20 @@ func (c *CRUD) WriteJSONL(remote string, w io.Writer) error {
 			return fmt.Errorf("write jsonl tombstone %s/%s: %w", tableName, id, err)
 		}
 		if err := rt.SyncUpsert(q, id, tableName, remote, atNs); err != nil {
+			if closeErr := closeRows(tombstoneRows, "tombstone sync"); closeErr != nil {
+				return fmt.Errorf("sync tombstone %s/%s: %w (additionally, %v)", tableName, id, err, closeErr)
+			}
 			return err
 		}
 	}
 	if err := tombstoneRows.Err(); err != nil {
+		if closeErr := closeRows(tombstoneRows, "tombstone sync"); closeErr != nil {
+			return fmt.Errorf("iterate tombstone rows: %w (additionally, %v)", err, closeErr)
+		}
 		return fmt.Errorf("iterate tombstone rows: %w", err)
+	}
+	if err := closeRows(tombstoneRows, "tombstone sync"); err != nil {
+		return err
 	}
 	return nil
 }

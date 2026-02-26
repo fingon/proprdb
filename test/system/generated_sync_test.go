@@ -9,34 +9,34 @@ import (
 	"testing"
 
 	_ "github.com/mattn/go-sqlite3"
+	"gotest.tools/v3/assert"
+	is "gotest.tools/v3/assert/cmp"
+)
+
+const (
+	testRemoteA   = "remote-a"
+	typeURLPrefix = "type.googleapis.com/"
+	selectByIDSQL = "id = ?"
 )
 
 func TestGeneratedJSONLSync(t *testing.T) {
 	ctx := context.Background()
 	sourceDB, err := sql.Open("sqlite3", "file:source-sync?mode=memory&cache=shared")
-	if err != nil {
-		t.Fatalf("open source sqlite: %v", err)
-	}
-	defer func() {
-		_ = sourceDB.Close()
-	}()
+	assert.NilError(t, err)
+	t.Cleanup(func() {
+		assert.NilError(t, sourceDB.Close())
+	})
 
 	targetDB, err := sql.Open("sqlite3", "file:target-sync?mode=memory&cache=shared")
-	if err != nil {
-		t.Fatalf("open target sqlite: %v", err)
-	}
-	defer func() {
-		_ = targetDB.Close()
-	}()
+	assert.NilError(t, err)
+	t.Cleanup(func() {
+		assert.NilError(t, targetDB.Close())
+	})
 
 	source := NewCRUD(sourceDB)
-	if err := source.Init(); err != nil {
-		t.Fatalf("init source CRUD: %v", err)
-	}
+	assert.NilError(t, source.Init())
 	target := NewCRUD(targetDB)
-	if err := target.Init(); err != nil {
-		t.Fatalf("init target CRUD: %v", err)
-	}
+	assert.NilError(t, target.Init())
 
 	personRow, err := source.Person.Insert(&Person{Name: "Ada", Age: 37})
 	if err != nil {
@@ -51,63 +51,43 @@ func TestGeneratedJSONLSync(t *testing.T) {
 	}
 
 	var firstExport bytes.Buffer
-	if err := source.WriteJSONL("remote-a", &firstExport); err != nil {
-		t.Fatalf("first source export: %v", err)
-	}
+	assert.NilError(t, source.WriteJSONL(testRemoteA, &firstExport))
 	firstLines := strings.Split(strings.TrimSpace(firstExport.String()), "\n")
-	if len(firstLines) != 1 {
-		t.Fatalf("expected 1 line in first export, got %d: %q", len(firstLines), firstExport.String())
-	}
+	assert.Check(t, is.Len(firstLines, 1))
 
 	var secondExport bytes.Buffer
-	if err := source.WriteJSONL("remote-a", &secondExport); err != nil {
-		t.Fatalf("second source export: %v", err)
-	}
-	if strings.TrimSpace(secondExport.String()) != "" {
-		t.Fatalf("expected no lines in second export, got %q", secondExport.String())
-	}
+	assert.NilError(t, source.WriteJSONL(testRemoteA, &secondExport))
+	assert.Check(t, is.Equal(strings.TrimSpace(secondExport.String()), ""))
 
-	if err := target.ReadJSONL("remote-a", strings.NewReader(firstExport.String())); err != nil {
-		t.Fatalf("read first export into target: %v", err)
-	}
+	assert.NilError(t, target.ReadJSONL(testRemoteA, strings.NewReader(firstExport.String())))
 
-	targetPeople, err := target.Person.Select("id = ?", personRow.ID)
+	targetPeople, err := target.Person.Select(selectByIDSQL, personRow.ID)
 	if err != nil {
 		t.Fatalf("select target person: %v", err)
 	}
-	if len(targetPeople) != 1 {
-		t.Fatalf("expected 1 target person after import, got %d", len(targetPeople))
-	}
-	if targetPeople[0].Data.GetName() != "Ada" {
-		t.Fatalf("unexpected imported person name: %q", targetPeople[0].Data.GetName())
-	}
+	assert.Check(t, is.Len(targetPeople, 1))
+	assert.Check(t, is.Equal(targetPeople[0].Data.GetName(), "Ada"))
 
 	var remoteSyncCount int
-	if err := targetDB.QueryRowContext(ctx, "SELECT COUNT(*) FROM _sync WHERE remote = ?", "remote-a").Scan(&remoteSyncCount); err != nil {
+	if err := targetDB.QueryRowContext(ctx, "SELECT COUNT(*) FROM _sync WHERE remote = ?", testRemoteA).Scan(&remoteSyncCount); err != nil {
 		t.Fatalf("count remote sync entries: %v", err)
 	}
-	if remoteSyncCount != 1 {
-		t.Fatalf("expected 1 remote sync entry, got %d", remoteSyncCount)
-	}
+	assert.Check(t, is.Equal(remoteSyncCount, 1))
 
-	noteLine := fmt.Sprintf("{\"id\":%q,\"atNs\":%d,\"data\":{\"@type\":%q,\"text\":\"ignored\"}}\n", noteRow.ID, personRow.AtNs+10, "type.googleapis.com/"+NoteTypeName)
-	if err := target.ReadJSONL("remote-a", strings.NewReader(noteLine)); err != nil {
+	noteLine := fmt.Sprintf("{\"id\":%q,\"atNs\":%d,\"data\":{\"@type\":%q,\"text\":\"ignored\"}}\n", noteRow.ID, personRow.AtNs+10, typeURLPrefix+NoteTypeName)
+	if err := target.ReadJSONL(testRemoteA, strings.NewReader(noteLine)); err != nil {
 		t.Fatalf("read note line into target: %v", err)
 	}
-	targetNotes, err := target.Note.Select("id = ?", noteRow.ID)
+	targetNotes, err := target.Note.Select(selectByIDSQL, noteRow.ID)
 	if err != nil {
 		t.Fatalf("select target note after ignored sync line: %v", err)
 	}
-	if len(targetNotes) != 0 {
-		t.Fatalf("expected note sync line to be ignored, got %d rows", len(targetNotes))
-	}
+	assert.Check(t, is.Len(targetNotes, 0))
 	var ignoredSyncCount int
-	if err := targetDB.QueryRowContext(ctx, "SELECT COUNT(*) FROM _sync WHERE object_id = ? AND table_name = ? AND remote = ?", noteRow.ID, NoteTableName, "remote-a").Scan(&ignoredSyncCount); err != nil {
+	if err := targetDB.QueryRowContext(ctx, "SELECT COUNT(*) FROM _sync WHERE object_id = ? AND table_name = ? AND remote = ?", noteRow.ID, NoteTableName, testRemoteA).Scan(&ignoredSyncCount); err != nil {
 		t.Fatalf("count ignored note sync rows: %v", err)
 	}
-	if ignoredSyncCount != 0 {
-		t.Fatalf("expected no _sync entry for ignored note sync line, got %d", ignoredSyncCount)
-	}
+	assert.Check(t, is.Equal(ignoredSyncCount, 0))
 
 	updatedPerson, err := source.Person.UpdateByID(personRow.ID, &Person{Name: "Ada Updated", Age: 38})
 	if err != nil {
@@ -115,47 +95,35 @@ func TestGeneratedJSONLSync(t *testing.T) {
 	}
 
 	var thirdExport bytes.Buffer
-	if err := source.WriteJSONL("remote-a", &thirdExport); err != nil {
-		t.Fatalf("third source export: %v", err)
-	}
+	assert.NilError(t, source.WriteJSONL(testRemoteA, &thirdExport))
 	thirdLines := strings.Split(strings.TrimSpace(thirdExport.String()), "\n")
-	if len(thirdLines) != 1 {
-		t.Fatalf("expected 1 line in third export, got %d", len(thirdLines))
-	}
+	assert.Check(t, is.Len(thirdLines, 1))
 
-	if err := target.ReadJSONL("remote-a", strings.NewReader(thirdExport.String())); err != nil {
+	if err := target.ReadJSONL(testRemoteA, strings.NewReader(thirdExport.String())); err != nil {
 		t.Fatalf("read third export into target: %v", err)
 	}
-	targetPeople, err = target.Person.Select("id = ?", personRow.ID)
+	targetPeople, err = target.Person.Select(selectByIDSQL, personRow.ID)
 	if err != nil {
 		t.Fatalf("re-select target person: %v", err)
 	}
-	if len(targetPeople) != 1 {
-		t.Fatalf("expected 1 target person after update import, got %d", len(targetPeople))
-	}
-	if targetPeople[0].Data.GetName() != "Ada Updated" {
-		t.Fatalf("unexpected target person name after update import: %q", targetPeople[0].Data.GetName())
-	}
+	assert.Check(t, is.Len(targetPeople, 1))
+	assert.Check(t, is.Equal(targetPeople[0].Data.GetName(), "Ada Updated"))
 
 	invalidByValidateLine := fmt.Sprintf(
 		"{\"id\":%q,\"atNs\":%d,\"data\":{\"@type\":%q,\"name\":\"\",\"age\":1}}\n",
 		personRow.ID,
 		targetPeople[0].AtNs+1,
-		"type.googleapis.com/"+PersonTypeName,
+		typeURLPrefix+PersonTypeName,
 	)
-	if err := target.ReadJSONL("remote-a", strings.NewReader(invalidByValidateLine)); err != nil {
+	if err := target.ReadJSONL(testRemoteA, strings.NewReader(invalidByValidateLine)); err != nil {
 		t.Fatalf("read invalid-by-valid line into target: %v", err)
 	}
-	targetPeople, err = target.Person.Select("id = ?", personRow.ID)
+	targetPeople, err = target.Person.Select(selectByIDSQL, personRow.ID)
 	if err != nil {
 		t.Fatalf("select target person after invalid-by-valid import: %v", err)
 	}
-	if len(targetPeople) != 1 {
-		t.Fatalf("expected 1 target person after invalid-by-valid import, got %d", len(targetPeople))
-	}
-	if targetPeople[0].Data.GetName() != "" {
-		t.Fatalf("expected empty name to be imported via JSONL despite write validation, got %q", targetPeople[0].Data.GetName())
-	}
+	assert.Check(t, is.Len(targetPeople, 1))
+	assert.Check(t, is.Equal(targetPeople[0].Data.GetName(), ""))
 
 	localNewer, err := target.Person.UpdateByID(personRow.ID, &Person{Name: "Local Newer", Age: 99})
 	if err != nil {
@@ -166,32 +134,27 @@ func TestGeneratedJSONLSync(t *testing.T) {
 	if staleDeleteAtNs < 0 {
 		staleDeleteAtNs = 0
 	}
-	staleDeleteLine := fmt.Sprintf("{\"id\":%q,\"deleted\":true,\"atNs\":%d,\"data\":{\"@type\":%q}}\n", personRow.ID, staleDeleteAtNs, "type.googleapis.com/"+PersonTypeName)
-	if err := target.ReadJSONL("remote-a", strings.NewReader(staleDeleteLine)); err != nil {
-		t.Fatalf("read stale delete line into target: %v", err)
-	}
-	targetPeople, err = target.Person.Select("id = ?", personRow.ID)
-	if err != nil {
-		t.Fatalf("select target person after stale delete: %v", err)
-	}
-	if len(targetPeople) != 1 {
-		t.Fatalf("expected person to survive stale delete, got %d rows", len(targetPeople))
-	}
-	if targetPeople[0].Data.GetName() != "Local Newer" {
-		t.Fatalf("expected local newer person to survive stale delete, got %q", targetPeople[0].Data.GetName())
-	}
-
 	newerDeleteAtNs := localNewer.AtNs + 1
-	newerDeleteLine := fmt.Sprintf("{\"id\":%q,\"deleted\":true,\"atNs\":%d,\"data\":{\"@type\":%q}}\n", personRow.ID, newerDeleteAtNs, "type.googleapis.com/"+PersonTypeName)
-	if err := target.ReadJSONL("remote-a", strings.NewReader(newerDeleteLine)); err != nil {
-		t.Fatalf("read newer delete line into target: %v", err)
+	deleteCases := []struct {
+		name            string
+		atNs            int64
+		expectedRows    int
+		expectedTopName string
+	}{
+		{name: "stale delete ignored", atNs: staleDeleteAtNs, expectedRows: 1, expectedTopName: "Local Newer"},
+		{name: "newer delete applied", atNs: newerDeleteAtNs, expectedRows: 0},
 	}
-	targetPeople, err = target.Person.Select("id = ?", personRow.ID)
-	if err != nil {
-		t.Fatalf("select target person after newer delete: %v", err)
-	}
-	if len(targetPeople) != 0 {
-		t.Fatalf("expected person to be deleted by newer delete line, got %d rows", len(targetPeople))
+	for _, testCase := range deleteCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			deleteLine := fmt.Sprintf("{\"id\":%q,\"deleted\":true,\"atNs\":%d,\"data\":{\"@type\":%q}}\n", personRow.ID, testCase.atNs, typeURLPrefix+PersonTypeName)
+			assert.NilError(t, target.ReadJSONL(testRemoteA, strings.NewReader(deleteLine)))
+			peopleAfterDelete, selectErr := target.Person.Select(selectByIDSQL, personRow.ID)
+			assert.NilError(t, selectErr)
+			assert.Check(t, is.Len(peopleAfterDelete, testCase.expectedRows))
+			if testCase.expectedRows > 0 {
+				assert.Check(t, is.Equal(peopleAfterDelete[0].Data.GetName(), testCase.expectedTopName))
+			}
+		})
 	}
 
 	var targetPersonTombstoneAtNs int64
@@ -203,10 +166,8 @@ func TestGeneratedJSONLSync(t *testing.T) {
 	}
 
 	var syncedAtNs int64
-	if err := targetDB.QueryRowContext(ctx, "SELECT at_ns FROM _sync WHERE object_id = ? AND table_name = ? AND remote = ?", personRow.ID, PersonTableName, "remote-a").Scan(&syncedAtNs); err != nil {
+	if err := targetDB.QueryRowContext(ctx, "SELECT at_ns FROM _sync WHERE object_id = ? AND table_name = ? AND remote = ?", personRow.ID, PersonTableName, testRemoteA).Scan(&syncedAtNs); err != nil {
 		t.Fatalf("read target _sync entry: %v", err)
 	}
-	if syncedAtNs < updatedPerson.AtNs {
-		t.Fatalf("expected synced at_ns >= %d, got %d", updatedPerson.AtNs, syncedAtNs)
-	}
+	assert.Check(t, syncedAtNs >= updatedPerson.AtNs)
 }

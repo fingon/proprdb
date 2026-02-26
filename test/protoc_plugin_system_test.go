@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"gotest.tools/v3/assert"
 	"gotest.tools/v3/golden"
 )
 
@@ -27,9 +28,8 @@ func TestProtocPluginGolden(t *testing.T) {
 	tempDir := t.TempDir()
 	pluginPath := filepath.Join(tempDir, "protoc-gen-proprdb")
 	generatedDir := filepath.Join(tempDir, "gen")
-	if err := os.MkdirAll(generatedDir, 0o755); err != nil {
-		t.Fatalf("create generated dir: %v", err)
-	}
+	err := os.MkdirAll(generatedDir, 0o755)
+	assert.NilError(t, err)
 
 	runCommand(t, repoRoot, nil, "go", "build", "-o", pluginPath, "./cmd/protoc-gen-proprdb")
 
@@ -49,9 +49,7 @@ func TestProtocPluginGolden(t *testing.T) {
 
 	generatedFile := filepath.Join(generatedDir, "system.proprdb.pb.go")
 	content, err := os.ReadFile(generatedFile)
-	if err != nil {
-		t.Fatalf("read generated file: %v", err)
-	}
+	assert.NilError(t, err)
 
 	golden.Assert(t, string(content), "system.proprdb.pb.go.golden", golden.FlagUpdate())
 }

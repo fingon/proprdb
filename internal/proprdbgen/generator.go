@@ -34,9 +34,22 @@ type messageModel struct {
 	AllowCustomIDInsert bool
 }
 
+type modelCollector struct{}
+
+type generatorEmitter struct {
+	g *protogen.GeneratedFile
+}
+
+const (
+	errNilDBTX = "nil DBTX"
+	errNilData = "nil data"
+	errEmptyID = "empty id"
+)
+
 // GenerateFile generates proprdb CRUD code for one .proto file.
 func GenerateFile(plugin *protogen.Plugin, file *protogen.File) error {
-	models, err := collectModels(file)
+	collector := modelCollector{}
+	models, err := collector.collectModels(file)
 	if err != nil {
 		return err
 	}
@@ -77,19 +90,20 @@ func GenerateFile(plugin *protogen.Plugin, file *protogen.File) error {
 	g.P(")")
 	g.P()
 
-	emitShared(g)
+	emitter := generatorEmitter{g: g}
+	emitter.emitShared()
 	for _, model := range models {
-		emitModel(g, model)
+		emitter.emitModel(model)
 	}
-	emitWrapper(g, models)
+	emitter.emitWrapper(models)
 
 	return nil
 }
 
-func collectModels(file *protogen.File) ([]messageModel, error) {
+func (c modelCollector) collectModels(file *protogen.File) ([]messageModel, error) {
 	models := make([]messageModel, 0)
 	for _, message := range file.Messages {
-		if err := appendMessageModels(&models, message); err != nil {
+		if err := c.appendMessageModels(&models, message); err != nil {
 			return nil, err
 		}
 	}
@@ -97,9 +111,9 @@ func collectModels(file *protogen.File) ([]messageModel, error) {
 	return models, nil
 }
 
-func appendMessageModels(models *[]messageModel, message *protogen.Message) error {
+func (c modelCollector) appendMessageModels(models *[]messageModel, message *protogen.Message) error {
 	if !message.Desc.IsMapEntry() {
-		model, err := buildModel(message)
+		model, err := c.buildModel(message)
 		if err != nil {
 			return err
 		}
@@ -110,7 +124,7 @@ func appendMessageModels(models *[]messageModel, message *protogen.Message) erro
 	}
 
 	for _, nested := range message.Messages {
-		if err := appendMessageModels(models, nested); err != nil {
+		if err := c.appendMessageModels(models, nested); err != nil {
 			return err
 		}
 	}
@@ -118,23 +132,23 @@ func appendMessageModels(models *[]messageModel, message *protogen.Message) erro
 	return nil
 }
 
-func buildModel(message *protogen.Message) (messageModel, error) {
-	omitTable, err := messageOptionBool(message, proprdbpb.E_OmitTable)
+func (c modelCollector) buildModel(message *protogen.Message) (messageModel, error) {
+	omitTable, err := c.messageOptionBool(message, proprdbpb.E_OmitTable)
 	if err != nil {
 		return messageModel{}, fmt.Errorf("message %s omit_table option: %w", message.Desc.FullName(), err)
 	}
 	if omitTable {
 		return messageModel{}, nil
 	}
-	omitSync, err := messageOptionBool(message, proprdbpb.E_OmitSync)
+	omitSync, err := c.messageOptionBool(message, proprdbpb.E_OmitSync)
 	if err != nil {
 		return messageModel{}, fmt.Errorf("message %s omit_sync option: %w", message.Desc.FullName(), err)
 	}
-	validateWrite, err := messageOptionBool(message, proprdbpb.E_ValidateWrite)
+	validateWrite, err := c.messageOptionBool(message, proprdbpb.E_ValidateWrite)
 	if err != nil {
 		return messageModel{}, fmt.Errorf("message %s validate_write option: %w", message.Desc.FullName(), err)
 	}
-	allowCustomIDInsert, err := messageOptionBool(message, proprdbpb.E_AllowCustomIdInsert)
+	allowCustomIDInsert, err := c.messageOptionBool(message, proprdbpb.E_AllowCustomIdInsert)
 	if err != nil {
 		return messageModel{}, fmt.Errorf("message %s allow_custom_id_insert option: %w", message.Desc.FullName(), err)
 	}
@@ -142,7 +156,7 @@ func buildModel(message *protogen.Message) (messageModel, error) {
 	signatures := make([]string, 0)
 
 	for _, field := range message.Fields {
-		external, err := fieldExternal(field)
+		external, err := c.fieldExternal(field)
 		if err != nil {
 			return messageModel{}, fmt.Errorf("field %s: %w", field.Desc.FullName(), err)
 		}
@@ -151,7 +165,7 @@ func buildModel(message *protogen.Message) (messageModel, error) {
 			continue
 		}
 
-		projection, err := projectedFieldFromProto(field)
+		projection, err := c.projectedFieldFromProto(field)
 		if err != nil {
 			return messageModel{}, fmt.Errorf("field %s: %w", field.Desc.FullName(), err)
 		}
@@ -162,7 +176,7 @@ func buildModel(message *protogen.Message) (messageModel, error) {
 
 	return messageModel{
 		GoName:              message.GoIdent.GoName,
-		TableName:           tableNameForMessage(message),
+		TableName:           c.tableNameForMessage(message),
 		TypeName:            string(message.Desc.FullName()),
 		TableTypeName:       message.GoIdent.GoName + "Table",
 		RowTypeName:         message.GoIdent.GoName + "Row",
@@ -174,7 +188,7 @@ func buildModel(message *protogen.Message) (messageModel, error) {
 	}, nil
 }
 
-func messageOptionBool(message *protogen.Message, extension protoreflect.ExtensionType) (bool, error) {
+func (c modelCollector) messageOptionBool(message *protogen.Message, extension protoreflect.ExtensionType) (bool, error) {
 	messageOptions, ok := message.Desc.Options().(*descriptorpb.MessageOptions)
 	if !ok || messageOptions == nil {
 		return false, nil
@@ -196,7 +210,7 @@ func messageOptionBool(message *protogen.Message, extension protoreflect.Extensi
 	}
 }
 
-func fieldExternal(field *protogen.Field) (bool, error) {
+func (c modelCollector) fieldExternal(field *protogen.Field) (bool, error) {
 	fieldOptions, ok := field.Desc.Options().(*descriptorpb.FieldOptions)
 	if !ok || fieldOptions == nil {
 		return false, nil
@@ -222,7 +236,7 @@ func fieldExternal(field *protogen.Field) (bool, error) {
 	}
 }
 
-func projectedFieldFromProto(field *protogen.Field) (projectedField, error) {
+func (c modelCollector) projectedFieldFromProto(field *protogen.Field) (projectedField, error) {
 	if field.Desc.IsList() || field.Desc.IsMap() {
 		return projectedField{}, errors.New("external field must be scalar")
 	}
@@ -257,18 +271,30 @@ func projectedFieldFromProto(field *protogen.Field) (projectedField, error) {
 	}
 }
 
-func tableNameForMessage(message *protogen.Message) string {
+func (c modelCollector) tableNameForMessage(message *protogen.Message) string {
 	fullName := strings.ReplaceAll(string(message.Desc.FullName()), ".", "_")
 	return strings.ToLower(fullName)
 }
 
-func emitShared(g *protogen.GeneratedFile) {
+func (e generatorEmitter) emitShared() {
+	g := e.g
 	g.P("type DBTX = rt.DBTX")
 	g.P("type proprdbJSONLRecord = rt.JSONLRecord")
 	g.P()
+	g.P("func closeRows(rows *sql.Rows, operation string) error {")
+	g.P("\tif rows == nil {")
+	g.P("\t\treturn nil")
+	g.P("\t}")
+	g.P("\tif err := rows.Close(); err != nil {")
+	g.P("\t\treturn fmt.Errorf(\"close %s rows: %w\", operation, err)")
+	g.P("\t}")
+	g.P("\treturn nil")
+	g.P("}")
+	g.P()
 }
 
-func emitModel(g *protogen.GeneratedFile, model messageModel) {
+func (e generatorEmitter) emitModel(model messageModel) {
+	g := e.g
 	tableNameConst := model.GoName + "TableName"
 	typeNameConst := model.GoName + "TypeName"
 	schemaConst := model.GoName + "ProjectionSchema"
@@ -280,11 +306,11 @@ func emitModel(g *protogen.GeneratedFile, model messageModel) {
 	g.P("const ", tableNameConst, " = ", strconv.Quote(model.TableName))
 	g.P("const ", typeNameConst, " = ", strconv.Quote(model.TypeName))
 	g.P("const ", schemaConst, " = ", strconv.Quote(model.ProjectionSchema))
-	g.P("const ", createTableConst, " = ", strconv.Quote(createTableSQL(model)))
-	g.P("const ", insertConst, " = ", strconv.Quote(insertSQL(model, false)))
-	g.P("const ", upsertConst, " = ", strconv.Quote(insertSQL(model, true)))
+	g.P("const ", createTableConst, " = ", strconv.Quote(model.createTableSQL()))
+	g.P("const ", insertConst, " = ", strconv.Quote(model.insertSQL(false)))
+	g.P("const ", upsertConst, " = ", strconv.Quote(model.insertSQL(true)))
 	if len(model.ProjectedFields) > 0 {
-		g.P("const ", reprojectConst, " = ", strconv.Quote(reprojectSQL(model)))
+		g.P("const ", reprojectConst, " = ", strconv.Quote(model.reprojectSQL()))
 	}
 	g.P()
 
@@ -305,21 +331,22 @@ func emitModel(g *protogen.GeneratedFile, model messageModel) {
 	g.P("}")
 	g.P()
 
-	emitInitMethod(g, model, tableNameConst, schemaConst, createTableConst)
-	emitSelectMethod(g, model, tableNameConst)
-	emitInsertMethod(g, model, tableNameConst, insertConst)
-	emitUpdateMethod(g, model, tableNameConst, upsertConst)
-	emitDeleteMethod(g, model, tableNameConst)
-	emitApplyWithAtNsMethods(g, model, tableNameConst, upsertConst)
+	e.emitInitMethod(model, tableNameConst, schemaConst, createTableConst)
+	e.emitSelectMethod(model, tableNameConst)
+	e.emitInsertMethod(model, tableNameConst, insertConst)
+	e.emitUpdateMethod(model, tableNameConst, upsertConst)
+	e.emitDeleteMethod(model, tableNameConst)
+	e.emitApplyWithAtNsMethods(model, tableNameConst, upsertConst)
 	if len(model.ProjectedFields) > 0 {
-		emitReprojectMethod(g, model, tableNameConst, reprojectConst)
+		e.emitReprojectMethod(model, tableNameConst, reprojectConst)
 	}
 }
 
-func emitInitMethod(g *protogen.GeneratedFile, model messageModel, tableNameConst, schemaConst, createTableConst string) {
+func (e generatorEmitter) emitInitMethod(model messageModel, tableNameConst, schemaConst, createTableConst string) {
+	g := e.g
 	g.P("func (t *", model.TableTypeName, ") Init() error {")
 	g.P("\tif t.q == nil {")
-	g.P("\t\treturn errors.New(\"nil DBTX\")")
+	g.P("\t\treturn errors.New(\"" + errNilDBTX + "\")")
 	g.P("\t}")
 	g.P("\tif err := rt.EnsureCoreTables(t.q); err != nil {")
 	g.P("\t\treturn err")
@@ -334,7 +361,6 @@ func emitInitMethod(g *protogen.GeneratedFile, model messageModel, tableNameCons
 		g.P("\tif err != nil {")
 		g.P("\t\treturn fmt.Errorf(\"read columns for %s: %w\", ", tableNameConst, ", err)")
 		g.P("\t}")
-		g.P("\tdefer func() { _ = columnRows.Close() }()")
 		g.P("\texistingColumns := make(map[string]bool)")
 		g.P("\tfor columnRows.Next() {")
 		g.P("\t\tvar cid int")
@@ -344,12 +370,21 @@ func emitInitMethod(g *protogen.GeneratedFile, model messageModel, tableNameCons
 		g.P("\t\tvar defaultValue any")
 		g.P("\t\tvar pk int")
 		g.P("\t\tif err := columnRows.Scan(&cid, &name, &colType, &notNull, &defaultValue, &pk); err != nil {")
+		g.P("\t\t\tif closeErr := closeRows(columnRows, \"projection metadata\"); closeErr != nil {")
+		g.P("\t\t\t\treturn fmt.Errorf(\"scan pragma row: %w (additionally, %v)\", err, closeErr)")
+		g.P("\t\t\t}")
 		g.P("\t\t\treturn fmt.Errorf(\"scan pragma row: %w\", err)")
 		g.P("\t\t}")
 		g.P("\t\texistingColumns[name] = true")
 		g.P("\t}")
 		g.P("\tif err := columnRows.Err(); err != nil {")
+		g.P("\t\tif closeErr := closeRows(columnRows, \"projection metadata\"); closeErr != nil {")
+		g.P("\t\t\treturn fmt.Errorf(\"iterate pragma rows: %w (additionally, %v)\", err, closeErr)")
+		g.P("\t\t}")
 		g.P("\t\treturn fmt.Errorf(\"iterate pragma rows: %w\", err)")
+		g.P("\t}")
+		g.P("\tif err := closeRows(columnRows, \"projection metadata\"); err != nil {")
+		g.P("\t\treturn err")
 		g.P("\t}")
 		for _, projectedField := range model.ProjectedFields {
 			g.P("\tif !existingColumns[", strconv.Quote(projectedField.ColumnName), "] {")
@@ -387,10 +422,11 @@ func emitInitMethod(g *protogen.GeneratedFile, model messageModel, tableNameCons
 	g.P()
 }
 
-func emitSelectMethod(g *protogen.GeneratedFile, model messageModel, tableNameConst string) {
+func (e generatorEmitter) emitSelectMethod(model messageModel, tableNameConst string) {
+	g := e.g
 	g.P("func (t *", model.TableTypeName, ") Select(where string, args ...any) ([]", model.RowTypeName, ", error) {")
 	g.P("\tif t.q == nil {")
-	g.P("\t\treturn nil, errors.New(\"nil DBTX\")")
+	g.P("\t\treturn nil, errors.New(\"" + errNilDBTX + "\")")
 	g.P("\t}")
 	g.P("\tctx := context.Background()")
 	g.P("\tquery := `SELECT id, at_ns, data FROM \"`+", tableNameConst, "+`\"`")
@@ -401,36 +437,48 @@ func emitSelectMethod(g *protogen.GeneratedFile, model messageModel, tableNameCo
 	g.P("\tif err != nil {")
 	g.P("\t\treturn nil, fmt.Errorf(\"select from %s: %w\", ", tableNameConst, ", err)")
 	g.P("\t}")
-	g.P("\tdefer func() { _ = rows.Close() }()")
 	g.P("\tresult := make([]", model.RowTypeName, ", 0)")
 	g.P("\tfor rows.Next() {")
 	g.P("\t\tvar id string")
 	g.P("\t\tvar atNs int64")
 	g.P("\t\tvar dataBytes []byte")
 	g.P("\t\tif err := rows.Scan(&id, &atNs, &dataBytes); err != nil {")
+	g.P("\t\t\tif closeErr := closeRows(rows, \"select\"); closeErr != nil {")
+	g.P("\t\t\t\treturn nil, fmt.Errorf(\"scan row from %s: %w (additionally, %v)\", ", tableNameConst, ", err, closeErr)")
+	g.P("\t\t\t}")
 	g.P("\t\t\treturn nil, fmt.Errorf(\"scan row from %s: %w\", ", tableNameConst, ", err)")
 	g.P("\t\t}")
 	g.P("\t\tdata := &", model.GoName, "{}")
 	g.P("\t\tif err := proto.Unmarshal(dataBytes, data); err != nil {")
+	g.P("\t\t\tif closeErr := closeRows(rows, \"select\"); closeErr != nil {")
+	g.P("\t\t\t\treturn nil, fmt.Errorf(\"unmarshal ", model.GoName, " row: %w (additionally, %v)\", err, closeErr)")
+	g.P("\t\t\t}")
 	g.P("\t\t\treturn nil, fmt.Errorf(\"unmarshal ", model.GoName, " row: %w\", err)")
 	g.P("\t\t}")
 	g.P("\t\tresult = append(result, ", model.RowTypeName, "{ID: id, AtNs: atNs, Data: data})")
 	g.P("\t}")
 	g.P("\tif err := rows.Err(); err != nil {")
+	g.P("\t\tif closeErr := closeRows(rows, \"select\"); closeErr != nil {")
+	g.P("\t\t\treturn nil, fmt.Errorf(\"iterate rows from %s: %w (additionally, %v)\", ", tableNameConst, ", err, closeErr)")
+	g.P("\t\t}")
 	g.P("\t\treturn nil, fmt.Errorf(\"iterate rows from %s: %w\", ", tableNameConst, ", err)")
+	g.P("\t}")
+	g.P("\tif err := closeRows(rows, \"select\"); err != nil {")
+	g.P("\t\treturn nil, err")
 	g.P("\t}")
 	g.P("\treturn result, nil")
 	g.P("}")
 	g.P()
 }
 
-func emitInsertMethod(g *protogen.GeneratedFile, model messageModel, tableNameConst, insertConst string) {
+func (e generatorEmitter) emitInsertMethod(model messageModel, tableNameConst, insertConst string) {
+	g := e.g
 	g.P("func (t *", model.TableTypeName, ") Insert(data *", model.GoName, ") (", model.RowTypeName, ", error) {")
 	g.P("\tif t.q == nil {")
-	g.P("\t\treturn ", model.RowTypeName, "{}, errors.New(\"nil DBTX\")")
+	g.P("\t\treturn ", model.RowTypeName, "{}, errors.New(\""+errNilDBTX+"\")")
 	g.P("\t}")
 	g.P("\tif data == nil {")
-	g.P("\t\treturn ", model.RowTypeName, "{}, errors.New(\"nil data\")")
+	g.P("\t\treturn ", model.RowTypeName, "{}, errors.New(\""+errNilData+"\")")
 	g.P("\t}")
 	g.P("\tid, err := rt.UUIDv7()")
 	g.P("\tif err != nil {")
@@ -446,10 +494,10 @@ func emitInsertMethod(g *protogen.GeneratedFile, model messageModel, tableNameCo
 	if model.AllowCustomIDInsert {
 		g.P("func (t *", model.TableTypeName, ") InsertWithID(id string, data *", model.GoName, ") (", model.RowTypeName, ", error) {")
 		g.P("\tif t.q == nil {")
-		g.P("\t\treturn ", model.RowTypeName, "{}, errors.New(\"nil DBTX\")")
+		g.P("\t\treturn ", model.RowTypeName, "{}, errors.New(\""+errNilDBTX+"\")")
 		g.P("\t}")
 		g.P("\tif data == nil {")
-		g.P("\t\treturn ", model.RowTypeName, "{}, errors.New(\"nil data\")")
+		g.P("\t\treturn ", model.RowTypeName, "{}, errors.New(\""+errNilData+"\")")
 		g.P("\t}")
 		g.P("\treturn t.insertWithID(id, data)")
 		g.P("}")
@@ -458,13 +506,13 @@ func emitInsertMethod(g *protogen.GeneratedFile, model messageModel, tableNameCo
 
 	g.P("func (t *", model.TableTypeName, ") insertWithID(id string, data *", model.GoName, ") (", model.RowTypeName, ", error) {")
 	g.P("\tif t.q == nil {")
-	g.P("\t\treturn ", model.RowTypeName, "{}, errors.New(\"nil DBTX\")")
+	g.P("\t\treturn ", model.RowTypeName, "{}, errors.New(\""+errNilDBTX+"\")")
 	g.P("\t}")
 	g.P("\tif data == nil {")
-	g.P("\t\treturn ", model.RowTypeName, "{}, errors.New(\"nil data\")")
+	g.P("\t\treturn ", model.RowTypeName, "{}, errors.New(\""+errNilData+"\")")
 	g.P("\t}")
 	g.P("\tif id == \"\" {")
-	g.P("\t\treturn ", model.RowTypeName, "{}, errors.New(\"empty id\")")
+	g.P("\t\treturn ", model.RowTypeName, "{}, errors.New(\""+errEmptyID+"\")")
 	g.P("\t}")
 	g.P("\tif err := rt.ValidateUUID(id); err != nil {")
 	g.P("\t\treturn ", model.RowTypeName, "{}, fmt.Errorf(\"validate id %s: %w\", id, err)")
@@ -495,19 +543,20 @@ func emitInsertMethod(g *protogen.GeneratedFile, model messageModel, tableNameCo
 	g.P()
 }
 
-func emitUpdateMethod(g *protogen.GeneratedFile, model messageModel, tableNameConst, upsertConst string) {
+func (e generatorEmitter) emitUpdateMethod(model messageModel, tableNameConst, upsertConst string) {
+	g := e.g
 	g.P("func (t *", model.TableTypeName, ") UpdateByID(id string, data *", model.GoName, ") (", model.RowTypeName, ", error) {")
 	g.P("\tif t.q == nil {")
-	g.P("\t\treturn ", model.RowTypeName, "{}, errors.New(\"nil DBTX\")")
+	g.P("\t\treturn ", model.RowTypeName, "{}, errors.New(\""+errNilDBTX+"\")")
 	g.P("\t}")
 	g.P("\tif id == \"\" {")
-	g.P("\t\treturn ", model.RowTypeName, "{}, errors.New(\"empty id\")")
+	g.P("\t\treturn ", model.RowTypeName, "{}, errors.New(\""+errEmptyID+"\")")
 	g.P("\t}")
 	g.P("\tif err := rt.ValidateUUID(id); err != nil {")
 	g.P("\t\treturn ", model.RowTypeName, "{}, fmt.Errorf(\"validate id %s: %w\", id, err)")
 	g.P("\t}")
 	g.P("\tif data == nil {")
-	g.P("\t\treturn ", model.RowTypeName, "{}, errors.New(\"nil data\")")
+	g.P("\t\treturn ", model.RowTypeName, "{}, errors.New(\""+errNilData+"\")")
 	g.P("\t}")
 	if model.ValidateWrite {
 		g.P("\tif err := data.Valid(); err != nil {")
@@ -536,26 +585,27 @@ func emitUpdateMethod(g *protogen.GeneratedFile, model messageModel, tableNameCo
 
 	g.P("func (t *", model.TableTypeName, ") UpdateRow(row ", model.RowTypeName, ") (", model.RowTypeName, ", error) {")
 	g.P("\tif t.q == nil {")
-	g.P("\t\treturn ", model.RowTypeName, "{}, errors.New(\"nil DBTX\")")
+	g.P("\t\treturn ", model.RowTypeName, "{}, errors.New(\""+errNilDBTX+"\")")
 	g.P("\t}")
 	g.P("\tif row.ID == \"\" {")
-	g.P("\t\treturn ", model.RowTypeName, "{}, errors.New(\"empty id\")")
+	g.P("\t\treturn ", model.RowTypeName, "{}, errors.New(\""+errEmptyID+"\")")
 	g.P("\t}")
 	g.P("\tif row.Data == nil {")
-	g.P("\t\treturn ", model.RowTypeName, "{}, errors.New(\"nil data\")")
+	g.P("\t\treturn ", model.RowTypeName, "{}, errors.New(\""+errNilData+"\")")
 	g.P("\t}")
 	g.P("\treturn t.UpdateByID(row.ID, row.Data)")
 	g.P("}")
 	g.P()
 }
 
-func emitDeleteMethod(g *protogen.GeneratedFile, model messageModel, tableNameConst string) {
+func (e generatorEmitter) emitDeleteMethod(model messageModel, tableNameConst string) {
+	g := e.g
 	g.P("func (t *", model.TableTypeName, ") DeleteByID(id string) error {")
 	g.P("\tif t.q == nil {")
-	g.P("\t\treturn errors.New(\"nil DBTX\")")
+	g.P("\t\treturn errors.New(\"" + errNilDBTX + "\")")
 	g.P("\t}")
 	g.P("\tif id == \"\" {")
-	g.P("\t\treturn errors.New(\"empty id\")")
+	g.P("\t\treturn errors.New(\"" + errEmptyID + "\")")
 	g.P("\t}")
 	g.P("\tctx := context.Background()")
 	g.P("\tatNs := rt.NowNs()")
@@ -571,26 +621,27 @@ func emitDeleteMethod(g *protogen.GeneratedFile, model messageModel, tableNameCo
 
 	g.P("func (t *", model.TableTypeName, ") DeleteRow(row ", model.RowTypeName, ") error {")
 	g.P("\tif t.q == nil {")
-	g.P("\t\treturn errors.New(\"nil DBTX\")")
+	g.P("\t\treturn errors.New(\"" + errNilDBTX + "\")")
 	g.P("\t}")
 	g.P("\tif row.ID == \"\" {")
-	g.P("\t\treturn errors.New(\"empty id\")")
+	g.P("\t\treturn errors.New(\"" + errEmptyID + "\")")
 	g.P("\t}")
 	g.P("\treturn t.DeleteByID(row.ID)")
 	g.P("}")
 	g.P()
 }
 
-func emitApplyWithAtNsMethods(g *protogen.GeneratedFile, model messageModel, tableNameConst, upsertConst string) {
+func (e generatorEmitter) emitApplyWithAtNsMethods(model messageModel, tableNameConst, upsertConst string) {
+	g := e.g
 	g.P("func (t *", model.TableTypeName, ") upsertWithAtNs(id string, atNs int64, data *", model.GoName, ") error {")
 	g.P("\tif t.q == nil {")
-	g.P("\t\treturn errors.New(\"nil DBTX\")")
+	g.P("\t\treturn errors.New(\"" + errNilDBTX + "\")")
 	g.P("\t}")
 	g.P("\tif id == \"\" {")
-	g.P("\t\treturn errors.New(\"empty id\")")
+	g.P("\t\treturn errors.New(\"" + errEmptyID + "\")")
 	g.P("\t}")
 	g.P("\tif data == nil {")
-	g.P("\t\treturn errors.New(\"nil data\")")
+	g.P("\t\treturn errors.New(\"" + errNilData + "\")")
 	g.P("\t}")
 	g.P("\tctx := context.Background()")
 	g.P("\tdataBytes, err := proto.Marshal(data)")
@@ -612,10 +663,10 @@ func emitApplyWithAtNsMethods(g *protogen.GeneratedFile, model messageModel, tab
 	g.P()
 	g.P("func (t *", model.TableTypeName, ") tombstoneWithAtNs(id string, atNs int64) error {")
 	g.P("\tif t.q == nil {")
-	g.P("\t\treturn errors.New(\"nil DBTX\")")
+	g.P("\t\treturn errors.New(\"" + errNilDBTX + "\")")
 	g.P("\t}")
 	g.P("\tif id == \"\" {")
-	g.P("\t\treturn errors.New(\"empty id\")")
+	g.P("\t\treturn errors.New(\"" + errEmptyID + "\")")
 	g.P("\t}")
 	g.P("\tctx := context.Background()")
 	g.P("\tif _, err := t.q.ExecContext(ctx, `INSERT INTO _deleted (table_name, id, at_ns) VALUES (?, ?, ?) ON CONFLICT(table_name, id) DO UPDATE SET at_ns = excluded.at_ns`, ", tableNameConst, ", id, atNs); err != nil {")
@@ -629,7 +680,8 @@ func emitApplyWithAtNsMethods(g *protogen.GeneratedFile, model messageModel, tab
 	g.P()
 }
 
-func emitReprojectMethod(g *protogen.GeneratedFile, model messageModel, tableNameConst, reprojectConst string) {
+func (e generatorEmitter) emitReprojectMethod(model messageModel, tableNameConst, reprojectConst string) {
+	g := e.g
 	g.P("func (t *", model.TableTypeName, ") reproject() error {")
 	g.P("\tctx := context.Background()")
 	g.P("\trows, err := t.q.QueryContext(ctx, `SELECT id, data FROM \"`+", tableNameConst, "+`\"`)")
@@ -676,7 +728,8 @@ func emitReprojectMethod(g *protogen.GeneratedFile, model messageModel, tableNam
 	g.P()
 }
 
-func emitWrapper(g *protogen.GeneratedFile, models []messageModel) {
+func (e generatorEmitter) emitWrapper(models []messageModel) {
+	g := e.g
 	syncModels := make([]messageModel, 0, len(models))
 	for _, model := range models {
 		if !model.OmitSync {
@@ -707,7 +760,7 @@ func emitWrapper(g *protogen.GeneratedFile, models []messageModel) {
 		g.P("\t\treturn c.", model.GoName, ".q, nil")
 		g.P("\t}")
 	}
-	g.P("\treturn nil, errors.New(\"nil DBTX\")")
+	g.P("\treturn nil, errors.New(\"" + errNilDBTX + "\")")
 	g.P("}")
 	g.P()
 	g.P("func (c *CRUD) Init() error {")
@@ -767,12 +820,14 @@ func emitWrapper(g *protogen.GeneratedFile, models []messageModel) {
 		g.P("\tif err != nil {")
 		g.P("\t\treturn fmt.Errorf(\"select tombstones for jsonl write: %w\", err)")
 		g.P("\t}")
-		g.P("\tdefer func() { _ = tombstoneRows.Close() }()")
 		g.P("\tfor tombstoneRows.Next() {")
 		g.P("\t\tvar tableName string")
 		g.P("\t\tvar id string")
 		g.P("\t\tvar atNs int64")
 		g.P("\t\tif err := tombstoneRows.Scan(&tableName, &id, &atNs); err != nil {")
+		g.P("\t\t\tif closeErr := closeRows(tombstoneRows, \"tombstone sync\"); closeErr != nil {")
+		g.P("\t\t\t\treturn fmt.Errorf(\"scan tombstone row: %w (additionally, %v)\", err, closeErr)")
+		g.P("\t\t\t}")
 		g.P("\t\t\treturn fmt.Errorf(\"scan tombstone row: %w\", err)")
 		g.P("\t\t}")
 		g.P("\t\tneedsSend, err := rt.SyncNeedsSend(q, id, tableName, remote, atNs)")
@@ -800,11 +855,20 @@ func emitWrapper(g *protogen.GeneratedFile, models []messageModel) {
 		g.P("\t\t\treturn fmt.Errorf(\"write jsonl tombstone %s/%s: %w\", tableName, id, err)")
 		g.P("\t\t}")
 		g.P("\t\tif err := rt.SyncUpsert(q, id, tableName, remote, atNs); err != nil {")
+		g.P("\t\t\tif closeErr := closeRows(tombstoneRows, \"tombstone sync\"); closeErr != nil {")
+		g.P("\t\t\t\treturn fmt.Errorf(\"sync tombstone %s/%s: %w (additionally, %v)\", tableName, id, err, closeErr)")
+		g.P("\t\t\t}")
 		g.P("\t\t\treturn err")
 		g.P("\t\t}")
 		g.P("\t}")
 		g.P("\tif err := tombstoneRows.Err(); err != nil {")
+		g.P("\t\tif closeErr := closeRows(tombstoneRows, \"tombstone sync\"); closeErr != nil {")
+		g.P("\t\t\treturn fmt.Errorf(\"iterate tombstone rows: %w (additionally, %v)\", err, closeErr)")
+		g.P("\t\t}")
 		g.P("\t\treturn fmt.Errorf(\"iterate tombstone rows: %w\", err)")
+		g.P("\t}")
+		g.P("\tif err := closeRows(tombstoneRows, \"tombstone sync\"); err != nil {")
+		g.P("\t\treturn err")
 		g.P("\t}")
 	}
 	g.P("\treturn nil")
@@ -874,9 +938,9 @@ func emitWrapper(g *protogen.GeneratedFile, models []messageModel) {
 	g.P()
 }
 
-func createTableSQL(model messageModel) string {
+func (m messageModel) createTableSQL() string {
 	columns := []string{`"id" TEXT PRIMARY KEY`, `"at_ns" INTEGER NOT NULL`, `"data" BLOB NOT NULL`}
-	for _, projectedField := range model.ProjectedFields {
+	for _, projectedField := range m.ProjectedFields {
 		columns = append(
 			columns,
 			fmt.Sprintf(
@@ -890,14 +954,14 @@ func createTableSQL(model messageModel) string {
 
 	return fmt.Sprintf(
 		`CREATE TABLE IF NOT EXISTS "%s" (%s)`,
-		model.TableName,
+		m.TableName,
 		strings.Join(columns, ", "),
 	)
 }
 
-func insertSQL(model messageModel, upsert bool) string {
+func (m messageModel) insertSQL(upsert bool) string {
 	columns := []string{"id", "at_ns", "data"}
-	for _, projectedField := range model.ProjectedFields {
+	for _, projectedField := range m.ProjectedFields {
 		columns = append(columns, projectedField.ColumnName)
 	}
 
@@ -913,7 +977,7 @@ func insertSQL(model messageModel, upsert bool) string {
 
 	statement := fmt.Sprintf(
 		`INSERT INTO "%s" (%s) VALUES (%s)`,
-		model.TableName,
+		m.TableName,
 		strings.Join(quotedColumns, ", "),
 		strings.Join(placeholders, ", "),
 	)
@@ -922,7 +986,7 @@ func insertSQL(model messageModel, upsert bool) string {
 	}
 
 	updates := []string{`"at_ns" = excluded."at_ns"`, `"data" = excluded."data"`}
-	for _, projectedField := range model.ProjectedFields {
+	for _, projectedField := range m.ProjectedFields {
 		updates = append(
 			updates,
 			fmt.Sprintf(
@@ -936,15 +1000,15 @@ func insertSQL(model messageModel, upsert bool) string {
 	return statement + " ON CONFLICT(id) DO UPDATE SET " + strings.Join(updates, ", ")
 }
 
-func reprojectSQL(model messageModel) string {
-	updates := make([]string, 0, len(model.ProjectedFields))
-	for _, projectedField := range model.ProjectedFields {
+func (m messageModel) reprojectSQL() string {
+	updates := make([]string, 0, len(m.ProjectedFields))
+	for _, projectedField := range m.ProjectedFields {
 		updates = append(updates, fmt.Sprintf(`"%s" = ?`, projectedField.ColumnName))
 	}
 
 	return fmt.Sprintf(
 		`UPDATE "%s" SET %s WHERE id = ?`,
-		model.TableName,
+		m.TableName,
 		strings.Join(updates, ", "),
 	)
 }
