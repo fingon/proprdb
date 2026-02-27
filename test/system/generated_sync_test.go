@@ -14,11 +14,19 @@ import (
 )
 
 const (
-	testRemoteA   = "remote-a"
-	testRemoteWS  = "   "
-	testRemoteEmpty = ""
-	typeURLPrefix = "type.googleapis.com/"
-	selectByIDSQL = "id = ?"
+	testRemoteA               = "remote-a"
+	testRemoteWS              = "   "
+	testRemoteEmpty           = ""
+	typeURLPrefix             = "type.googleapis.com/"
+	selectByIDSQL             = "id = ?"
+	selectUnknownCountByIDSQL = "SELECT COUNT(*) FROM _unknown_types WHERE type_name = ? AND id = ?"
+	insertUnknownRowSQL       = "INSERT INTO _unknown_types (type_name, id, at_ns, deleted, data_json) VALUES (?, ?, ?, ?, ?)"
+)
+
+const (
+	unknownTypeName = "generatedtest.example.UnknownThing"
+	unknownID       = "018f4f3f-6f9f-7a1b-8f55-1234567890aa"
+	drainPersonID   = "018f4f3f-6f9f-7a1b-8f55-1234567890ac"
 )
 
 func TestGeneratedJSONLSync(t *testing.T) {
@@ -236,4 +244,60 @@ func TestGeneratedJSONLEmptyRemoteNoSyncEntries(t *testing.T) {
 		assert.NilError(t, err)
 		assert.Check(t, is.Equal(wsRemoteSyncCount, 1))
 	}
+}
+
+func TestGeneratedJSONLUnknownTypesAreCompacted(t *testing.T) {
+	ctx := context.Background()
+	db, err := sql.Open("sqlite3", "file:unknown-sync-compact?mode=memory&cache=shared")
+	assert.NilError(t, err)
+	t.Cleanup(func() {
+		assert.NilError(t, db.Close())
+	})
+
+	crud := NewCRUD(db)
+	assert.NilError(t, crud.Init())
+
+	firstLine := fmt.Sprintf("{\"id\":%q,\"atNs\":10,\"data\":{\"@type\":%q,\"payload\":\"old\"}}\n", unknownID, typeURLPrefix+unknownTypeName)
+	secondLine := fmt.Sprintf("{\"id\":%q,\"atNs\":20,\"data\":{\"@type\":%q,\"payload\":\"new\"}}\n", unknownID, typeURLPrefix+unknownTypeName)
+	importData := firstLine + secondLine
+	assert.NilError(t, crud.ReadJSONL(testRemoteA, strings.NewReader(importData)))
+
+	var unknownRowCount int
+	err = db.QueryRowContext(ctx, selectUnknownCountByIDSQL, unknownTypeName, unknownID).Scan(&unknownRowCount)
+	assert.NilError(t, err)
+	assert.Check(t, is.Equal(unknownRowCount, 1))
+
+	var storedAtNs int64
+	err = db.QueryRowContext(ctx, "SELECT at_ns FROM _unknown_types WHERE type_name = ? AND id = ?", unknownTypeName, unknownID).Scan(&storedAtNs)
+	assert.NilError(t, err)
+	assert.Check(t, is.Equal(storedAtNs, int64(20)))
+}
+
+func TestGeneratedInitDrainsUnknownRowsForKnownType(t *testing.T) {
+	ctx := context.Background()
+	db, err := sql.Open("sqlite3", "file:unknown-sync-drain?mode=memory&cache=shared")
+	assert.NilError(t, err)
+	t.Cleanup(func() {
+		assert.NilError(t, db.Close())
+	})
+
+	crud := NewCRUD(db)
+	assert.NilError(t, crud.Init())
+
+	personAnyJSON := fmt.Sprintf("{\"@type\":%q,\"name\":\"Recovered\",\"age\":\"44\"}", typeURLPrefix+PersonTypeName)
+	_, err = db.ExecContext(ctx, insertUnknownRowSQL, PersonTypeName, drainPersonID, int64(77), 0, personAnyJSON)
+	assert.NilError(t, err)
+
+	assert.NilError(t, crud.Person.Init())
+
+	recoveredRows, err := crud.Person.Select(selectByIDSQL, drainPersonID)
+	assert.NilError(t, err)
+	assert.Check(t, is.Len(recoveredRows, 1))
+	assert.Check(t, is.Equal(recoveredRows[0].Data.GetName(), "Recovered"))
+	assert.Check(t, is.Equal(recoveredRows[0].Data.GetAge(), int64(44)))
+
+	var unknownRowCount int
+	err = db.QueryRowContext(ctx, selectUnknownCountByIDSQL, PersonTypeName, drainPersonID).Scan(&unknownRowCount)
+	assert.NilError(t, err)
+	assert.Check(t, is.Equal(unknownRowCount, 0))
 }

@@ -22,6 +22,7 @@ const (
 	CoreTableDeletedName     = "_deleted"
 	CoreTableSyncName        = "_sync"
 	CoreTableSchemaStateName = "_proprdb_schema"
+	CoreTableUnknownName     = "_unknown_types"
 	dataColumnName           = "data"
 )
 
@@ -67,6 +68,10 @@ func EnsureCoreTables(q DBTX) error {
 	createSchemaStateTableSQL := `CREATE TABLE IF NOT EXISTS ` + CoreTableSchemaStateName + ` (table_name TEXT PRIMARY KEY, schema_hash TEXT NOT NULL)`
 	if _, err := q.ExecContext(ctx, createSchemaStateTableSQL); err != nil {
 		return fmt.Errorf("create _proprdb_schema table: %w", err)
+	}
+	createUnknownTableSQL := `CREATE TABLE IF NOT EXISTS ` + CoreTableUnknownName + ` (type_name TEXT NOT NULL, id TEXT NOT NULL, at_ns INTEGER NOT NULL, deleted INTEGER NOT NULL, data_json TEXT NOT NULL, PRIMARY KEY (type_name, id, at_ns))`
+	if _, err := q.ExecContext(ctx, createUnknownTableSQL); err != nil {
+		return fmt.Errorf("create _unknown_types table: %w", err)
 	}
 	return nil
 }
@@ -231,6 +236,126 @@ func ReadJSONL(r io.Reader, visit func(JSONLRecord, int) error) error {
 			return err
 		}
 	}
+}
+
+type anyTypeEnvelope struct {
+	Type string `json:"@type"`
+}
+
+func TypeNameFromAnyJSON(data json.RawMessage) (string, error) {
+	envelope := anyTypeEnvelope{}
+	if err := json.Unmarshal(data, &envelope); err != nil {
+		return "", fmt.Errorf("unmarshal any json: %w", err)
+	}
+	typeName := TypeNameFromURL(envelope.Type)
+	if typeName == "" {
+		return "", errors.New("empty @type")
+	}
+	return typeName, nil
+}
+
+func UnknownInsert(q DBTX, typeName string, record JSONLRecord) error {
+	if q == nil {
+		return errors.New("nil DBTX")
+	}
+	if strings.TrimSpace(typeName) == "" {
+		return errors.New("empty type name")
+	}
+	ctx := context.Background()
+	deletedInt := 0
+	if record.Deleted {
+		deletedInt = 1
+	}
+	upsertUnknownSQL := `INSERT INTO ` + CoreTableUnknownName + ` (type_name, id, at_ns, deleted, data_json) VALUES (?, ?, ?, ?, ?)`
+	if _, err := q.ExecContext(ctx, upsertUnknownSQL, typeName, record.ID, record.AtNs, deletedInt, string(record.Data)); err != nil {
+		return fmt.Errorf("insert unknown row for %s/%s/%d: %w", typeName, record.ID, record.AtNs, err)
+	}
+	return nil
+}
+
+func CompactUnknownLatest(q DBTX) error {
+	if q == nil {
+		return errors.New("nil DBTX")
+	}
+	ctx := context.Background()
+	compactSQL := `DELETE FROM ` + CoreTableUnknownName + ` WHERE rowid NOT IN (
+SELECT MAX(kept.rowid)
+FROM ` + CoreTableUnknownName + ` kept
+JOIN (
+	SELECT type_name, id, MAX(at_ns) AS max_at_ns
+	FROM ` + CoreTableUnknownName + `
+	GROUP BY type_name, id
+) latest
+ON latest.type_name = kept.type_name AND latest.id = kept.id AND latest.max_at_ns = kept.at_ns
+GROUP BY kept.type_name, kept.id
+)`
+	if _, err := q.ExecContext(ctx, compactSQL); err != nil {
+		return fmt.Errorf("compact unknown rows: %w", err)
+	}
+	return nil
+}
+
+func ReplayUnknownByType(q DBTX, typeName string, apply func(JSONLRecord) error) error {
+	if q == nil {
+		return errors.New("nil DBTX")
+	}
+	if apply == nil {
+		return errors.New("nil apply")
+	}
+	if strings.TrimSpace(typeName) == "" {
+		return errors.New("empty type name")
+	}
+	if err := CompactUnknownLatest(q); err != nil {
+		return err
+	}
+	ctx := context.Background()
+	selectUnknownSQL := `SELECT id, at_ns, deleted, data_json FROM ` + CoreTableUnknownName + ` WHERE type_name = ? ORDER BY at_ns ASC, id ASC, rowid ASC`
+	rows, err := q.QueryContext(ctx, selectUnknownSQL, typeName)
+	if err != nil {
+		return fmt.Errorf("select unknown rows for %s: %w", typeName, err)
+	}
+	type unknownReplayRow struct {
+		id          string
+		atNs        int64
+		deletedInt  int
+		dataJSONStr string
+	}
+	replayRows := make([]unknownReplayRow, 0)
+	for rows.Next() {
+		row := unknownReplayRow{}
+		if err := rows.Scan(&row.id, &row.atNs, &row.deletedInt, &row.dataJSONStr); err != nil {
+			if closeErr := CloseRows(rows, "unknown rows"); closeErr != nil {
+				return fmt.Errorf("scan unknown row for %s: %w (additionally, %v)", typeName, err, closeErr)
+			}
+			return fmt.Errorf("scan unknown row for %s: %w", typeName, err)
+		}
+		replayRows = append(replayRows, row)
+	}
+	if err := rows.Err(); err != nil {
+		if closeErr := CloseRows(rows, "unknown rows"); closeErr != nil {
+			return fmt.Errorf("iterate unknown rows for %s: %w (additionally, %v)", typeName, err, closeErr)
+		}
+		return fmt.Errorf("iterate unknown rows for %s: %w", typeName, err)
+	}
+	if err := CloseRows(rows, "unknown rows"); err != nil {
+		return err
+	}
+	for _, row := range replayRows {
+		record := JSONLRecord{
+			ID:      row.id,
+			Deleted: row.deletedInt != 0,
+			AtNs:    row.atNs,
+			Data:    json.RawMessage(row.dataJSONStr),
+		}
+		if err := apply(record); err != nil {
+			return fmt.Errorf("apply unknown row for %s/%s: %w", typeName, row.id, err)
+		}
+		deleteUnknownRowsSQL := `DELETE FROM ` + CoreTableUnknownName + ` WHERE type_name = ? AND id = ?`
+		if _, err := q.ExecContext(ctx, deleteUnknownRowsSQL, typeName, row.id); err != nil {
+			return fmt.Errorf("delete unknown rows for %s/%s: %w", typeName, row.id, err)
+		}
+	}
+	return nil
 }
 
 func SyncNeedsSend(q DBTX, objectID, tableName, remote string, atNs int64) (bool, error) {

@@ -111,19 +111,18 @@ func (t *PersonTable) Init() error {
 		if _, insertErr := t.q.ExecContext(ctx, `INSERT INTO _proprdb_schema (table_name, schema_hash) VALUES (?, ?)`, PersonTableName, PersonProjectionSchema); insertErr != nil {
 			return fmt.Errorf("insert schema hash for %s: %w", PersonTableName, insertErr)
 		}
-		return nil
-	}
-	if schemaErr != nil {
+	} else if schemaErr != nil {
 		return fmt.Errorf("select schema hash for %s: %w", PersonTableName, schemaErr)
+	} else if currentSchema != PersonProjectionSchema {
+		if err := t.reproject(); err != nil {
+			return fmt.Errorf("reproject table %s: %w", PersonTableName, err)
+		}
+		if _, err := t.q.ExecContext(ctx, `UPDATE _proprdb_schema SET schema_hash = ? WHERE table_name = ?`, PersonProjectionSchema, PersonTableName); err != nil {
+			return fmt.Errorf("update schema hash for %s: %w", PersonTableName, err)
+		}
 	}
-	if currentSchema == PersonProjectionSchema {
-		return nil
-	}
-	if err := t.reproject(); err != nil {
-		return fmt.Errorf("reproject table %s: %w", PersonTableName, err)
-	}
-	if _, err := t.q.ExecContext(ctx, `UPDATE _proprdb_schema SET schema_hash = ? WHERE table_name = ?`, PersonProjectionSchema, PersonTableName); err != nil {
-		return fmt.Errorf("update schema hash for %s: %w", PersonTableName, err)
+	if err := t.drainUnknownRows(PersonTypeName); err != nil {
+		return fmt.Errorf("drain unknown rows for %s: %w", PersonTableName, err)
 	}
 	return nil
 }
@@ -396,6 +395,33 @@ func (t *PersonTable) reproject() error {
 	return nil
 }
 
+func (t *PersonTable) drainUnknownRows(typeName string) error {
+	if t.q == nil {
+		return errors.New("nil DBTX")
+	}
+	if typeName == "" {
+		return errors.New("empty type name")
+	}
+	return rt.ReplayUnknownByType(t.q, typeName, func(record proprdbJSONLRecord) error {
+		if record.Deleted {
+			return t.tombstoneWithAtNs(record.ID, record.AtNs)
+		}
+		anyMessage := &anypb.Any{}
+		if err := protojson.Unmarshal(record.Data, anyMessage); err != nil {
+			return fmt.Errorf("unmarshal unknown data for Person %s: %w", record.ID, err)
+		}
+		data := &Person{}
+		if err := anypb.UnmarshalTo(anyMessage, data, proto.UnmarshalOptions{}); err != nil {
+			return fmt.Errorf("unmarshal unknown payload for Person %s: %w", record.ID, err)
+		}
+		return t.upsertWithAtNs(record.ID, record.AtNs, data)
+	})
+}
+
+func (t *PersonTable) DrainUnknownRows() error {
+	return t.drainUnknownRows(PersonTypeName)
+}
+
 const NoteTableName = "generatedtest_example_note"
 const NoteTypeName = "generatedtest.example.Note"
 const NoteProjectionSchema = "text:string"
@@ -473,19 +499,18 @@ func (t *NoteTable) Init() error {
 		if _, insertErr := t.q.ExecContext(ctx, `INSERT INTO _proprdb_schema (table_name, schema_hash) VALUES (?, ?)`, NoteTableName, NoteProjectionSchema); insertErr != nil {
 			return fmt.Errorf("insert schema hash for %s: %w", NoteTableName, insertErr)
 		}
-		return nil
-	}
-	if schemaErr != nil {
+	} else if schemaErr != nil {
 		return fmt.Errorf("select schema hash for %s: %w", NoteTableName, schemaErr)
+	} else if currentSchema != NoteProjectionSchema {
+		if err := t.reproject(); err != nil {
+			return fmt.Errorf("reproject table %s: %w", NoteTableName, err)
+		}
+		if _, err := t.q.ExecContext(ctx, `UPDATE _proprdb_schema SET schema_hash = ? WHERE table_name = ?`, NoteProjectionSchema, NoteTableName); err != nil {
+			return fmt.Errorf("update schema hash for %s: %w", NoteTableName, err)
+		}
 	}
-	if currentSchema == NoteProjectionSchema {
-		return nil
-	}
-	if err := t.reproject(); err != nil {
-		return fmt.Errorf("reproject table %s: %w", NoteTableName, err)
-	}
-	if _, err := t.q.ExecContext(ctx, `UPDATE _proprdb_schema SET schema_hash = ? WHERE table_name = ?`, NoteProjectionSchema, NoteTableName); err != nil {
-		return fmt.Errorf("update schema hash for %s: %w", NoteTableName, err)
+	if err := t.drainUnknownRows(NoteTypeName); err != nil {
+		return fmt.Errorf("drain unknown rows for %s: %w", NoteTableName, err)
 	}
 	return nil
 }
@@ -738,6 +763,33 @@ func (t *NoteTable) reproject() error {
 	return nil
 }
 
+func (t *NoteTable) drainUnknownRows(typeName string) error {
+	if t.q == nil {
+		return errors.New("nil DBTX")
+	}
+	if typeName == "" {
+		return errors.New("empty type name")
+	}
+	return rt.ReplayUnknownByType(t.q, typeName, func(record proprdbJSONLRecord) error {
+		if record.Deleted {
+			return t.tombstoneWithAtNs(record.ID, record.AtNs)
+		}
+		anyMessage := &anypb.Any{}
+		if err := protojson.Unmarshal(record.Data, anyMessage); err != nil {
+			return fmt.Errorf("unmarshal unknown data for Note %s: %w", record.ID, err)
+		}
+		data := &Note{}
+		if err := anypb.UnmarshalTo(anyMessage, data, proto.UnmarshalOptions{}); err != nil {
+			return fmt.Errorf("unmarshal unknown payload for Note %s: %w", record.ID, err)
+		}
+		return t.upsertWithAtNs(record.ID, record.AtNs, data)
+	})
+}
+
+func (t *NoteTable) DrainUnknownRows() error {
+	return t.drainUnknownRows(NoteTypeName)
+}
+
 type CRUD struct {
 	Person *PersonTable
 	Note   *NoteTable
@@ -749,6 +801,7 @@ var crudGeneratedTableDescriptors = []rt.GeneratedTableDescriptor{
 	{TableName: rt.CoreTableDeletedName, IsCore: true, SyncEnabled: false},
 	{TableName: rt.CoreTableSyncName, IsCore: true, SyncEnabled: false},
 	{TableName: rt.CoreTableSchemaStateName, IsCore: true, SyncEnabled: false},
+	{TableName: rt.CoreTableUnknownName, IsCore: true, SyncEnabled: false},
 }
 
 func NewCRUD(q DBTX) *CRUD {
@@ -883,18 +936,17 @@ func (c *CRUD) ReadJSONL(remote string, r io.Reader) error {
 	if err != nil {
 		return err
 	}
-	return rt.ReadJSONL(r, func(record proprdbJSONLRecord, lineNumber int) error {
+	readErr := rt.ReadJSONL(r, func(record proprdbJSONLRecord, lineNumber int) error {
 		if record.ID == "" {
 			return fmt.Errorf("jsonl line %d has empty id", lineNumber)
 		}
 		if len(record.Data) == 0 {
 			return fmt.Errorf("jsonl line %d has empty data", lineNumber)
 		}
-		anyMessage := &anypb.Any{}
-		if err := protojson.Unmarshal(record.Data, anyMessage); err != nil {
-			return fmt.Errorf("unmarshal jsonl data on line %d: %w", lineNumber, err)
+		typeName, err := rt.TypeNameFromAnyJSON(record.Data)
+		if err != nil {
+			return fmt.Errorf("read @type on line %d: %w", lineNumber, err)
 		}
-		typeName := rt.TypeNameFromURL(anyMessage.GetTypeUrl())
 		switch typeName {
 		case PersonTypeName:
 			localMaxAtNs, err := rt.LocalMaxAtNs(q, PersonTableName, record.ID)
@@ -916,6 +968,10 @@ func (c *CRUD) ReadJSONL(remote string, r io.Reader) error {
 			if c.Person == nil {
 				return errors.New("nil Person table")
 			}
+			anyMessage := &anypb.Any{}
+			if err := protojson.Unmarshal(record.Data, anyMessage); err != nil {
+				return fmt.Errorf("unmarshal jsonl data on line %d: %w", lineNumber, err)
+			}
 			data := &Person{}
 			if err := anypb.UnmarshalTo(anyMessage, data, proto.UnmarshalOptions{}); err != nil {
 				return fmt.Errorf("unmarshal Person data on line %d: %w", lineNumber, err)
@@ -925,7 +981,18 @@ func (c *CRUD) ReadJSONL(remote string, r io.Reader) error {
 			slog.Error("ignoring unsynced jsonl record", "type", typeName, "id", record.ID, "remote", remote, "line", lineNumber)
 			return nil
 		default:
-			return fmt.Errorf("unsupported @type on line %d: %s", lineNumber, typeName)
+			return rt.UnknownInsert(q, typeName, record)
 		}
 	})
+	compactErr := rt.CompactUnknownLatest(q)
+	if readErr != nil {
+		if compactErr != nil {
+			return fmt.Errorf("read jsonl: %w (additionally, compact unknown rows: %v)", readErr, compactErr)
+		}
+		return readErr
+	}
+	if compactErr != nil {
+		return fmt.Errorf("compact unknown rows: %w", compactErr)
+	}
+	return nil
 }

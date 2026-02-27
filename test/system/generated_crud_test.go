@@ -164,6 +164,7 @@ func TestGeneratedCRUDTableDescriptors(t *testing.T) {
 		{TableName: rt.CoreTableDeletedName, TypeName: "", IsCore: true, SyncEnabled: false},
 		{TableName: rt.CoreTableSyncName, TypeName: "", IsCore: true, SyncEnabled: false},
 		{TableName: rt.CoreTableSchemaStateName, TypeName: "", IsCore: true, SyncEnabled: false},
+		{TableName: rt.CoreTableUnknownName, TypeName: "", IsCore: true, SyncEnabled: false},
 	}
 	assert.DeepEqual(t, descriptors, expected)
 
