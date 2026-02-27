@@ -15,6 +15,8 @@ import (
 
 const (
 	testRemoteA   = "remote-a"
+	testRemoteWS  = "   "
+	testRemoteEmpty = ""
 	typeURLPrefix = "type.googleapis.com/"
 	selectByIDSQL = "id = ?"
 )
@@ -170,4 +172,68 @@ func TestGeneratedJSONLSync(t *testing.T) {
 		t.Fatalf("read target _sync entry: %v", err)
 	}
 	assert.Check(t, syncedAtNs >= updatedPerson.AtNs)
+}
+
+func TestGeneratedJSONLEmptyRemoteNoSyncEntries(t *testing.T) {
+	ctx := context.Background()
+	sourceDB, err := sql.Open("sqlite3", "file:source-sync-empty-remote?mode=memory&cache=shared")
+	assert.NilError(t, err)
+	t.Cleanup(func() {
+		assert.NilError(t, sourceDB.Close())
+	})
+
+	targetDB, err := sql.Open("sqlite3", "file:target-sync-empty-remote?mode=memory&cache=shared")
+	assert.NilError(t, err)
+	t.Cleanup(func() {
+		assert.NilError(t, targetDB.Close())
+	})
+
+	source := NewCRUD(sourceDB)
+	assert.NilError(t, source.Init())
+	target := NewCRUD(targetDB)
+	assert.NilError(t, target.Init())
+
+	personRow, err := source.Person.Insert(&Person{Name: "Empty Remote", Age: 1})
+	assert.NilError(t, err)
+
+	var firstExport bytes.Buffer
+	assert.NilError(t, source.WriteJSONL(testRemoteEmpty, &firstExport))
+	firstExportText := strings.TrimSpace(firstExport.String())
+	assert.Check(t, firstExportText != "")
+
+	var secondExport bytes.Buffer
+	assert.NilError(t, source.WriteJSONL(testRemoteEmpty, &secondExport))
+	secondExportText := strings.TrimSpace(secondExport.String())
+	assert.Check(t, is.Equal(secondExportText, firstExportText))
+
+	assert.NilError(t, target.ReadJSONL(testRemoteEmpty, strings.NewReader(firstExport.String())))
+
+	targetPeople, err := target.Person.Select(selectByIDSQL, personRow.ID)
+	assert.NilError(t, err)
+	assert.Check(t, is.Len(targetPeople, 1))
+	assert.Check(t, is.Equal(targetPeople[0].Data.GetName(), "Empty Remote"))
+
+	for _, db := range []*sql.DB{sourceDB, targetDB} {
+		var emptyRemoteSyncCount int
+		err = db.QueryRowContext(ctx, "SELECT COUNT(*) FROM _sync WHERE remote = ?", testRemoteEmpty).Scan(&emptyRemoteSyncCount)
+		assert.NilError(t, err)
+		assert.Check(t, is.Equal(emptyRemoteSyncCount, 0))
+	}
+
+	var wsFirstExport bytes.Buffer
+	assert.NilError(t, source.WriteJSONL(testRemoteWS, &wsFirstExport))
+	assert.Check(t, strings.TrimSpace(wsFirstExport.String()) != "")
+
+	var wsSecondExport bytes.Buffer
+	assert.NilError(t, source.WriteJSONL(testRemoteWS, &wsSecondExport))
+	assert.Check(t, is.Equal(strings.TrimSpace(wsSecondExport.String()), ""))
+
+	assert.NilError(t, target.ReadJSONL(testRemoteWS, strings.NewReader(wsFirstExport.String())))
+
+	for _, db := range []*sql.DB{sourceDB, targetDB} {
+		var wsRemoteSyncCount int
+		err = db.QueryRowContext(ctx, "SELECT COUNT(*) FROM _sync WHERE remote = ?", testRemoteWS).Scan(&wsRemoteSyncCount)
+		assert.NilError(t, err)
+		assert.Check(t, is.Equal(wsRemoteSyncCount, 1))
+	}
 }

@@ -76,6 +76,23 @@ Each object table stores:
 
 Implementations may also project selected typed fields from `data` into additional tables for queryability.
 
+## JSONL sync API semantics
+
+Generated CRUD wrappers include:
+
+- `WriteJSONL(remote string, w io.Writer) error`
+- `ReadJSONL(remote string, r io.Reader) error`
+
+`remote` controls whether `_sync` bookkeeping is used:
+
+- `remote == ""` (exact empty string):
+  - `WriteJSONL` exports records without `_sync`-based deduplication.
+  - `ReadJSONL` imports records without creating/updating `_sync` rows.
+- `remote != ""`:
+  - Both methods use `_sync` rows scoped by that remote value.
+
+Whitespace-only strings are treated as non-empty remote names.
+
 ## Protobuf extensions
 
 `proprdb` defines generator options in `proto/proprdb/options.proto`.

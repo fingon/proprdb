@@ -774,9 +774,6 @@ func (c *CRUD) Init() error {
 }
 
 func (c *CRUD) WriteJSONL(remote string, w io.Writer) error {
-	if strings.TrimSpace(remote) == "" {
-		return errors.New("empty remote")
-	}
 	if w == nil {
 		return errors.New("nil writer")
 	}
@@ -865,9 +862,6 @@ func (c *CRUD) WriteJSONL(remote string, w io.Writer) error {
 }
 
 func (c *CRUD) ReadJSONL(remote string, r io.Reader) error {
-	if strings.TrimSpace(remote) == "" {
-		return errors.New("empty remote")
-	}
 	if r == nil {
 		return errors.New("nil reader")
 	}

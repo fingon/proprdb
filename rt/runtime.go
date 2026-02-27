@@ -211,6 +211,9 @@ func ReadJSONL(r io.Reader, visit func(JSONLRecord, int) error) error {
 }
 
 func SyncNeedsSend(q DBTX, objectID, tableName, remote string, atNs int64) (bool, error) {
+	if remote == "" {
+		return true, nil
+	}
 	ctx := context.Background()
 	var syncedAtNs int64
 	err := q.QueryRowContext(ctx, `SELECT at_ns FROM _sync WHERE object_id = ? AND table_name = ? AND remote = ?`, objectID, tableName, remote).Scan(&syncedAtNs)
@@ -224,6 +227,9 @@ func SyncNeedsSend(q DBTX, objectID, tableName, remote string, atNs int64) (bool
 }
 
 func SyncUpsert(q DBTX, objectID, tableName, remote string, atNs int64) error {
+	if remote == "" {
+		return nil
+	}
 	ctx := context.Background()
 	if _, err := q.ExecContext(ctx, `INSERT INTO _sync (object_id, table_name, at_ns, remote) VALUES (?, ?, ?, ?) ON CONFLICT(object_id, table_name, remote) DO UPDATE SET at_ns = CASE WHEN excluded.at_ns > at_ns THEN excluded.at_ns ELSE at_ns END`, objectID, tableName, atNs, remote); err != nil {
 		return fmt.Errorf("upsert sync row for %s/%s/%s: %w", tableName, objectID, remote, err)
