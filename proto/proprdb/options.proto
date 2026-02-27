@@ -1,6 +1,6 @@
 syntax = "proto3";
 
-package proprdb;
+package com.github.fingon.proprdb;
 
 import "google/protobuf/descriptor.proto";
 

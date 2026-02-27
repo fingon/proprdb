@@ -223,7 +223,7 @@ func (c modelCollector) messageOptionIndexes(message *protogen.Message, fieldsBy
 	value := proto.GetExtension(messageOptions, proprdbpb.E_Indexes)
 	indexDefs, ok := value.([]*proprdbpb.Index)
 	if !ok {
-		return nil, fmt.Errorf("unexpected proprdb.indexes type %T", value)
+		return nil, fmt.Errorf("unexpected com.github.fingon.proprdb.indexes type %T", value)
 	}
 
 	indexes := make([]messageIndex, 0, len(indexDefs))
@@ -251,7 +251,7 @@ func (c modelCollector) messageOptionIndexes(message *protogen.Message, fieldsBy
 				return nil, fmt.Errorf("index %d references unknown field %q", indexPosition+1, fieldName)
 			}
 			if !projectedByName[fieldName] {
-				return nil, fmt.Errorf("index %d field %q must be marked (proprdb.external)=true", indexPosition+1, fieldName)
+				return nil, fmt.Errorf("index %d field %q must be marked (com.github.fingon.proprdb.external)=true", indexPosition+1, fieldName)
 			}
 			columnSeen[fieldName] = true
 			columnNames = append(columnNames, fieldName)
@@ -322,7 +322,7 @@ func (c modelCollector) fieldExternal(field *protogen.Field) (bool, error) {
 
 		return *external, nil
 	default:
-		return false, fmt.Errorf("unexpected proprdb.external type %T", value)
+		return false, fmt.Errorf("unexpected com.github.fingon.proprdb.external type %T", value)
 	}
 }
 

@@ -71,7 +71,7 @@ var file_proto_proprdb_options_proto_extTypes = []protoimpl.ExtensionInfo{
 		ExtendedType:  (*descriptorpb.FieldOptions)(nil),
 		ExtensionType: (*bool)(nil),
 		Field:         50001,
-		Name:          "proprdb.external",
+		Name:          "com.github.fingon.proprdb.external",
 		Tag:           "varint,50001,opt,name=external",
 		Filename:      "proto/proprdb/options.proto",
 	},
@@ -79,7 +79,7 @@ var file_proto_proprdb_options_proto_extTypes = []protoimpl.ExtensionInfo{
 		ExtendedType:  (*descriptorpb.MessageOptions)(nil),
 		ExtensionType: (*bool)(nil),
 		Field:         50002,
-		Name:          "proprdb.omit_table",
+		Name:          "com.github.fingon.proprdb.omit_table",
 		Tag:           "varint,50002,opt,name=omit_table",
 		Filename:      "proto/proprdb/options.proto",
 	},
@@ -87,7 +87,7 @@ var file_proto_proprdb_options_proto_extTypes = []protoimpl.ExtensionInfo{
 		ExtendedType:  (*descriptorpb.MessageOptions)(nil),
 		ExtensionType: (*bool)(nil),
 		Field:         50003,
-		Name:          "proprdb.omit_sync",
+		Name:          "com.github.fingon.proprdb.omit_sync",
 		Tag:           "varint,50003,opt,name=omit_sync",
 		Filename:      "proto/proprdb/options.proto",
 	},
@@ -95,7 +95,7 @@ var file_proto_proprdb_options_proto_extTypes = []protoimpl.ExtensionInfo{
 		ExtendedType:  (*descriptorpb.MessageOptions)(nil),
 		ExtensionType: (*bool)(nil),
 		Field:         50004,
-		Name:          "proprdb.validate_write",
+		Name:          "com.github.fingon.proprdb.validate_write",
 		Tag:           "varint,50004,opt,name=validate_write",
 		Filename:      "proto/proprdb/options.proto",
 	},
@@ -103,7 +103,7 @@ var file_proto_proprdb_options_proto_extTypes = []protoimpl.ExtensionInfo{
 		ExtendedType:  (*descriptorpb.MessageOptions)(nil),
 		ExtensionType: (*bool)(nil),
 		Field:         50005,
-		Name:          "proprdb.allow_custom_id_insert",
+		Name:          "com.github.fingon.proprdb.allow_custom_id_insert",
 		Tag:           "varint,50005,opt,name=allow_custom_id_insert",
 		Filename:      "proto/proprdb/options.proto",
 	},
@@ -111,7 +111,7 @@ var file_proto_proprdb_options_proto_extTypes = []protoimpl.ExtensionInfo{
 		ExtendedType:  (*descriptorpb.MessageOptions)(nil),
 		ExtensionType: ([]*Index)(nil),
 		Field:         50006,
-		Name:          "proprdb.indexes",
+		Name:          "com.github.fingon.proprdb.indexes",
 		Tag:           "bytes,50006,rep,name=indexes",
 		Filename:      "proto/proprdb/options.proto",
 	},
@@ -133,7 +133,7 @@ var (
 	E_ValidateWrite = &file_proto_proprdb_options_proto_extTypes[3]
 	// optional bool allow_custom_id_insert = 50005;
 	E_AllowCustomIdInsert = &file_proto_proprdb_options_proto_extTypes[4]
-	// repeated proprdb.Index indexes = 50006;
+	// repeated com.github.fingon.proprdb.Index indexes = 50006;
 	E_Indexes = &file_proto_proprdb_options_proto_extTypes[5]
 )
 
@@ -141,7 +141,7 @@ var File_proto_proprdb_options_proto protoreflect.FileDescriptor
 
 const file_proto_proprdb_options_proto_rawDesc = "" +
 	"\n" +
-	"\x1bproto/proprdb/options.proto\x12\aproprdb\x1a google/protobuf/descriptor.proto\"\x1f\n" +
+	"\x1bproto/proprdb/options.proto\x12\x19com.github.fingon.proprdb\x1a google/protobuf/descriptor.proto\"\x1f\n" +
 	"\x05Index\x12\x16\n" +
 	"\x06fields\x18\x01 \x03(\tR\x06fields:;\n" +
 	"\bexternal\x12\x1d.google.protobuf.FieldOptions\x18ц\x03 \x01(\bR\bexternal:@\n" +
@@ -149,8 +149,8 @@ const file_proto_proprdb_options_proto_rawDesc = "" +
 	"omit_table\x12\x1f.google.protobuf.MessageOptions\x18҆\x03 \x01(\bR\tomitTable:>\n" +
 	"\tomit_sync\x12\x1f.google.protobuf.MessageOptions\x18ӆ\x03 \x01(\bR\bomitSync:H\n" +
 	"\x0evalidate_write\x12\x1f.google.protobuf.MessageOptions\x18Ԇ\x03 \x01(\bR\rvalidateWrite:V\n" +
-	"\x16allow_custom_id_insert\x12\x1f.google.protobuf.MessageOptions\x18Ն\x03 \x01(\bR\x13allowCustomIdInsert:K\n" +
-	"\aindexes\x12\x1f.google.protobuf.MessageOptions\x18ֆ\x03 \x03(\v2\x0e.proprdb.IndexR\aindexesB3Z1github.com/fingon/proprdb/proto/proprdb;proprdbpbb\x06proto3"
+	"\x16allow_custom_id_insert\x12\x1f.google.protobuf.MessageOptions\x18Ն\x03 \x01(\bR\x13allowCustomIdInsert:]\n" +
+	"\aindexes\x12\x1f.google.protobuf.MessageOptions\x18ֆ\x03 \x03(\v2 .com.github.fingon.proprdb.IndexR\aindexesB3Z1github.com/fingon/proprdb/proto/proprdb;proprdbpbb\x06proto3"
 
 var (
 	file_proto_proprdb_options_proto_rawDescOnce sync.Once
@@ -166,18 +166,18 @@ func file_proto_proprdb_options_proto_rawDescGZIP() []byte {
 
 var file_proto_proprdb_options_proto_msgTypes = make([]protoimpl.MessageInfo, 1)
 var file_proto_proprdb_options_proto_goTypes = []any{
-	(*Index)(nil),                       // 0: proprdb.Index
+	(*Index)(nil),                       // 0: com.github.fingon.proprdb.Index
 	(*descriptorpb.FieldOptions)(nil),   // 1: google.protobuf.FieldOptions
 	(*descriptorpb.MessageOptions)(nil), // 2: google.protobuf.MessageOptions
 }
 var file_proto_proprdb_options_proto_depIdxs = []int32{
-	1, // 0: proprdb.external:extendee -> google.protobuf.FieldOptions
-	2, // 1: proprdb.omit_table:extendee -> google.protobuf.MessageOptions
-	2, // 2: proprdb.omit_sync:extendee -> google.protobuf.MessageOptions
-	2, // 3: proprdb.validate_write:extendee -> google.protobuf.MessageOptions
-	2, // 4: proprdb.allow_custom_id_insert:extendee -> google.protobuf.MessageOptions
-	2, // 5: proprdb.indexes:extendee -> google.protobuf.MessageOptions
-	0, // 6: proprdb.indexes:type_name -> proprdb.Index
+	1, // 0: com.github.fingon.proprdb.external:extendee -> google.protobuf.FieldOptions
+	2, // 1: com.github.fingon.proprdb.omit_table:extendee -> google.protobuf.MessageOptions
+	2, // 2: com.github.fingon.proprdb.omit_sync:extendee -> google.protobuf.MessageOptions
+	2, // 3: com.github.fingon.proprdb.validate_write:extendee -> google.protobuf.MessageOptions
+	2, // 4: com.github.fingon.proprdb.allow_custom_id_insert:extendee -> google.protobuf.MessageOptions
+	2, // 5: com.github.fingon.proprdb.indexes:extendee -> google.protobuf.MessageOptions
+	0, // 6: com.github.fingon.proprdb.indexes:type_name -> com.github.fingon.proprdb.Index
 	7, // [7:7] is the sub-list for method output_type
 	7, // [7:7] is the sub-list for method input_type
 	6, // [6:7] is the sub-list for extension type_name

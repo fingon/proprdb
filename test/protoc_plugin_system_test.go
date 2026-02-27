@@ -81,7 +81,7 @@ package generatedtest.bad;
 import "proto/proprdb/options.proto";
 option go_package = "generatedtest/bad;bad";
 message Person {
-  option (proprdb.indexes) = {fields: "name"};
+  option (com.github.fingon.proprdb.indexes) = {fields: "name"};
   string name = 1;
 }`
 	err = os.WriteFile(badProtoPath, []byte(badProto), 0o644)
@@ -95,7 +95,7 @@ message Person {
 		badProtoPath,
 	)
 	assert.Check(t, runErr != nil)
-	assert.Check(t, strings.Contains(output, "must be marked (proprdb.external)=true"))
+	assert.Check(t, strings.Contains(output, "must be marked (com.github.fingon.proprdb.external)=true"))
 }
 
 func TestProtocPluginRejectsEmptyIndex(t *testing.T) {
@@ -125,8 +125,8 @@ package generatedtest.bad;
 import "proto/proprdb/options.proto";
 option go_package = "generatedtest/bad;bad";
 message Person {
-  option (proprdb.indexes) = {};
-  string name = 1 [(proprdb.external) = true];
+  option (com.github.fingon.proprdb.indexes) = {};
+  string name = 1 [(com.github.fingon.proprdb.external) = true];
 }`
 	err = os.WriteFile(badProtoPath, []byte(badProto), 0o644)
 	assert.NilError(t, err)
