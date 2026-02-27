@@ -743,11 +743,25 @@ type CRUD struct {
 	Note   *NoteTable
 }
 
+var crudGeneratedTableDescriptors = []rt.GeneratedTableDescriptor{
+	{TableName: PersonTableName, TypeName: PersonTypeName, IsCore: false, SyncEnabled: true},
+	{TableName: NoteTableName, TypeName: NoteTypeName, IsCore: false, SyncEnabled: false},
+	{TableName: rt.CoreTableDeletedName, IsCore: true, SyncEnabled: false},
+	{TableName: rt.CoreTableSyncName, IsCore: true, SyncEnabled: false},
+	{TableName: rt.CoreTableSchemaStateName, IsCore: true, SyncEnabled: false},
+}
+
 func NewCRUD(q DBTX) *CRUD {
 	return &CRUD{
 		Person: NewPersonTable(q),
 		Note:   NewNoteTable(q),
 	}
+}
+
+func (c *CRUD) TableDescriptors() []rt.GeneratedTableDescriptor {
+	copiedDescriptors := make([]rt.GeneratedTableDescriptor, len(crudGeneratedTableDescriptors))
+	copy(copiedDescriptors, crudGeneratedTableDescriptors)
+	return copiedDescriptors
 }
 
 func (c *CRUD) dbtx() (DBTX, error) {

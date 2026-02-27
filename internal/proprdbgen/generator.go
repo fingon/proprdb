@@ -919,12 +919,27 @@ func (e generatorEmitter) emitWrapper(models []messageModel) {
 	}
 	g.P("}")
 	g.P()
+	g.P("var crudGeneratedTableDescriptors = []rt.GeneratedTableDescriptor{")
+	for _, model := range models {
+		g.P("\t{TableName: ", model.GoName, "TableName, TypeName: ", model.GoName, "TypeName, IsCore: false, SyncEnabled: ", strconv.FormatBool(!model.OmitSync), "},")
+	}
+	g.P("\t{TableName: rt.CoreTableDeletedName, IsCore: true, SyncEnabled: false},")
+	g.P("\t{TableName: rt.CoreTableSyncName, IsCore: true, SyncEnabled: false},")
+	g.P("\t{TableName: rt.CoreTableSchemaStateName, IsCore: true, SyncEnabled: false},")
+	g.P("}")
+	g.P()
 	g.P("func NewCRUD(q DBTX) *CRUD {")
 	g.P("\treturn &CRUD{")
 	for _, model := range models {
 		g.P("\t\t", model.GoName, ": New", model.TableTypeName, "(q),")
 	}
 	g.P("\t}")
+	g.P("}")
+	g.P()
+	g.P("func (c *CRUD) TableDescriptors() []rt.GeneratedTableDescriptor {")
+	g.P("\tcopiedDescriptors := make([]rt.GeneratedTableDescriptor, len(crudGeneratedTableDescriptors))")
+	g.P("\tcopy(copiedDescriptors, crudGeneratedTableDescriptors)")
+	g.P("\treturn copiedDescriptors")
 	g.P("}")
 	g.P()
 	g.P("func (c *CRUD) dbtx() (DBTX, error) {")

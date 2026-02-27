@@ -18,6 +18,13 @@ import (
 	"google.golang.org/protobuf/types/known/anypb"
 )
 
+const (
+	CoreTableDeletedName     = "_deleted"
+	CoreTableSyncName        = "_sync"
+	CoreTableSchemaStateName = "_proprdb_schema"
+	dataColumnName           = "data"
+)
+
 type DBTX interface {
 	ExecContext(context.Context, string, ...any) (sql.Result, error)
 	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
@@ -31,18 +38,34 @@ type JSONLRecord struct {
 	Data    json.RawMessage `json:"data"`
 }
 
+type GeneratedTableDescriptor struct {
+	TableName   string
+	TypeName    string
+	IsCore      bool
+	SyncEnabled bool
+}
+
+type TableIntrospection struct {
+	Descriptor     GeneratedTableDescriptor
+	ObjectCount    int64
+	DiskUsageBytes int64
+}
+
 func EnsureCoreTables(q DBTX) error {
 	if q == nil {
 		return errors.New("nil DBTX")
 	}
 	ctx := context.Background()
-	if _, err := q.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS _deleted (table_name TEXT NOT NULL, id TEXT NOT NULL, at_ns INTEGER NOT NULL, PRIMARY KEY (table_name, id))`); err != nil {
+	createDeletedTableSQL := `CREATE TABLE IF NOT EXISTS ` + CoreTableDeletedName + ` (table_name TEXT NOT NULL, id TEXT NOT NULL, at_ns INTEGER NOT NULL, PRIMARY KEY (table_name, id))`
+	if _, err := q.ExecContext(ctx, createDeletedTableSQL); err != nil {
 		return fmt.Errorf("create _deleted table: %w", err)
 	}
-	if _, err := q.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS _sync (object_id TEXT NOT NULL, table_name TEXT NOT NULL, at_ns INTEGER NOT NULL, remote TEXT NOT NULL, PRIMARY KEY (object_id, table_name, remote))`); err != nil {
+	createSyncTableSQL := `CREATE TABLE IF NOT EXISTS ` + CoreTableSyncName + ` (object_id TEXT NOT NULL, table_name TEXT NOT NULL, at_ns INTEGER NOT NULL, remote TEXT NOT NULL, PRIMARY KEY (object_id, table_name, remote))`
+	if _, err := q.ExecContext(ctx, createSyncTableSQL); err != nil {
 		return fmt.Errorf("create _sync table: %w", err)
 	}
-	if _, err := q.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS _proprdb_schema (table_name TEXT PRIMARY KEY, schema_hash TEXT NOT NULL)`); err != nil {
+	createSchemaStateTableSQL := `CREATE TABLE IF NOT EXISTS ` + CoreTableSchemaStateName + ` (table_name TEXT PRIMARY KEY, schema_hash TEXT NOT NULL)`
+	if _, err := q.ExecContext(ctx, createSchemaStateTableSQL); err != nil {
 		return fmt.Errorf("create _proprdb_schema table: %w", err)
 	}
 	return nil
@@ -216,7 +239,8 @@ func SyncNeedsSend(q DBTX, objectID, tableName, remote string, atNs int64) (bool
 	}
 	ctx := context.Background()
 	var syncedAtNs int64
-	err := q.QueryRowContext(ctx, `SELECT at_ns FROM _sync WHERE object_id = ? AND table_name = ? AND remote = ?`, objectID, tableName, remote).Scan(&syncedAtNs)
+	selectSyncSQL := `SELECT at_ns FROM ` + CoreTableSyncName + ` WHERE object_id = ? AND table_name = ? AND remote = ?`
+	err := q.QueryRowContext(ctx, selectSyncSQL, objectID, tableName, remote).Scan(&syncedAtNs)
 	if errors.Is(err, sql.ErrNoRows) {
 		return true, nil
 	}
@@ -231,7 +255,8 @@ func SyncUpsert(q DBTX, objectID, tableName, remote string, atNs int64) error {
 		return nil
 	}
 	ctx := context.Background()
-	if _, err := q.ExecContext(ctx, `INSERT INTO _sync (object_id, table_name, at_ns, remote) VALUES (?, ?, ?, ?) ON CONFLICT(object_id, table_name, remote) DO UPDATE SET at_ns = CASE WHEN excluded.at_ns > at_ns THEN excluded.at_ns ELSE at_ns END`, objectID, tableName, atNs, remote); err != nil {
+	upsertSyncSQL := `INSERT INTO ` + CoreTableSyncName + ` (object_id, table_name, at_ns, remote) VALUES (?, ?, ?, ?) ON CONFLICT(object_id, table_name, remote) DO UPDATE SET at_ns = CASE WHEN excluded.at_ns > at_ns THEN excluded.at_ns ELSE at_ns END`
+	if _, err := q.ExecContext(ctx, upsertSyncSQL, objectID, tableName, atNs, remote); err != nil {
 		return fmt.Errorf("upsert sync row for %s/%s/%s: %w", tableName, objectID, remote, err)
 	}
 	return nil
@@ -249,7 +274,8 @@ func LocalMaxAtNs(q DBTX, tableName, objectID string) (int64, error) {
 		maxAtNs = rowAtNs
 	}
 	var tombstoneAtNs int64
-	tombstoneErr := q.QueryRowContext(ctx, `SELECT at_ns FROM _deleted WHERE table_name = ? AND id = ?`, tableName, objectID).Scan(&tombstoneAtNs)
+	selectTombstoneSQL := `SELECT at_ns FROM ` + CoreTableDeletedName + ` WHERE table_name = ? AND id = ?`
+	tombstoneErr := q.QueryRowContext(ctx, selectTombstoneSQL, tableName, objectID).Scan(&tombstoneAtNs)
 	if tombstoneErr != nil && !errors.Is(tombstoneErr, sql.ErrNoRows) {
 		return 0, fmt.Errorf("select tombstone timestamp for %s/%s: %w", tableName, objectID, tombstoneErr)
 	}
@@ -257,4 +283,118 @@ func LocalMaxAtNs(q DBTX, tableName, objectID string) (int64, error) {
 		maxAtNs = tombstoneAtNs
 	}
 	return maxAtNs, nil
+}
+
+func IntrospectTables(q DBTX, descriptors []GeneratedTableDescriptor) ([]TableIntrospection, error) {
+	if q == nil {
+		return nil, errors.New("nil DBTX")
+	}
+	introspectionRows := make([]TableIntrospection, 0, len(descriptors))
+	for _, descriptor := range descriptors {
+		objectCount, err := tableObjectCount(q, descriptor.TableName)
+		if err != nil {
+			return nil, err
+		}
+		diskUsageBytes, err := tableDiskUsageBytes(q, descriptor.TableName)
+		if err != nil {
+			return nil, err
+		}
+		introspectionRows = append(introspectionRows, TableIntrospection{
+			Descriptor:     descriptor,
+			ObjectCount:    objectCount,
+			DiskUsageBytes: diskUsageBytes,
+		})
+	}
+	return introspectionRows, nil
+}
+
+func tableObjectCount(q DBTX, tableName string) (int64, error) {
+	ctx := context.Background()
+	var objectCount int64
+	tableNameIdentifier := quoteSQLiteIdentifier(tableName)
+	query := `SELECT COUNT(*) FROM ` + tableNameIdentifier
+	if err := q.QueryRowContext(ctx, query).Scan(&objectCount); err != nil {
+		return 0, fmt.Errorf("count objects for table %s: %w", tableName, err)
+	}
+	return objectCount, nil
+}
+
+func tableDiskUsageBytes(q DBTX, tableName string) (int64, error) {
+	ctx := context.Background()
+	columnNames, err := tableColumnNames(q, tableName)
+	if err != nil {
+		return 0, err
+	}
+	tableNameIdentifier := quoteSQLiteIdentifier(tableName)
+	var diskUsageBytes int64
+	var query string
+	if containsColumn(columnNames, dataColumnName) {
+		query = `SELECT COALESCE(SUM(LENGTH(` + quoteSQLiteIdentifier(dataColumnName) + `)), 0) FROM ` + tableNameIdentifier
+	} else {
+		query = `SELECT COALESCE(SUM(` + estimatedRowPayloadBytesSQL(columnNames) + `), 0) FROM ` + tableNameIdentifier
+	}
+	if err := q.QueryRowContext(ctx, query).Scan(&diskUsageBytes); err != nil {
+		return 0, fmt.Errorf("read disk usage for table %s: %w", tableName, err)
+	}
+	return diskUsageBytes, nil
+}
+
+func tableColumnNames(q DBTX, tableName string) ([]string, error) {
+	ctx := context.Background()
+	query := `PRAGMA table_info(` + quoteSQLiteIdentifier(tableName) + `)`
+	rows, err := q.QueryContext(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("read columns for table %s: %w", tableName, err)
+	}
+	columnNames := make([]string, 0)
+	for rows.Next() {
+		var cid int
+		var name string
+		var colType string
+		var notNull int
+		var defaultValue any
+		var pk int
+		if err := rows.Scan(&cid, &name, &colType, &notNull, &defaultValue, &pk); err != nil {
+			if closeErr := CloseRows(rows, "table columns"); closeErr != nil {
+				return nil, fmt.Errorf("scan table column for %s: %w (additionally, %v)", tableName, err, closeErr)
+			}
+			return nil, fmt.Errorf("scan table column for %s: %w", tableName, err)
+		}
+		columnNames = append(columnNames, name)
+	}
+	if err := rows.Err(); err != nil {
+		if closeErr := CloseRows(rows, "table columns"); closeErr != nil {
+			return nil, fmt.Errorf("iterate table columns for %s: %w (additionally, %v)", tableName, err, closeErr)
+		}
+		return nil, fmt.Errorf("iterate table columns for %s: %w", tableName, err)
+	}
+	if err := CloseRows(rows, "table columns"); err != nil {
+		return nil, err
+	}
+	return columnNames, nil
+}
+
+func containsColumn(columnNames []string, targetColumn string) bool {
+	for _, columnName := range columnNames {
+		if columnName == targetColumn {
+			return true
+		}
+	}
+	return false
+}
+
+func estimatedRowPayloadBytesSQL(columnNames []string) string {
+	if len(columnNames) == 0 {
+		return "0"
+	}
+	estimatedColumns := make([]string, 0, len(columnNames))
+	for _, columnName := range columnNames {
+		quotedColumnName := quoteSQLiteIdentifier(columnName)
+		estimatedColumns = append(estimatedColumns, `COALESCE(LENGTH(CAST(`+quotedColumnName+` AS BLOB)), 0)`)
+	}
+	return strings.Join(estimatedColumns, " + ")
+}
+
+func quoteSQLiteIdentifier(value string) string {
+	return `"` + strings.ReplaceAll(value, `"`, `""`) + `"`
 }

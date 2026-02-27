@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"testing"
 
+	rt "github.com/fingon/proprdb/rt"
 	_ "github.com/mattn/go-sqlite3"
 	"gotest.tools/v3/assert"
 	is "gotest.tools/v3/assert/cmp"
@@ -146,6 +147,29 @@ func TestGeneratedCRUD(t *testing.T) {
 	err = db.QueryRowContext(ctx, "SELECT \"text\" FROM \""+NoteTableName+"\" WHERE id = ?", insertedNote.ID).Scan(&projectedText)
 	assert.NilError(t, err)
 	assert.Check(t, is.Equal(projectedText, "Projected note"))
+}
+
+func TestGeneratedCRUDTableDescriptors(t *testing.T) {
+	db, err := sql.Open("sqlite3", "file::memory:?cache=shared")
+	assert.NilError(t, err)
+	t.Cleanup(func() {
+		assert.NilError(t, db.Close())
+	})
+
+	crud := NewCRUD(db)
+	descriptors := crud.TableDescriptors()
+	expected := []rt.GeneratedTableDescriptor{
+		{TableName: PersonTableName, TypeName: PersonTypeName, IsCore: false, SyncEnabled: true},
+		{TableName: NoteTableName, TypeName: NoteTypeName, IsCore: false, SyncEnabled: false},
+		{TableName: rt.CoreTableDeletedName, TypeName: "", IsCore: true, SyncEnabled: false},
+		{TableName: rt.CoreTableSyncName, TypeName: "", IsCore: true, SyncEnabled: false},
+		{TableName: rt.CoreTableSchemaStateName, TypeName: "", IsCore: true, SyncEnabled: false},
+	}
+	assert.DeepEqual(t, descriptors, expected)
+
+	descriptors[0].TableName = "mutated"
+	descriptorsSecondRead := crud.TableDescriptors()
+	assert.Check(t, is.Equal(descriptorsSecondRead[0].TableName, PersonTableName))
 }
 
 func tableIndexNamesByName(t *testing.T, ctx context.Context, db *sql.DB, tableName string) map[string]bool {
