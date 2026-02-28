@@ -20,5 +20,21 @@ repos:
         name: "Lint and format Go code"
         language: system
         files: \.go$
-        entry: golangci-lint run --fix
+        entry: go tool golangci-lint run --fix
         pass_filenames: false
+
+      - id: format-proto
+        name: "Format (Proto)"
+        language: system
+        types: [proto]
+        entry: |
+          bash -c 'for file in "$@"
+              do go tool buf format "$file" -w --exit-code
+            done'
+
+      - id: go-mod-tidy
+        name: "Run go mod tidy"
+        language: system
+        files: '^go\.(mod|sum)$'
+        pass_filenames: false
+        entry: go mod tidy -v
