@@ -1,6 +1,7 @@
 package proprdbgen
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
 	"unicode"
@@ -10,12 +11,17 @@ import (
 
 const swiftRuntimeModuleName = "ProprDBSwiftRuntime"
 
+type SwiftGeneratorOptions struct {
+	Visibility string
+}
+
 type swiftEmitter struct {
-	g *protogen.GeneratedFile
+	g          *protogen.GeneratedFile
+	visibility string
 }
 
 // GenerateSwiftFile generates proprdb CRUD code for Swift.
-func GenerateSwiftFile(plugin *protogen.Plugin, file *protogen.File) error {
+func GenerateSwiftFile(plugin *protogen.Plugin, file *protogen.File, options SwiftGeneratorOptions) error {
 	collector := modelCollector{}
 	models, err := collector.collectModels(file)
 	if err != nil {
@@ -34,7 +40,10 @@ func GenerateSwiftFile(plugin *protogen.Plugin, file *protogen.File) error {
 	g.P("import ", swiftRuntimeModuleName)
 	g.P()
 
-	emitter := swiftEmitter{g: g}
+	emitter := swiftEmitter{
+		g:          g,
+		visibility: swiftVisibilityKeyword(options.Visibility),
+	}
 	for _, model := range models {
 		emitter.emitModel(file, model)
 	}
@@ -53,11 +62,12 @@ func (e swiftEmitter) emitModel(file *protogen.File, model messageModel) {
 	upsertConst := model.GoName + "UpsertSQL"
 	reprojectConst := model.GoName + "ReprojectSQL"
 	indexPrefixConst := model.GoName + "GeneratedIndexPrefix"
+	visibility := e.visibilityPrefix()
 
-	g.P("let ", tableNameConst, " = ", strconv.Quote(model.TableName))
+	g.P(visibility, "let ", tableNameConst, " = ", strconv.Quote(model.TableName))
 	g.P("private let ", tableNameConst, "Quoted = quoteSQLiteIdentifier(", tableNameConst, ")")
-	g.P("let ", typeNameConst, " = ", strconv.Quote(model.TypeName))
-	g.P("let ", schemaConst, " = ", strconv.Quote(model.ProjectionSchema))
+	g.P(visibility, "let ", typeNameConst, " = ", strconv.Quote(model.TypeName))
+	g.P(visibility, "let ", schemaConst, " = ", strconv.Quote(model.ProjectionSchema))
 	g.P("private let ", createTableConst, " = ", strconv.Quote(model.createTableSQL()))
 	g.P("private let ", insertConst, " = ", strconv.Quote(model.insertSQL(false)))
 	g.P("private let ", upsertConst, " = ", strconv.Quote(model.insertSQL(true)))
@@ -70,11 +80,11 @@ func (e swiftEmitter) emitModel(file *protogen.File, model messageModel) {
 	}
 	g.P()
 
-	g.P("struct ", model.RowTypeName, ": Equatable {")
-	g.P("\tvar id: String")
-	g.P("\tvar atNs: Int64")
-	g.P("\tvar data: ", swiftTypeName)
-	g.P("\tinit(id: String, atNs: Int64, data: ", swiftTypeName, ") {")
+	g.P(visibility, "struct ", model.RowTypeName, ": Equatable {")
+	g.P("\t", visibility, "var id: String")
+	g.P("\t", visibility, "var atNs: Int64")
+	g.P("\t", visibility, "var data: ", swiftTypeName)
+	g.P("\t", visibility, "init(id: String, atNs: Int64, data: ", swiftTypeName, ") {")
 	g.P("\t\tself.id = id")
 	g.P("\t\tself.atNs = atNs")
 	g.P("\t\tself.data = data")
@@ -82,9 +92,9 @@ func (e swiftEmitter) emitModel(file *protogen.File, model messageModel) {
 	g.P("}")
 	g.P()
 
-	g.P("struct ", model.TableTypeName, " {")
+	g.P(visibility, "struct ", model.TableTypeName, " {")
 	g.P("\tfileprivate let q: any DBTX")
-	g.P("\tinit(_ q: any DBTX) {")
+	g.P("\t", visibility, "init(_ q: any DBTX) {")
 	g.P("\t\tself.q = q")
 	g.P("\t}")
 	g.P()
@@ -105,7 +115,7 @@ func (e swiftEmitter) emitModel(file *protogen.File, model messageModel) {
 
 func (e swiftEmitter) emitSwiftInitMethod(file *protogen.File, model messageModel, swiftTypeName, tableNameConst, typeNameConst, schemaConst, createTableConst, indexPrefixConst string) {
 	g := e.g
-	g.P("\tfunc initialize() throws {")
+	g.P("\t", e.visibilityPrefix(), "func initialize() throws {")
 	g.P("\t\ttry ensureCoreTables(q)")
 	g.P("\t\ttry q.execute(", createTableConst, ")")
 	if len(model.ProjectedFields) > 0 {
@@ -156,7 +166,7 @@ func (e swiftEmitter) emitSwiftInitMethod(file *protogen.File, model messageMode
 
 func (e swiftEmitter) emitSwiftSelectMethod(model messageModel, swiftTypeName, tableNameConst string) {
 	g := e.g
-	g.P("\tfunc select(where whereClause: String = \"\", arguments: [Any?] = []) throws -> [", model.RowTypeName, "] {")
+	g.P("\t", e.visibilityPrefix(), "func select(where whereClause: String = \"\", arguments: [Any?] = []) throws -> [", model.RowTypeName, "] {")
 	g.P("\t\tvar query = \"SELECT id, at_ns, data FROM \" + ", tableNameConst, "Quoted")
 	g.P("\t\tif !whereClause.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {")
 	g.P("\t\t\tquery += \" WHERE \" + whereClause")
@@ -178,14 +188,14 @@ func (e swiftEmitter) emitSwiftSelectMethod(model messageModel, swiftTypeName, t
 
 func (e swiftEmitter) emitSwiftInsertMethod(model messageModel, swiftTypeName, tableNameConst, insertConst string) {
 	g := e.g
-	g.P("\tfunc insert(_ data: ", swiftTypeName, ") throws -> ", model.RowTypeName, " {")
+	g.P("\t", e.visibilityPrefix(), "func insert(_ data: ", swiftTypeName, ") throws -> ", model.RowTypeName, " {")
 	g.P("\t\tlet id = try uuidV7()")
 	g.P("\t\ttry validateUUID(id)")
 	g.P("\t\treturn try insertWithIDInternal(id: id, data: data)")
 	g.P("\t}")
 	g.P()
 	if model.AllowCustomIDInsert {
-		g.P("\tfunc insertWithID(_ id: String, data: ", swiftTypeName, ") throws -> ", model.RowTypeName, " {")
+		g.P("\t", e.visibilityPrefix(), "func insertWithID(_ id: String, data: ", swiftTypeName, ") throws -> ", model.RowTypeName, " {")
 		g.P("\t\treturn try insertWithIDInternal(id: id, data: data)")
 		g.P("\t}")
 		g.P()
@@ -213,7 +223,7 @@ func (e swiftEmitter) emitSwiftInsertMethod(model messageModel, swiftTypeName, t
 
 func (e swiftEmitter) emitSwiftUpdateMethod(model messageModel, swiftTypeName, tableNameConst, upsertConst string) {
 	g := e.g
-	g.P("\tfunc updateByID(_ id: String, data: ", swiftTypeName, ") throws -> ", model.RowTypeName, " {")
+	g.P("\t", e.visibilityPrefix(), "func updateByID(_ id: String, data: ", swiftTypeName, ") throws -> ", model.RowTypeName, " {")
 	g.P("\t\tif id.isEmpty {")
 	g.P("\t\t\tthrow ProprDBError(\"empty id\")")
 	g.P("\t\t}")
@@ -232,7 +242,7 @@ func (e swiftEmitter) emitSwiftUpdateMethod(model messageModel, swiftTypeName, t
 	g.P("\t\treturn ", model.RowTypeName, "(id: id, atNs: atNs, data: data)")
 	g.P("\t}")
 	g.P()
-	g.P("\tfunc updateRow(_ row: ", model.RowTypeName, ") throws -> ", model.RowTypeName, " {")
+	g.P("\t", e.visibilityPrefix(), "func updateRow(_ row: ", model.RowTypeName, ") throws -> ", model.RowTypeName, " {")
 	g.P("\t\treturn try updateByID(row.id, data: row.data)")
 	g.P("\t}")
 	g.P()
@@ -240,7 +250,7 @@ func (e swiftEmitter) emitSwiftUpdateMethod(model messageModel, swiftTypeName, t
 
 func (e swiftEmitter) emitSwiftDeleteMethod(model messageModel, tableNameConst string) {
 	g := e.g
-	g.P("\tfunc deleteByID(_ id: String) throws {")
+	g.P("\t", e.visibilityPrefix(), "func deleteByID(_ id: String) throws {")
 	g.P("\t\tif id.isEmpty {")
 	g.P("\t\t\tthrow ProprDBError(\"empty id\")")
 	g.P("\t\t}")
@@ -249,7 +259,7 @@ func (e swiftEmitter) emitSwiftDeleteMethod(model messageModel, tableNameConst s
 	g.P("\t\ttry q.execute(\"DELETE FROM \" + ", tableNameConst, "Quoted + \" WHERE id = ?\", arguments: [id])")
 	g.P("\t}")
 	g.P()
-	g.P("\tfunc deleteRow(_ row: ", model.RowTypeName, ") throws {")
+	g.P("\t", e.visibilityPrefix(), "func deleteRow(_ row: ", model.RowTypeName, ") throws {")
 	g.P("\t\ttry deleteByID(row.id)")
 	g.P("\t}")
 	g.P()
@@ -317,7 +327,7 @@ func (e swiftEmitter) emitSwiftDrainUnknownMethod(file *protogen.File, swiftType
 	g.P("\t\t}")
 	g.P("\t}")
 	g.P()
-	g.P("\tfunc drainUnknownRows() throws {")
+	g.P("\t", e.visibilityPrefix(), "func drainUnknownRows() throws {")
 	g.P("\t\ttry drainUnknownRows(", typeNameConst, ")")
 	g.P("\t}")
 	g.P()
@@ -348,17 +358,18 @@ func (e swiftEmitter) emitWrapper(file *protogen.File, models []messageModel) {
 		}
 	}
 
-	g.P("struct CRUD {")
+	visibility := e.visibilityPrefix()
+	g.P(visibility, "struct CRUD {")
 	for _, model := range models {
-		g.P("\tlet ", swiftPropertyNameFromGoName(model.GoName), ": ", model.TableTypeName)
+		g.P("\t", visibility, "let ", swiftPropertyNameFromGoName(model.GoName), ": ", model.TableTypeName)
 	}
-	g.P("\tinit(_ q: any DBTX) {")
+	g.P("\t", visibility, "init(_ q: any DBTX) {")
 	for _, model := range models {
 		g.P("\t\tself.", swiftPropertyNameFromGoName(model.GoName), " = ", model.TableTypeName, "(q)")
 	}
 	g.P("\t}")
 	g.P()
-	g.P("\tfunc tableDescriptors() -> [GeneratedTableDescriptor] {")
+	g.P("\t", visibility, "func tableDescriptors() -> [GeneratedTableDescriptor] {")
 	g.P("\t\treturn [")
 	for _, model := range models {
 		g.P("\t\t\tGeneratedTableDescriptor(tableName: ", model.GoName, "TableName, typeName: ", model.GoName, "TypeName, isCore: false, syncEnabled: ", strconv.FormatBool(!model.OmitSync), "),")
@@ -374,13 +385,13 @@ func (e swiftEmitter) emitWrapper(file *protogen.File, models []messageModel) {
 	g.P("\t\treturn ", swiftPropertyNameFromGoName(models[0].GoName), ".q")
 	g.P("\t}")
 	g.P()
-	g.P("\tfunc initialize() throws {")
+	g.P("\t", visibility, "func initialize() throws {")
 	for _, model := range models {
 		g.P("\t\ttry ", swiftPropertyNameFromGoName(model.GoName), ".initialize()")
 	}
 	g.P("\t}")
 	g.P()
-	g.P("\tfunc writeJSONL(remote: String) throws -> String {")
+	g.P("\t", visibility, "func writeJSONL(remote: String) throws -> String {")
 	g.P("\t\tlet q = dbtx()")
 	g.P("\t\tvar output = \"\"")
 	for _, model := range syncModels {
@@ -426,7 +437,7 @@ func (e swiftEmitter) emitWrapper(file *protogen.File, models []messageModel) {
 	g.P("\t\treturn output")
 	g.P("\t}")
 	g.P()
-	g.P("\tfunc readJSONL(remote: String, text: String) throws {")
+	g.P("\t", visibility, "func readJSONL(remote: String, text: String) throws {")
 	g.P("\t\tlet q = dbtx()")
 	g.P("\t\tvar readError: Error?")
 	g.P("\t\tdo {")
@@ -517,4 +528,49 @@ func swiftPropertyNameFromGoName(value string) string {
 func escapeSwiftStringLiteralContent(value string) string {
 	replacer := strings.NewReplacer(`\`, `\\`, `"`, `\"`)
 	return replacer.Replace(value)
+}
+
+func (e swiftEmitter) visibilityPrefix() string {
+	if e.visibility == "" {
+		return ""
+	}
+	return e.visibility + " "
+}
+
+func ParseSwiftGeneratorOptions(rawOptions map[string]string) (SwiftGeneratorOptions, error) {
+	options := SwiftGeneratorOptions{}
+	for name, value := range rawOptions {
+		switch name {
+		case "Visibility":
+			if err := validateSwiftVisibility(value); err != nil {
+				return SwiftGeneratorOptions{}, err
+			}
+			options.Visibility = value
+		default:
+			return SwiftGeneratorOptions{}, fmt.Errorf("unsupported option %q", name)
+		}
+	}
+	return options, nil
+}
+
+func validateSwiftVisibility(value string) error {
+	switch value {
+	case "Public", "Internal", "Package":
+		return nil
+	default:
+		return fmt.Errorf("unsupported Visibility %q", value)
+	}
+}
+
+func swiftVisibilityKeyword(value string) string {
+	switch value {
+	case "Public":
+		return "public"
+	case "Internal":
+		return "internal"
+	case "Package":
+		return "package"
+	default:
+		return ""
+	}
 }

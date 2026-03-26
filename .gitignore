@@ -1,3 +1,4 @@
 /protoc-gen-proprdb
 /protoc-gen-proprdb-swift
 .build
+.swiftpm

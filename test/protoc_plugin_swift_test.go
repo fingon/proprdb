@@ -157,3 +157,51 @@ message Person {
 	assert.Check(t, strings.Contains(generatedText, `if data.hasNick {`))
 	assert.Check(t, strings.Contains(generatedText, `insertArguments.append(nil)`))
 }
+
+func TestProtocSwiftPluginSupportsPublicVisibility(t *testing.T) {
+	t.Helper()
+
+	if _, err := exec.LookPath("protoc"); err != nil {
+		t.Skipf("protoc not available: %v", err)
+	}
+
+	_, currentFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("determine current file path")
+	}
+	repoRoot := filepath.Dir(filepath.Dir(currentFile))
+
+	tempDir := t.TempDir()
+	pluginPath := filepath.Join(tempDir, "protoc-gen-proprdb-swift")
+	generatedDir := filepath.Join(tempDir, "gen")
+	err := os.MkdirAll(generatedDir, 0o755)
+	assert.NilError(t, err)
+
+	runCommand(t, repoRoot, nil, "go", "build", "-o", pluginPath, "./cmd/protoc-gen-proprdb-swift")
+
+	protoDir := filepath.Join(repoRoot, "test", "fixtures")
+	protoFile := filepath.Join(protoDir, "system.proto")
+	runCommand(
+		t,
+		tempDir,
+		nil,
+		"protoc",
+		"-I", protoDir,
+		"-I", repoRoot,
+		"--plugin=protoc-gen-proprdb-swift="+pluginPath,
+		"--proprdb-swift_out=Visibility=Public,paths=source_relative:"+generatedDir,
+		protoFile,
+	)
+
+	generatedFile := filepath.Join(generatedDir, "system.proprdb.pb.swift")
+	content, err := os.ReadFile(generatedFile)
+	assert.NilError(t, err)
+
+	generatedText := string(content)
+	assert.Check(t, strings.Contains(generatedText, `public let PersonTableName = "generatedtest_example_person"`))
+	assert.Check(t, strings.Contains(generatedText, `public struct PersonRow: Equatable {`))
+	assert.Check(t, strings.Contains(generatedText, `public struct PersonTable {`))
+	assert.Check(t, strings.Contains(generatedText, `public func initialize() throws {`))
+	assert.Check(t, strings.Contains(generatedText, `public struct CRUD {`))
+	assert.Check(t, strings.Contains(generatedText, `public func readJSONL(remote: String, text: String) throws {`))
+}
