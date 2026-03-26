@@ -480,7 +480,6 @@ func (e swiftEmitter) emitWrapper(file *protogen.File, models []messageModel) {
 	g.P("\t\t}")
 	g.P("\t}")
 	g.P("}")
-	g.P()
 }
 
 func swiftMessageTypeName(file *protogen.File, goName string) string {
