@@ -9,18 +9,40 @@
 #
 #
 
-BINARIES=protoc-gen-proprdb
+BINARIES=protoc-gen-proprdb protoc-gen-proprdb-swift
+SWIFT_ENV=HOME=/tmp SWIFTPM_MODULECACHE_OVERRIDE=/tmp/swiftpm-module-cache CLANG_MODULE_CACHE_PATH=/tmp/clang-module-cache
 
 .PHONY: all
-all: test $(BINARIES)
+all: test build
 
 protoc-gen-proprdb: $(wildcard **/*.go)
 	go build ./cmd/protoc-gen-proprdb
+
+protoc-gen-proprdb-swift: $(wildcard **/*.go)
+	go build ./cmd/protoc-gen-proprdb-swift
+
+.PHONY: build
+build: $(BINARIES) swift-build
+
+.PHONY: swift-fixtures
+swift-fixtures:
+	go build ./cmd/protoc-gen-proprdb-swift
+	mkdir -p test/swift/Sources/GeneratedSystem
+	protoc -I test/fixtures -I . --swift_out=test/swift/Sources/GeneratedSystem --plugin=protoc-gen-proprdb-swift=./protoc-gen-proprdb-swift --proprdb-swift_out=paths=source_relative:test/swift/Sources/GeneratedSystem test/fixtures/system.proto
+
+.PHONY: swift-test
+swift-test: swift-fixtures
+	cd test/swift && $(SWIFT_ENV) swift test
+
+.PHONY: swift-build
+swift-build: swift-fixtures
+	cd test/swift && $(SWIFT_ENV) swift build
 
 .PHONY: test
 test:
 	go test ./...
 	cd test/system && go test ./...
+	$(MAKE) swift-test
 
 .PHONY: lint
 lint:
