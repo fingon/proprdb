@@ -3,14 +3,15 @@
 #
 # Copyright (c) 2026 Markus Stenberg
 #
-# Last modified: Thu Feb 26 09:32:52 2026 mstenber
+# Last modified: Fri Jul 17 09:53:07 2026 mstenber
 # Last modified: Wed Feb 25 13:32:14 2026 mstenber
-# Edit time:     3 min
+# Edit time:     5 min
 #
 #
 
 BINARIES=protoc-gen-proprdb protoc-gen-proprdb-swift
 SWIFT_ENV=HOME=/tmp SWIFTPM_MODULECACHE_OVERRIDE=/tmp/swiftpm-module-cache CLANG_MODULE_CACHE_PATH=/tmp/clang-module-cache
+SWIFT_ARGS=
 
 .PHONY: all
 all: test build
@@ -32,11 +33,11 @@ swift-fixtures:
 
 .PHONY: swift-test
 swift-test: swift-fixtures
-	cd test/swift && $(SWIFT_ENV) swift test
+	cd test/swift && $(SWIFT_ENV) swift test $(SWIFT_ARGS)
 
 .PHONY: swift-build
 swift-build: swift-fixtures
-	cd test/swift && $(SWIFT_ENV) swift build
+	cd test/swift && $(SWIFT_ENV) swift build $(SWIFT_ARGS)
 
 .PHONY: test
 test:
