@@ -67,3 +67,10 @@ check: lint verify-generated test build
 .PHONY: lint
 lint:
 	go tool golangci-lint run
+
+.PHONY: release-minor release-patch
+release-minor:
+	./scripts/release minor
+
+release-patch:
+	./scripts/release patch

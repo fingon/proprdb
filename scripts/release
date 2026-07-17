@@ -1,0 +1,87 @@
+#!/bin/sh
+
+set -eu
+
+remote=origin
+tag_prefix=v
+
+usage() {
+	echo "Usage: $0 [minor|patch]" >&2
+	exit 2
+}
+
+bump=${1:-}
+if [ -z "$bump" ]; then
+	printf "Release type (minor/patch): "
+	read -r bump
+fi
+
+case "$bump" in
+minor|patch)
+	;;
+*)
+	usage
+	;;
+esac
+
+if [ "$#" -gt 1 ]; then
+	usage
+fi
+
+git rev-parse --is-inside-work-tree >/dev/null
+
+if [ -n "$(git status --porcelain)" ]; then
+	echo "Refusing to release from a dirty worktree." >&2
+	exit 1
+fi
+
+latest_tag=$(
+	git tag --list "${tag_prefix}[0-9]*.[0-9]*.[0-9]*" --sort=-version:refname |
+		while IFS= read -r candidate; do
+			version=${candidate#"$tag_prefix"}
+			if ! printf "%s\n" "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+				continue
+			fi
+			printf "%s\n" "$candidate"
+			break
+		done
+)
+
+if [ -z "$latest_tag" ]; then
+	echo "No semantic version tag matching ${tag_prefix}MAJOR.MINOR.PATCH was found." >&2
+	exit 1
+fi
+
+version=${latest_tag#"$tag_prefix"}
+major=${version%%.*}
+remainder=${version#*.}
+minor=${remainder%%.*}
+patch=${remainder#*.}
+
+case "$bump" in
+minor)
+	minor=$((minor + 1))
+	patch=0
+	;;
+patch)
+	patch=$((patch + 1))
+	;;
+esac
+
+new_tag="${tag_prefix}${major}.${minor}.${patch}"
+if git rev-parse --verify --quiet "refs/tags/$new_tag" >/dev/null; then
+	echo "Tag $new_tag already exists." >&2
+	exit 1
+fi
+
+git remote get-url "$remote" >/dev/null
+
+echo "Creating annotated tag $new_tag from $latest_tag."
+git tag --annotate "$new_tag" --message "Release $new_tag"
+
+if ! git push "$remote" "$new_tag"; then
+	echo "Failed to push $new_tag; the local tag was kept." >&2
+	exit 1
+fi
+
+echo "Released $new_tag."
