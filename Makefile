@@ -11,10 +11,10 @@
 
 BINARIES=protoc-gen-proprdb protoc-gen-proprdb-swift
 SWIFT_ENV=HOME=/tmp SWIFTPM_MODULECACHE_OVERRIDE=/tmp/swiftpm-module-cache CLANG_MODULE_CACHE_PATH=/tmp/clang-module-cache
-SWIFT_ARGS=
+SWIFT_ARGS?=--disable-sandbox
 
 .PHONY: all
-all: test build
+all: lint verify-generated test build
 
 protoc-gen-proprdb: $(wildcard **/*.go)
 	go build ./cmd/protoc-gen-proprdb
@@ -22,14 +22,25 @@ protoc-gen-proprdb: $(wildcard **/*.go)
 protoc-gen-proprdb-swift: $(wildcard **/*.go)
 	go build ./cmd/protoc-gen-proprdb-swift
 
-.PHONY: build
+.PHONY: protoc-gen-proprdb protoc-gen-proprdb-swift build
 build: $(BINARIES) swift-build
+
+.PHONY: generate
+generate: $(BINARIES)
+	protoc -I test/fixtures -I . --go_out=test/system --go_opt=paths=source_relative --plugin=protoc-gen-proprdb=./protoc-gen-proprdb --proprdb_out=paths=source_relative:test/system test/fixtures/system.proto
+	mkdir -p test/swift/Sources/GeneratedSystem
+	protoc -I test/fixtures -I . --plugin=protoc-gen-proprdb-swift=./protoc-gen-proprdb-swift --proprdb-swift_out=paths=source_relative:test/swift/Sources/GeneratedSystem test/fixtures/system.proto
+	go test ./test -update
+
+.PHONY: verify-generated
+verify-generated:
+	git diff --exit-code -- test/system/system.proprdb.pb.go test/swift/Sources/GeneratedSystem/system.proprdb.pb.swift test/testdata
 
 .PHONY: swift-fixtures
 swift-fixtures:
 	go build ./cmd/protoc-gen-proprdb-swift
 	mkdir -p test/swift/Sources/GeneratedSystem
-	protoc -I test/fixtures -I . --swift_out=test/swift/Sources/GeneratedSystem --plugin=protoc-gen-proprdb-swift=./protoc-gen-proprdb-swift --proprdb-swift_out=paths=source_relative:test/swift/Sources/GeneratedSystem test/fixtures/system.proto
+	protoc -I test/fixtures -I . --plugin=protoc-gen-proprdb-swift=./protoc-gen-proprdb-swift --proprdb-swift_out=paths=source_relative:test/swift/Sources/GeneratedSystem test/fixtures/system.proto
 
 .PHONY: swift-test
 swift-test: swift-fixtures
@@ -44,6 +55,14 @@ test:
 	go test ./...
 	cd test/system && go test ./...
 	$(MAKE) swift-test
+
+.PHONY: race
+race:
+	go test -race ./...
+	cd test/system && go test -race ./...
+
+.PHONY: check
+check: lint verify-generated test build
 
 .PHONY: lint
 lint:

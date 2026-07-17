@@ -7,7 +7,7 @@ import ProprDBSwiftRuntime
 let PersonTableName = "generatedtest_example_person"
 private let PersonTableNameQuoted = quoteSQLiteIdentifier(PersonTableName)
 let PersonTypeName = "generatedtest.example.Person"
-let PersonProjectionSchema = "name:string;age:int64;idx:name;idx:name,age"
+let PersonProjectionSchema = "name:string;age:int64"
 private let PersonCreateTableSQL = "CREATE TABLE IF NOT EXISTS \"generatedtest_example_person\" (\"id\" TEXT PRIMARY KEY, \"at_ns\" INTEGER NOT NULL, \"data\" BLOB NOT NULL, \"name\" TEXT NOT NULL DEFAULT '', \"age\" INTEGER NOT NULL DEFAULT 0)"
 private let PersonInsertSQL = "INSERT INTO \"generatedtest_example_person\" (\"id\", \"at_ns\", \"data\", \"name\", \"age\") VALUES (?, ?, ?, ?, ?)"
 private let PersonUpsertSQL = "INSERT INTO \"generatedtest_example_person\" (\"id\", \"at_ns\", \"data\", \"name\", \"age\") VALUES (?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET \"at_ns\" = excluded.\"at_ns\", \"data\" = excluded.\"data\", \"name\" = excluded.\"name\", \"age\" = excluded.\"age\""
@@ -16,7 +16,7 @@ private let PersonCreateIndexSQL1 = "CREATE INDEX IF NOT EXISTS \"idx_generatedt
 private let PersonCreateIndexSQL2 = "CREATE INDEX IF NOT EXISTS \"idx_generatedtest_example_person__name_age\" ON \"generatedtest_example_person\" (\"name\", \"age\")"
 private let PersonReprojectSQL = "UPDATE \"generatedtest_example_person\" SET \"name\" = ?, \"age\" = ? WHERE id = ?"
 
-struct PersonRow: Equatable {
+struct PersonRow: Equatable, Sendable {
 	var id: String
 	var atNs: Int64
 	var data: Generatedtest_Example_Person
@@ -105,13 +105,17 @@ struct PersonTable {
 		}
 		try validateUUID(id)
 		try validateForWrite(data)
-		let atNs = nowNs()
 		let dataBytes = try data.serializedData()
-		try q.execute("DELETE FROM \(_deletedTableName) WHERE table_name = ? AND id = ?", arguments: [PersonTableName, id])
+		var atNs: Int64 = 0
 		var insertArguments: [Any?] = [id, atNs, dataBytes]
 		insertArguments.append(data.name)
 		insertArguments.append(data.age)
-		try q.execute(PersonInsertSQL, arguments: insertArguments)
+		try q.withTransaction { transaction in
+			atNs = try nextObjectAtNs(transaction, tableName: PersonTableName, objectID: id)
+			insertArguments[1] = atNs
+			try transaction.execute("DELETE FROM \(_deletedTableName) WHERE table_name = ? AND id = ?", arguments: [PersonTableName, id])
+			try transaction.execute(PersonInsertSQL, arguments: insertArguments)
+		}
 		return PersonRow(id: id, atNs: atNs, data: data)
 	}
 
@@ -121,13 +125,17 @@ struct PersonTable {
 		}
 		try validateUUID(id)
 		try validateForWrite(data)
-		let atNs = nowNs()
 		let dataBytes = try data.serializedData()
-		try q.execute("DELETE FROM \(_deletedTableName) WHERE table_name = ? AND id = ?", arguments: [PersonTableName, id])
+		var atNs: Int64 = 0
 		var updateArguments: [Any?] = [id, atNs, dataBytes]
 		updateArguments.append(data.name)
 		updateArguments.append(data.age)
-		try q.execute(PersonUpsertSQL, arguments: updateArguments)
+		try q.withTransaction { transaction in
+			atNs = try nextObjectAtNs(transaction, tableName: PersonTableName, objectID: id)
+			updateArguments[1] = atNs
+			try transaction.execute("DELETE FROM \(_deletedTableName) WHERE table_name = ? AND id = ?", arguments: [PersonTableName, id])
+			try transaction.execute(PersonUpsertSQL, arguments: updateArguments)
+		}
 		return PersonRow(id: id, atNs: atNs, data: data)
 	}
 
@@ -139,9 +147,11 @@ struct PersonTable {
 		if id.isEmpty {
 			throw ProprDBError("empty id")
 		}
-		let atNs = nowNs()
-		try q.execute("INSERT INTO \(_deletedTableName) (table_name, id, at_ns) VALUES (?, ?, ?) ON CONFLICT(table_name, id) DO UPDATE SET at_ns = excluded.at_ns", arguments: [PersonTableName, id, atNs])
-		try q.execute("DELETE FROM " + PersonTableNameQuoted + " WHERE id = ?", arguments: [id])
+		try q.withTransaction { transaction in
+			let atNs = try nextObjectAtNs(transaction, tableName: PersonTableName, objectID: id)
+			try transaction.execute("INSERT INTO \(_deletedTableName) (table_name, id, at_ns) VALUES (?, ?, ?) ON CONFLICT(table_name, id) DO UPDATE SET at_ns = excluded.at_ns", arguments: [PersonTableName, id, atNs])
+			try transaction.execute("DELETE FROM " + PersonTableNameQuoted + " WHERE id = ?", arguments: [id])
+		}
 	}
 
 	func deleteRow(_ row: PersonRow) throws {
@@ -213,7 +223,7 @@ private let NoteUpsertSQL = "INSERT INTO \"generatedtest_example_note\" (\"id\",
 private let NoteGeneratedIndexPrefix = "idx_generatedtest_example_note__"
 private let NoteReprojectSQL = "UPDATE \"generatedtest_example_note\" SET \"text\" = ? WHERE id = ?"
 
-struct NoteRow: Equatable {
+struct NoteRow: Equatable, Sendable {
 	var id: String
 	var atNs: Int64
 	var data: Generatedtest_Example_Note
@@ -290,12 +300,16 @@ struct NoteTable {
 			throw ProprDBError("empty id")
 		}
 		try validateUUID(id)
-		let atNs = nowNs()
 		let dataBytes = try data.serializedData()
-		try q.execute("DELETE FROM \(_deletedTableName) WHERE table_name = ? AND id = ?", arguments: [NoteTableName, id])
+		var atNs: Int64 = 0
 		var insertArguments: [Any?] = [id, atNs, dataBytes]
 		insertArguments.append(data.text)
-		try q.execute(NoteInsertSQL, arguments: insertArguments)
+		try q.withTransaction { transaction in
+			atNs = try nextObjectAtNs(transaction, tableName: NoteTableName, objectID: id)
+			insertArguments[1] = atNs
+			try transaction.execute("DELETE FROM \(_deletedTableName) WHERE table_name = ? AND id = ?", arguments: [NoteTableName, id])
+			try transaction.execute(NoteInsertSQL, arguments: insertArguments)
+		}
 		return NoteRow(id: id, atNs: atNs, data: data)
 	}
 
@@ -304,12 +318,16 @@ struct NoteTable {
 			throw ProprDBError("empty id")
 		}
 		try validateUUID(id)
-		let atNs = nowNs()
 		let dataBytes = try data.serializedData()
-		try q.execute("DELETE FROM \(_deletedTableName) WHERE table_name = ? AND id = ?", arguments: [NoteTableName, id])
+		var atNs: Int64 = 0
 		var updateArguments: [Any?] = [id, atNs, dataBytes]
 		updateArguments.append(data.text)
-		try q.execute(NoteUpsertSQL, arguments: updateArguments)
+		try q.withTransaction { transaction in
+			atNs = try nextObjectAtNs(transaction, tableName: NoteTableName, objectID: id)
+			updateArguments[1] = atNs
+			try transaction.execute("DELETE FROM \(_deletedTableName) WHERE table_name = ? AND id = ?", arguments: [NoteTableName, id])
+			try transaction.execute(NoteUpsertSQL, arguments: updateArguments)
+		}
 		return NoteRow(id: id, atNs: atNs, data: data)
 	}
 
@@ -321,9 +339,11 @@ struct NoteTable {
 		if id.isEmpty {
 			throw ProprDBError("empty id")
 		}
-		let atNs = nowNs()
-		try q.execute("INSERT INTO \(_deletedTableName) (table_name, id, at_ns) VALUES (?, ?, ?) ON CONFLICT(table_name, id) DO UPDATE SET at_ns = excluded.at_ns", arguments: [NoteTableName, id, atNs])
-		try q.execute("DELETE FROM " + NoteTableNameQuoted + " WHERE id = ?", arguments: [id])
+		try q.withTransaction { transaction in
+			let atNs = try nextObjectAtNs(transaction, tableName: NoteTableName, objectID: id)
+			try transaction.execute("INSERT INTO \(_deletedTableName) (table_name, id, at_ns) VALUES (?, ?, ?) ON CONFLICT(table_name, id) DO UPDATE SET at_ns = excluded.at_ns", arguments: [NoteTableName, id, atNs])
+			try transaction.execute("DELETE FROM " + NoteTableNameQuoted + " WHERE id = ?", arguments: [id])
+		}
 	}
 
 	func deleteRow(_ row: NoteRow) throws {
@@ -492,5 +512,51 @@ struct CRUD {
 		if let readError {
 			throw readError
 		}
+	}
+}
+
+extension ProprDBActor {
+	func initialize() throws {
+		try withDatabase { database in try CRUD(database).initialize() }
+	}
+
+	func selectPerson() throws -> [PersonRow] {
+		try withDatabase { database in try PersonTable(database).select() }
+	}
+
+	func insertPerson(_ data: Generatedtest_Example_Person) throws -> PersonRow {
+		try withDatabase { database in try PersonTable(database).insert(data) }
+	}
+
+	func updatePersonByID(_ id: String, data: Generatedtest_Example_Person) throws -> PersonRow {
+		try withDatabase { database in try PersonTable(database).updateByID(id, data: data) }
+	}
+
+	func deletePersonByID(_ id: String) throws {
+		try withDatabase { database in try PersonTable(database).deleteByID(id) }
+	}
+
+	func selectNote() throws -> [NoteRow] {
+		try withDatabase { database in try NoteTable(database).select() }
+	}
+
+	func insertNote(_ data: Generatedtest_Example_Note) throws -> NoteRow {
+		try withDatabase { database in try NoteTable(database).insert(data) }
+	}
+
+	func updateNoteByID(_ id: String, data: Generatedtest_Example_Note) throws -> NoteRow {
+		try withDatabase { database in try NoteTable(database).updateByID(id, data: data) }
+	}
+
+	func deleteNoteByID(_ id: String) throws {
+		try withDatabase { database in try NoteTable(database).deleteByID(id) }
+	}
+
+	func writeJSONL(remote: String) throws -> String {
+		try withDatabase { database in try CRUD(database).writeJSONL(remote: remote) }
+	}
+
+	func readJSONL(remote: String, text: String) throws {
+		try withDatabase { database in try CRUD(database).readJSONL(remote: remote, text: text) }
 	}
 }

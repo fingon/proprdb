@@ -199,7 +199,7 @@ func TestProtocSwiftPluginSupportsPublicVisibility(t *testing.T) {
 
 	generatedText := string(content)
 	assert.Check(t, strings.Contains(generatedText, `public let PersonTableName = "generatedtest_example_person"`))
-	assert.Check(t, strings.Contains(generatedText, `public struct PersonRow: Equatable {`))
+	assert.Check(t, strings.Contains(generatedText, `public struct PersonRow: Equatable, Sendable {`))
 	assert.Check(t, strings.Contains(generatedText, `public struct PersonTable {`))
 	assert.Check(t, strings.Contains(generatedText, `public func initialize() throws {`))
 	assert.Check(t, strings.Contains(generatedText, `public struct CRUD {`))

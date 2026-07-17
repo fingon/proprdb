@@ -15,7 +15,7 @@ final class RuntimeIntrospectionTests: XCTestCase {
         XCTAssertEqual(introspection.count, 1)
         XCTAssertEqual(introspection[0].descriptor.tableName, "thing")
         XCTAssertEqual(introspection[0].objectCount, 3)
-        XCTAssertEqual(introspection[0].diskUsageBytes, 5)
+        XCTAssertEqual(introspection[0].payloadBytes, 5)
     }
 
     func testRTIntrospectTablesFallbackForNoDataColumn() throws {
@@ -37,7 +37,7 @@ final class RuntimeIntrospectionTests: XCTestCase {
             GeneratedTableDescriptor(tableName: "thing", typeName: "example.Thing", isCore: false, syncEnabled: true),
         ])
         XCTAssertEqual(introspection[0].objectCount, 0)
-        XCTAssertEqual(introspection[0].diskUsageBytes, 0)
+        XCTAssertEqual(introspection[0].payloadBytes, 0)
     }
 
     func testRTIntrospectTablesMissingTableErrors() throws {

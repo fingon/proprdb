@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	rt "github.com/fingon/proprdb/rt"
 	_ "github.com/mattn/go-sqlite3"
 	"gotest.tools/v3/assert"
 	is "gotest.tools/v3/assert/cmp"
@@ -43,9 +44,9 @@ func TestGeneratedJSONLSync(t *testing.T) {
 		assert.NilError(t, targetDB.Close())
 	})
 
-	source := NewCRUD(sourceDB)
+	source := NewCRUD(rt.WrapDB(sourceDB))
 	assert.NilError(t, source.Init())
-	target := NewCRUD(targetDB)
+	target := NewCRUD(rt.WrapDB(targetDB))
 	assert.NilError(t, target.Init())
 
 	personRow, err := source.Person.Insert(&Person{Name: "Ada", Age: 37})
@@ -196,9 +197,9 @@ func TestGeneratedJSONLEmptyRemoteNoSyncEntries(t *testing.T) {
 		assert.NilError(t, targetDB.Close())
 	})
 
-	source := NewCRUD(sourceDB)
+	source := NewCRUD(rt.WrapDB(sourceDB))
 	assert.NilError(t, source.Init())
-	target := NewCRUD(targetDB)
+	target := NewCRUD(rt.WrapDB(targetDB))
 	assert.NilError(t, target.Init())
 
 	personRow, err := source.Person.Insert(&Person{Name: "Empty Remote", Age: 1})
@@ -254,7 +255,7 @@ func TestGeneratedJSONLUnknownTypesAreCompacted(t *testing.T) {
 		assert.NilError(t, db.Close())
 	})
 
-	crud := NewCRUD(db)
+	crud := NewCRUD(rt.WrapDB(db))
 	assert.NilError(t, crud.Init())
 
 	firstLine := fmt.Sprintf("{\"id\":%q,\"atNs\":10,\"data\":{\"@type\":%q,\"payload\":\"old\"}}\n", unknownID, typeURLPrefix+unknownTypeName)
@@ -281,7 +282,7 @@ func TestGeneratedInitDrainsUnknownRowsForKnownType(t *testing.T) {
 		assert.NilError(t, db.Close())
 	})
 
-	crud := NewCRUD(db)
+	crud := NewCRUD(rt.WrapDB(db))
 	assert.NilError(t, crud.Init())
 
 	personAnyJSON := fmt.Sprintf("{\"@type\":%q,\"name\":\"Recovered\",\"age\":\"44\"}", typeURLPrefix+PersonTypeName)

@@ -19,7 +19,8 @@ func TestRTIntrospectTablesUsesDataBlobWhenPresent(t *testing.T) {
 	t.Cleanup(func() {
 		assert.NilError(t, db.Close())
 	})
-	assert.NilError(t, rt.EnsureCoreTables(db))
+	adapter := rt.WrapDB(db)
+	assert.NilError(t, rt.EnsureCoreTables(adapter))
 	_, err = db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS "thing" ("id" TEXT PRIMARY KEY, "at_ns" INTEGER NOT NULL, "data" BLOB NOT NULL)`)
 	assert.NilError(t, err)
 	_, err = db.ExecContext(ctx, `INSERT INTO "thing" ("id", "at_ns", "data") VALUES ('a', 1, X'0102'), ('b', 2, X''), ('c', 3, X'ffffff')`)
@@ -28,12 +29,12 @@ func TestRTIntrospectTablesUsesDataBlobWhenPresent(t *testing.T) {
 	descriptors := []rt.GeneratedTableDescriptor{
 		{TableName: "thing", TypeName: "example.Thing", IsCore: false, SyncEnabled: true},
 	}
-	introspectionRows, err := rt.IntrospectTables(db, descriptors)
+	introspectionRows, err := rt.IntrospectTables(adapter, descriptors)
 	assert.NilError(t, err)
 	assert.Check(t, is.Len(introspectionRows, 1))
 	assert.Check(t, is.Equal(introspectionRows[0].Descriptor.TableName, "thing"))
 	assert.Check(t, is.Equal(introspectionRows[0].ObjectCount, int64(3)))
-	assert.Check(t, is.Equal(introspectionRows[0].DiskUsageBytes, int64(5)))
+	assert.Check(t, is.Equal(introspectionRows[0].PayloadBytes, int64(5)))
 }
 
 func TestRTIntrospectTablesFallbackForNoDataColumn(t *testing.T) {
@@ -43,12 +44,13 @@ func TestRTIntrospectTablesFallbackForNoDataColumn(t *testing.T) {
 	t.Cleanup(func() {
 		assert.NilError(t, db.Close())
 	})
-	assert.NilError(t, rt.EnsureCoreTables(db))
+	adapter := rt.WrapDB(db)
+	assert.NilError(t, rt.EnsureCoreTables(adapter))
 	_, err = db.ExecContext(ctx, `INSERT INTO "_deleted" ("table_name", "id", "at_ns") VALUES ('person', 'one', 123), ('note', 'two', 7)`)
 	assert.NilError(t, err)
 
 	descriptors := []rt.GeneratedTableDescriptor{{TableName: rt.CoreTableDeletedName, IsCore: true, SyncEnabled: false}}
-	introspectionRows, err := rt.IntrospectTables(db, descriptors)
+	introspectionRows, err := rt.IntrospectTables(adapter, descriptors)
 	assert.NilError(t, err)
 	assert.Check(t, is.Len(introspectionRows, 1))
 	assert.Check(t, is.Equal(introspectionRows[0].ObjectCount, int64(2)))
@@ -59,7 +61,7 @@ func TestRTIntrospectTablesFallbackForNoDataColumn(t *testing.T) {
 		`SELECT COALESCE(SUM(COALESCE(LENGTH(CAST("table_name" AS BLOB)), 0) + COALESCE(LENGTH(CAST("id" AS BLOB)), 0) + COALESCE(LENGTH(CAST("at_ns" AS BLOB)), 0)), 0) FROM "_deleted"`,
 	).Scan(&expectedBytes)
 	assert.NilError(t, err)
-	assert.Check(t, is.Equal(introspectionRows[0].DiskUsageBytes, expectedBytes))
+	assert.Check(t, is.Equal(introspectionRows[0].PayloadBytes, expectedBytes))
 }
 
 func TestRTIntrospectTablesEmptyTableReturnsZero(t *testing.T) {
@@ -72,11 +74,11 @@ func TestRTIntrospectTablesEmptyTableReturnsZero(t *testing.T) {
 	_, err = db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS "thing" ("id" TEXT PRIMARY KEY, "at_ns" INTEGER NOT NULL, "data" BLOB NOT NULL)`)
 	assert.NilError(t, err)
 
-	introspectionRows, err := rt.IntrospectTables(db, []rt.GeneratedTableDescriptor{{TableName: "thing", TypeName: "example.Thing", IsCore: false, SyncEnabled: true}})
+	introspectionRows, err := rt.IntrospectTables(rt.WrapDB(db), []rt.GeneratedTableDescriptor{{TableName: "thing", TypeName: "example.Thing", IsCore: false, SyncEnabled: true}})
 	assert.NilError(t, err)
 	assert.Check(t, is.Len(introspectionRows, 1))
 	assert.Check(t, is.Equal(introspectionRows[0].ObjectCount, int64(0)))
-	assert.Check(t, is.Equal(introspectionRows[0].DiskUsageBytes, int64(0)))
+	assert.Check(t, is.Equal(introspectionRows[0].PayloadBytes, int64(0)))
 }
 
 func TestRTIntrospectTablesMissingTableErrors(t *testing.T) {
@@ -86,7 +88,7 @@ func TestRTIntrospectTablesMissingTableErrors(t *testing.T) {
 		assert.NilError(t, db.Close())
 	})
 
-	_, err = rt.IntrospectTables(db, []rt.GeneratedTableDescriptor{{TableName: "missing_table", TypeName: "example.Missing", IsCore: false, SyncEnabled: true}})
+	_, err = rt.IntrospectTables(rt.WrapDB(db), []rt.GeneratedTableDescriptor{{TableName: "missing_table", TypeName: "example.Missing", IsCore: false, SyncEnabled: true}})
 	assert.Assert(t, err != nil)
 	assert.Check(t, strings.Contains(err.Error(), "count objects for table missing_table"))
 }

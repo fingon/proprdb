@@ -7,7 +7,8 @@
 
 ## Goals
 
-- Preserve long-term readability of personal metadata and its change history.
+- Preserve long-term readability of personal metadata through durable JSONL
+  exports.
 - Keep the interchange format simple and implementation-independent.
 - Use strongly typed schemas for object payloads.
 
@@ -26,6 +27,10 @@ Updates can be received in any order. Conflict resolution is timestamp-based:
 
 - Newer `atNs` wins.
 - If timestamps are equal, the update should be treated as idempotent and payload-equal.
+
+SQLite stores only the latest state of each object. Change history exists only
+in JSONL exports retained by the application; ProprDB does not keep a local
+append-only history.
 
 ## Object model
 
@@ -74,7 +79,10 @@ Each object table stores:
 - `remote` (`TEXT NOT NULL`)
 - primary key: (`object_id`, `table_name`, `remote`)
 
-Implementations may also project selected typed fields from `data` into additional tables for queryability.
+Implementations may also project selected typed fields from `data` into
+additional columns for queryability. Initialization owns only ProprDB core
+tables and generated tables for message types supported by the current
+application. Other SQLite tables are ignored.
 
 ## JSONL sync API semantics
 

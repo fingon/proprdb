@@ -25,14 +25,15 @@ func main() {
 			return err
 		}
 
+		files := make([]*protogen.File, 0)
 		for _, file := range plugin.Files {
 			if !file.Generate {
 				continue
 			}
-
-			if err := proprdbgen.GenerateSwiftFile(plugin, file, options); err != nil {
-				return fmt.Errorf("generate %s: %w", file.Desc.Path(), err)
-			}
+			files = append(files, file)
+		}
+		if err := proprdbgen.GenerateSwiftFiles(plugin, files, options); err != nil {
+			return fmt.Errorf("generate Swift module: %w", err)
 		}
 
 		return nil

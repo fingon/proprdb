@@ -10,7 +10,10 @@ message Person {
   option (com.github.fingon.proprdb.validate_write) = true;
   option (com.github.fingon.proprdb.allow_custom_id_insert) = true;
   option (com.github.fingon.proprdb.indexes) = {fields: "name"};
-  option (com.github.fingon.proprdb.indexes) = {fields: "name" fields: "age"};
+  option (com.github.fingon.proprdb.indexes) = {
+    fields: "name"
+    fields: "age"
+  };
   string name = 1 [(com.github.fingon.proprdb.external) = true];
   int64 age = 2 [(com.github.fingon.proprdb.external) = true];
 }

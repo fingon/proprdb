@@ -24,7 +24,7 @@ func TestGeneratedCRUD(t *testing.T) {
 		assert.NilError(t, db.Close())
 	})
 
-	crud := NewCRUD(db)
+	crud := NewCRUD(rt.WrapDB(db))
 	assert.NilError(t, crud.Init())
 
 	indexesAfterInit := tableIndexNamesByName(t, ctx, db, PersonTableName)
@@ -133,7 +133,7 @@ func TestGeneratedCRUD(t *testing.T) {
 	tx, err := db.BeginTx(ctx, nil)
 	assert.NilError(t, err)
 
-	txTable := NewPersonTable(tx)
+	txTable := NewPersonTable(rt.WrapTx(tx))
 	if _, err := txTable.Insert(&Person{Name: "Tx User", Age: 41}); err != nil {
 		rollbackErr := tx.Rollback()
 		assert.NilError(t, rollbackErr)
@@ -156,7 +156,7 @@ func TestGeneratedCRUDTableDescriptors(t *testing.T) {
 		assert.NilError(t, db.Close())
 	})
 
-	crud := NewCRUD(db)
+	crud := NewCRUD(rt.WrapDB(db))
 	descriptors := crud.TableDescriptors()
 	expected := []rt.GeneratedTableDescriptor{
 		{TableName: PersonTableName, TypeName: PersonTypeName, IsCore: false, SyncEnabled: true},

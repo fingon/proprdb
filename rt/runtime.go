@@ -10,7 +10,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"regexp"
+	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"google.golang.org/protobuf/encoding/protojson"
@@ -23,13 +26,142 @@ const (
 	CoreTableSyncName        = "_sync"
 	CoreTableSchemaStateName = "_proprdb_schema"
 	CoreTableUnknownName     = "_unknown_types"
+	CoreTableUnknownSyncName = "_unknown_sync"
+	CoreTableMetadataName    = "_proprdb_metadata"
+	CoreTableExportBatchName = "_export_batches"
+	CoreTableExportEntryName = "_export_batch_entries"
 	dataColumnName           = "data"
+	DefaultBatchRecords      = 256
+	metadataDatabaseIDKey    = "database_id"
+	unknownBatchTablePrefix  = "@unknown:"
 )
 
 type DBTX interface {
 	ExecContext(context.Context, string, ...any) (sql.Result, error)
 	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
 	QueryRowContext(context.Context, string, ...any) *sql.Row
+	WithTransaction(context.Context, func(DBTX) error) error
+}
+
+type DBAdapter struct {
+	db *sql.DB
+}
+
+type ConnAdapter struct {
+	conn *sql.Conn
+}
+
+type TxAdapter struct {
+	tx *sql.Tx
+}
+
+var savepointSequence atomic.Uint64
+
+func WrapDB(db *sql.DB) DBTX {
+	return &DBAdapter{db: db}
+}
+
+func WrapConn(conn *sql.Conn) DBTX {
+	return &ConnAdapter{conn: conn}
+}
+
+func WrapTx(tx *sql.Tx) DBTX {
+	return &TxAdapter{tx: tx}
+}
+
+func (a *DBAdapter) ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error) {
+	return a.db.ExecContext(ctx, query, args...)
+}
+
+func (a *DBAdapter) QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
+	return a.db.QueryContext(ctx, query, args...)
+}
+
+func (a *DBAdapter) QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row {
+	return a.db.QueryRowContext(ctx, query, args...)
+}
+
+func (a *DBAdapter) WithTransaction(ctx context.Context, body func(DBTX) error) error {
+	if a == nil || a.db == nil {
+		return errors.New("nil database adapter")
+	}
+	tx, err := a.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin transaction: %w", err)
+	}
+	return finishSQLTransaction(tx, body(&TxAdapter{tx: tx}))
+}
+
+func (a *ConnAdapter) ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error) {
+	return a.conn.ExecContext(ctx, query, args...)
+}
+
+func (a *ConnAdapter) QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
+	return a.conn.QueryContext(ctx, query, args...)
+}
+
+func (a *ConnAdapter) QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row {
+	return a.conn.QueryRowContext(ctx, query, args...)
+}
+
+func (a *ConnAdapter) WithTransaction(ctx context.Context, body func(DBTX) error) error {
+	if a == nil || a.conn == nil {
+		return errors.New("nil connection adapter")
+	}
+	tx, err := a.conn.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin transaction: %w", err)
+	}
+	return finishSQLTransaction(tx, body(&TxAdapter{tx: tx}))
+}
+
+func (a *TxAdapter) ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error) {
+	return a.tx.ExecContext(ctx, query, args...)
+}
+
+func (a *TxAdapter) QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
+	return a.tx.QueryContext(ctx, query, args...)
+}
+
+func (a *TxAdapter) QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row {
+	return a.tx.QueryRowContext(ctx, query, args...)
+}
+
+func (a *TxAdapter) WithTransaction(ctx context.Context, body func(DBTX) error) error {
+	if a == nil || a.tx == nil {
+		return errors.New("nil transaction adapter")
+	}
+	savepoint := "proprdb_" + strconv.FormatUint(savepointSequence.Add(1), 10)
+	if _, err := a.tx.ExecContext(ctx, "SAVEPOINT "+savepoint); err != nil {
+		return fmt.Errorf("create savepoint: %w", err)
+	}
+	bodyErr := body(a)
+	if bodyErr != nil {
+		if _, rollbackErr := a.tx.ExecContext(ctx, "ROLLBACK TO "+savepoint); rollbackErr != nil {
+			return fmt.Errorf("%w (additionally, rollback savepoint: %v)", bodyErr, rollbackErr)
+		}
+		if _, releaseErr := a.tx.ExecContext(ctx, "RELEASE "+savepoint); releaseErr != nil {
+			return fmt.Errorf("%w (additionally, release savepoint: %v)", bodyErr, releaseErr)
+		}
+		return bodyErr
+	}
+	if _, err := a.tx.ExecContext(ctx, "RELEASE "+savepoint); err != nil {
+		return fmt.Errorf("release savepoint: %w", err)
+	}
+	return nil
+}
+
+func finishSQLTransaction(tx *sql.Tx, bodyErr error) error {
+	if bodyErr != nil {
+		if rollbackErr := tx.Rollback(); rollbackErr != nil {
+			return fmt.Errorf("%w (additionally, rollback transaction: %v)", bodyErr, rollbackErr)
+		}
+		return bodyErr
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit transaction: %w", err)
+	}
+	return nil
 }
 
 type JSONLRecord struct {
@@ -37,6 +169,234 @@ type JSONLRecord struct {
 	Deleted bool            `json:"deleted,omitempty"`
 	AtNs    int64           `json:"atNs"`
 	Data    json.RawMessage `json:"data"`
+}
+
+type ConflictError struct {
+	TypeName      string
+	ID            string
+	AtNs          int64
+	LocalDeleted  bool
+	RemoteDeleted bool
+}
+
+func (e *ConflictError) Error() string {
+	return fmt.Sprintf("conflicting state type=%s id=%s at_ns=%d local_deleted=%t remote_deleted=%t", e.TypeName, e.ID, e.AtNs, e.LocalDeleted, e.RemoteDeleted)
+}
+
+type JSONLCheckpoint struct {
+	Version    int    `json:"version"`
+	DatabaseID string `json:"databaseId"`
+	BatchID    string `json:"batchId"`
+}
+
+type UnknownExportRecord struct {
+	TypeName string
+	Record   JSONLRecord
+}
+
+func UnknownExportRecordsContext(ctx context.Context, q DBTX, remote string) (records []UnknownExportRecord, err error) {
+	query := `SELECT unknown_row.type_name, unknown_row.id, unknown_row.at_ns, unknown_row.deleted, unknown_row.data_json
+FROM ` + CoreTableUnknownName + ` unknown_row
+LEFT JOIN ` + CoreTableUnknownSyncName + ` sync_row
+ON sync_row.type_name = unknown_row.type_name AND sync_row.id = unknown_row.id AND sync_row.remote = ?
+WHERE ? = '' OR sync_row.at_ns IS NULL OR sync_row.at_ns < unknown_row.at_ns
+ORDER BY unknown_row.type_name, unknown_row.id`
+	rows, err := q.QueryContext(ctx, query, remote, remote)
+	if err != nil {
+		return nil, fmt.Errorf("select unknown export rows: %w", err)
+	}
+	defer func() {
+		closeErr := rows.Close()
+		if closeErr != nil && err == nil {
+			err = fmt.Errorf("close unknown export rows: %w", closeErr)
+		}
+	}()
+	records = make([]UnknownExportRecord, 0)
+	for rows.Next() {
+		var typeName string
+		var id string
+		var atNs int64
+		var deleted int
+		var dataJSON string
+		if err := rows.Scan(&typeName, &id, &atNs, &deleted, &dataJSON); err != nil {
+			return nil, fmt.Errorf("scan unknown export row: %w", err)
+		}
+		records = append(records, UnknownExportRecord{
+			TypeName: typeName,
+			Record:   JSONLRecord{ID: id, Deleted: deleted != 0, AtNs: atNs, Data: json.RawMessage(dataJSON)},
+		})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate unknown export rows: %w", err)
+	}
+	return records, nil
+}
+
+func UnknownBatchTableName(typeName string) string {
+	return unknownBatchTablePrefix + typeName
+}
+
+func BeginJSONLBatchContext(ctx context.Context, q DBTX, remote string) (JSONLCheckpoint, error) {
+	if err := EnsureCoreTablesContext(ctx, q); err != nil {
+		return JSONLCheckpoint{}, err
+	}
+	databaseID, err := databaseIDContext(ctx, q)
+	if err != nil {
+		return JSONLCheckpoint{}, err
+	}
+	batchID, err := UUIDv7()
+	if err != nil {
+		return JSONLCheckpoint{}, err
+	}
+	if _, err := q.ExecContext(ctx, `INSERT INTO `+CoreTableExportBatchName+` (batch_id, database_id, remote, complete) VALUES (?, ?, ?, 0)`, batchID, databaseID, remote); err != nil {
+		return JSONLCheckpoint{}, fmt.Errorf("create export batch: %w", err)
+	}
+	return JSONLCheckpoint{Version: 1, DatabaseID: databaseID, BatchID: batchID}, nil
+}
+
+func AppendJSONLBatchEntryContext(ctx context.Context, q DBTX, checkpoint JSONLCheckpoint, sequence int, tableName, objectID string, atNs int64) error {
+	_, err := q.ExecContext(ctx, `INSERT INTO `+CoreTableExportEntryName+` (batch_id, sequence, table_name, object_id, at_ns) VALUES (?, ?, ?, ?, ?)`, checkpoint.BatchID, sequence, tableName, objectID, atNs)
+	if err != nil {
+		return fmt.Errorf("append export batch entry: %w", err)
+	}
+	return nil
+}
+
+func CompleteJSONLBatchContext(ctx context.Context, q DBTX, checkpoint JSONLCheckpoint) error {
+	result, err := q.ExecContext(ctx, `UPDATE `+CoreTableExportBatchName+` SET complete = 1 WHERE batch_id = ? AND database_id = ?`, checkpoint.BatchID, checkpoint.DatabaseID)
+	if err != nil {
+		return fmt.Errorf("complete export batch: %w", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("read completed export batch count: %w", err)
+	}
+	if affected != 1 {
+		return errors.New("export batch checkpoint does not match database")
+	}
+	return nil
+}
+
+func AcknowledgeJSONLContext(ctx context.Context, q DBTX, checkpoint JSONLCheckpoint) error {
+	return q.WithTransaction(ctx, func(tx DBTX) error {
+		databaseID, err := databaseIDContext(ctx, tx)
+		if err != nil {
+			return err
+		}
+		if checkpoint.Version != 1 || checkpoint.DatabaseID != databaseID {
+			return errors.New("export checkpoint belongs to a different database")
+		}
+		var remote string
+		var complete int
+		if err := tx.QueryRowContext(ctx, `SELECT remote, complete FROM `+CoreTableExportBatchName+` WHERE batch_id = ?`, checkpoint.BatchID).Scan(&remote, &complete); err != nil {
+			return fmt.Errorf("read export batch: %w", err)
+		}
+		if complete != 1 {
+			return errors.New("cannot acknowledge incomplete export batch")
+		}
+		if remote != "" {
+			query := `INSERT INTO ` + CoreTableSyncName + ` (object_id, table_name, at_ns, remote)
+SELECT object_id, table_name, at_ns, ? FROM ` + CoreTableExportEntryName + ` WHERE batch_id = ?
+AND table_name NOT LIKE '@unknown:%'
+ON CONFLICT(object_id, table_name, remote) DO UPDATE SET at_ns = max(at_ns, excluded.at_ns)`
+			if _, err := tx.ExecContext(ctx, query, remote, checkpoint.BatchID); err != nil {
+				return fmt.Errorf("acknowledge export entries: %w", err)
+			}
+			unknownQuery := `INSERT INTO ` + CoreTableUnknownSyncName + ` (type_name, id, at_ns, remote)
+SELECT substr(table_name, 10), object_id, at_ns, ? FROM ` + CoreTableExportEntryName + ` WHERE batch_id = ?
+AND table_name LIKE '@unknown:%'
+ON CONFLICT(type_name, id, remote) DO UPDATE SET at_ns = max(at_ns, excluded.at_ns)`
+			if _, err := tx.ExecContext(ctx, unknownQuery, remote, checkpoint.BatchID); err != nil {
+				return fmt.Errorf("acknowledge unknown export entries: %w", err)
+			}
+		}
+		return deleteJSONLBatchContext(ctx, tx, checkpoint.BatchID)
+	})
+}
+
+func DiscardJSONLContext(ctx context.Context, q DBTX, checkpoint JSONLCheckpoint) error {
+	databaseID, err := databaseIDContext(ctx, q)
+	if err != nil {
+		return err
+	}
+	if checkpoint.Version != 1 || checkpoint.DatabaseID != databaseID {
+		return errors.New("export checkpoint belongs to a different database")
+	}
+	return deleteJSONLBatchContext(ctx, q, checkpoint.BatchID)
+}
+
+func deleteJSONLBatchContext(ctx context.Context, q DBTX, batchID string) error {
+	if _, err := q.ExecContext(ctx, `DELETE FROM `+CoreTableExportEntryName+` WHERE batch_id = ?`, batchID); err != nil {
+		return fmt.Errorf("delete export batch entries: %w", err)
+	}
+	if _, err := q.ExecContext(ctx, `DELETE FROM `+CoreTableExportBatchName+` WHERE batch_id = ?`, batchID); err != nil {
+		return fmt.Errorf("delete export batch: %w", err)
+	}
+	return nil
+}
+
+func databaseIDContext(ctx context.Context, q DBTX) (string, error) {
+	var databaseID string
+	if err := q.QueryRowContext(ctx, `SELECT value FROM `+CoreTableMetadataName+` WHERE key = ?`, metadataDatabaseIDKey).Scan(&databaseID); err != nil {
+		return "", fmt.Errorf("read database id: %w", err)
+	}
+	return databaseID, nil
+}
+
+func (c JSONLCheckpoint) MarshalText() ([]byte, error) {
+	type checkpointWire JSONLCheckpoint
+	data, err := json.Marshal(checkpointWire(c))
+	if err != nil {
+		return nil, fmt.Errorf("marshal jsonl checkpoint: %w", err)
+	}
+	return data, nil
+}
+
+func (c *JSONLCheckpoint) UnmarshalText(data []byte) error {
+	type checkpointWire JSONLCheckpoint
+	var checkpoint checkpointWire
+	if err := json.Unmarshal(data, &checkpoint); err != nil {
+		return fmt.Errorf("unmarshal jsonl checkpoint: %w", err)
+	}
+	*c = JSONLCheckpoint(checkpoint)
+	if c.Version != 1 || c.DatabaseID == "" || c.BatchID == "" {
+		return errors.New("invalid jsonl checkpoint")
+	}
+	return nil
+}
+
+var decimalInt64Pattern = regexp.MustCompile(`^-?(0|[1-9][0-9]*)$`)
+
+func (r *JSONLRecord) UnmarshalJSON(data []byte) error {
+	var wire struct {
+		ID      string          `json:"id"`
+		Deleted bool            `json:"deleted,omitempty"`
+		AtNs    json.RawMessage `json:"atNs"`
+		Data    json.RawMessage `json:"data"`
+	}
+	if err := json.Unmarshal(data, &wire); err != nil {
+		return err
+	}
+	atNsText := string(wire.AtNs)
+	if len(wire.AtNs) > 0 && wire.AtNs[0] == '"' {
+		var value string
+		if err := json.Unmarshal(wire.AtNs, &value); err != nil {
+			return fmt.Errorf("decode atNs string: %w", err)
+		}
+		atNsText = value
+	}
+	if !decimalInt64Pattern.MatchString(atNsText) {
+		return errors.New("atNs must be a signed decimal integer")
+	}
+	atNs, err := strconv.ParseInt(atNsText, 10, 64)
+	if err != nil {
+		return fmt.Errorf("decode atNs: %w", err)
+	}
+	r.ID = wire.ID
+	r.Deleted = wire.Deleted
+	r.AtNs = atNs
+	r.Data = wire.Data
+	return nil
 }
 
 type GeneratedTableDescriptor struct {
@@ -47,31 +407,100 @@ type GeneratedTableDescriptor struct {
 }
 
 type TableIntrospection struct {
-	Descriptor     GeneratedTableDescriptor
-	ObjectCount    int64
-	DiskUsageBytes int64
+	Descriptor   GeneratedTableDescriptor
+	ObjectCount  int64
+	PayloadBytes int64
 }
 
 func EnsureCoreTables(q DBTX) error {
+	return EnsureCoreTablesContext(context.Background(), q)
+}
+
+func EnsureCoreTablesContext(ctx context.Context, q DBTX) error {
 	if q == nil {
 		return errors.New("nil DBTX")
 	}
-	ctx := context.Background()
-	createDeletedTableSQL := `CREATE TABLE IF NOT EXISTS ` + CoreTableDeletedName + ` (table_name TEXT NOT NULL, id TEXT NOT NULL, at_ns INTEGER NOT NULL, PRIMARY KEY (table_name, id))`
-	if _, err := q.ExecContext(ctx, createDeletedTableSQL); err != nil {
-		return fmt.Errorf("create _deleted table: %w", err)
+	return q.WithTransaction(ctx, func(tx DBTX) error {
+		statements := []struct {
+			name string
+			sql  string
+		}{
+			{"_deleted", `CREATE TABLE IF NOT EXISTS ` + CoreTableDeletedName + ` (table_name TEXT NOT NULL, id TEXT NOT NULL, at_ns INTEGER NOT NULL, PRIMARY KEY (table_name, id))`},
+			{"_sync", `CREATE TABLE IF NOT EXISTS ` + CoreTableSyncName + ` (object_id TEXT NOT NULL, table_name TEXT NOT NULL, at_ns INTEGER NOT NULL, remote TEXT NOT NULL, PRIMARY KEY (object_id, table_name, remote))`},
+			{"_proprdb_schema", `CREATE TABLE IF NOT EXISTS ` + CoreTableSchemaStateName + ` (table_name TEXT PRIMARY KEY, schema_hash TEXT NOT NULL)`},
+			{"_proprdb_metadata", `CREATE TABLE IF NOT EXISTS ` + CoreTableMetadataName + ` (key TEXT PRIMARY KEY, value TEXT NOT NULL)`},
+			{"_unknown_sync", `CREATE TABLE IF NOT EXISTS ` + CoreTableUnknownSyncName + ` (type_name TEXT NOT NULL, id TEXT NOT NULL, at_ns INTEGER NOT NULL, remote TEXT NOT NULL, PRIMARY KEY (type_name, id, remote))`},
+			{"_export_batches", `CREATE TABLE IF NOT EXISTS ` + CoreTableExportBatchName + ` (batch_id TEXT PRIMARY KEY, database_id TEXT NOT NULL, remote TEXT NOT NULL, complete INTEGER NOT NULL DEFAULT 0)`},
+			{"_export_batch_entries", `CREATE TABLE IF NOT EXISTS ` + CoreTableExportEntryName + ` (batch_id TEXT NOT NULL, sequence INTEGER NOT NULL, table_name TEXT NOT NULL, object_id TEXT NOT NULL, at_ns INTEGER NOT NULL, record_json BLOB, PRIMARY KEY (batch_id, sequence), FOREIGN KEY (batch_id) REFERENCES ` + CoreTableExportBatchName + `(batch_id) ON DELETE CASCADE)`},
+		}
+		for _, statement := range statements {
+			if _, err := tx.ExecContext(ctx, statement.sql); err != nil {
+				return fmt.Errorf("create %s table: %w", statement.name, err)
+			}
+		}
+		if err := ensureLatestUnknownSchema(ctx, tx); err != nil {
+			return err
+		}
+		var databaseID string
+		err := tx.QueryRowContext(ctx, `SELECT value FROM `+CoreTableMetadataName+` WHERE key = ?`, metadataDatabaseIDKey).Scan(&databaseID)
+		if errors.Is(err, sql.ErrNoRows) {
+			generatedID, idErr := UUIDv7()
+			if idErr != nil {
+				return idErr
+			}
+			if _, insertErr := tx.ExecContext(ctx, `INSERT INTO `+CoreTableMetadataName+` (key, value) VALUES (?, ?)`, metadataDatabaseIDKey, generatedID); insertErr != nil {
+				return fmt.Errorf("insert database id: %w", insertErr)
+			}
+		} else if err != nil {
+			return fmt.Errorf("read database id: %w", err)
+		}
+		if _, err := tx.ExecContext(ctx, `DELETE FROM `+CoreTableExportBatchName+` WHERE complete = 0`); err != nil {
+			return fmt.Errorf("clean incomplete export batches: %w", err)
+		}
+		return nil
+	})
+}
+
+func ensureLatestUnknownSchema(ctx context.Context, q DBTX) error {
+	var createSQL string
+	err := q.QueryRowContext(ctx, `SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?`, CoreTableUnknownName).Scan(&createSQL)
+	if errors.Is(err, sql.ErrNoRows) {
+		_, createErr := q.ExecContext(ctx, `CREATE TABLE `+CoreTableUnknownName+` (type_name TEXT NOT NULL, id TEXT NOT NULL, at_ns INTEGER NOT NULL, deleted INTEGER NOT NULL, data_json TEXT NOT NULL, PRIMARY KEY (type_name, id))`)
+		if createErr != nil {
+			return fmt.Errorf("create _unknown_types table: %w", createErr)
+		}
+		return nil
 	}
-	createSyncTableSQL := `CREATE TABLE IF NOT EXISTS ` + CoreTableSyncName + ` (object_id TEXT NOT NULL, table_name TEXT NOT NULL, at_ns INTEGER NOT NULL, remote TEXT NOT NULL, PRIMARY KEY (object_id, table_name, remote))`
-	if _, err := q.ExecContext(ctx, createSyncTableSQL); err != nil {
-		return fmt.Errorf("create _sync table: %w", err)
+	if err != nil {
+		return fmt.Errorf("inspect _unknown_types schema: %w", err)
 	}
-	createSchemaStateTableSQL := `CREATE TABLE IF NOT EXISTS ` + CoreTableSchemaStateName + ` (table_name TEXT PRIMARY KEY, schema_hash TEXT NOT NULL)`
-	if _, err := q.ExecContext(ctx, createSchemaStateTableSQL); err != nil {
-		return fmt.Errorf("create _proprdb_schema table: %w", err)
+	normalizedSQL := strings.ToLower(strings.ReplaceAll(createSQL, " ", ""))
+	if strings.Contains(normalizedSQL, "primarykey(type_name,id)") {
+		return nil
 	}
-	createUnknownTableSQL := `CREATE TABLE IF NOT EXISTS ` + CoreTableUnknownName + ` (type_name TEXT NOT NULL, id TEXT NOT NULL, at_ns INTEGER NOT NULL, deleted INTEGER NOT NULL, data_json TEXT NOT NULL, PRIMARY KEY (type_name, id, at_ns))`
-	if _, err := q.ExecContext(ctx, createUnknownTableSQL); err != nil {
-		return fmt.Errorf("create _unknown_types table: %w", err)
+	const replacementTable = "_unknown_types_replacement"
+	if _, err := q.ExecContext(ctx, `DROP TABLE IF EXISTS `+replacementTable); err != nil {
+		return fmt.Errorf("drop stale unknown replacement: %w", err)
+	}
+	if _, err := q.ExecContext(ctx, `CREATE TABLE `+replacementTable+` (type_name TEXT NOT NULL, id TEXT NOT NULL, at_ns INTEGER NOT NULL, deleted INTEGER NOT NULL, data_json TEXT NOT NULL, PRIMARY KEY (type_name, id))`); err != nil {
+		return fmt.Errorf("create unknown replacement: %w", err)
+	}
+	copySQL := `INSERT INTO ` + replacementTable + ` (type_name, id, at_ns, deleted, data_json)
+SELECT old.type_name, old.id, old.at_ns, old.deleted, old.data_json
+FROM ` + CoreTableUnknownName + ` old
+WHERE old.rowid = (
+	SELECT candidate.rowid FROM ` + CoreTableUnknownName + ` candidate
+	WHERE candidate.type_name = old.type_name AND candidate.id = old.id
+	ORDER BY candidate.at_ns DESC, candidate.rowid DESC LIMIT 1
+)`
+	if _, err := q.ExecContext(ctx, copySQL); err != nil {
+		return fmt.Errorf("copy latest unknown rows: %w", err)
+	}
+	if _, err := q.ExecContext(ctx, `DROP TABLE `+CoreTableUnknownName); err != nil {
+		return fmt.Errorf("drop legacy unknown table: %w", err)
+	}
+	if _, err := q.ExecContext(ctx, `ALTER TABLE `+replacementTable+` RENAME TO `+CoreTableUnknownName); err != nil {
+		return fmt.Errorf("rename unknown replacement: %w", err)
 	}
 	return nil
 }
@@ -255,20 +684,42 @@ func TypeNameFromAnyJSON(data json.RawMessage) (string, error) {
 }
 
 func UnknownInsert(q DBTX, typeName string, record JSONLRecord) error {
+	return UnknownInsertContext(context.Background(), q, typeName, record)
+}
+
+func UnknownInsertContext(ctx context.Context, q DBTX, typeName string, record JSONLRecord) error {
 	if q == nil {
 		return errors.New("nil DBTX")
 	}
 	if strings.TrimSpace(typeName) == "" {
 		return errors.New("empty type name")
 	}
-	ctx := context.Background()
 	deletedInt := 0
 	if record.Deleted {
 		deletedInt = 1
 	}
-	upsertUnknownSQL := `INSERT INTO ` + CoreTableUnknownName + ` (type_name, id, at_ns, deleted, data_json) VALUES (?, ?, ?, ?, ?)`
-	if _, err := q.ExecContext(ctx, upsertUnknownSQL, typeName, record.ID, record.AtNs, deletedInt, string(record.Data)); err != nil {
-		return fmt.Errorf("insert unknown row for %s/%s/%d: %w", typeName, record.ID, record.AtNs, err)
+	canonicalData, err := canonicalJSON(record.Data)
+	if err != nil {
+		return fmt.Errorf("canonicalize unknown row for %s/%s: %w", typeName, record.ID, err)
+	}
+	var localAtNs int64
+	var localDeleted int
+	var localData string
+	selectErr := q.QueryRowContext(ctx, `SELECT at_ns, deleted, data_json FROM `+CoreTableUnknownName+` WHERE type_name = ? AND id = ?`, typeName, record.ID).Scan(&localAtNs, &localDeleted, &localData)
+	if selectErr == nil && localAtNs == record.AtNs {
+		if localDeleted == deletedInt && localData == string(canonicalData) {
+			return nil
+		}
+		return &ConflictError{TypeName: typeName, ID: record.ID, AtNs: record.AtNs, LocalDeleted: localDeleted != 0, RemoteDeleted: record.Deleted}
+	}
+	if selectErr != nil && !errors.Is(selectErr, sql.ErrNoRows) {
+		return fmt.Errorf("read unknown row for %s/%s: %w", typeName, record.ID, selectErr)
+	}
+	upsertUnknownSQL := `INSERT INTO ` + CoreTableUnknownName + ` (type_name, id, at_ns, deleted, data_json) VALUES (?, ?, ?, ?, ?)
+ON CONFLICT(type_name, id) DO UPDATE SET at_ns = excluded.at_ns, deleted = excluded.deleted, data_json = excluded.data_json
+WHERE excluded.at_ns > at_ns`
+	if _, err := q.ExecContext(ctx, upsertUnknownSQL, typeName, record.ID, record.AtNs, deletedInt, string(canonicalData)); err != nil {
+		return fmt.Errorf("upsert unknown row for %s/%s/%d: %w", typeName, record.ID, record.AtNs, err)
 	}
 	return nil
 }
@@ -277,22 +728,21 @@ func CompactUnknownLatest(q DBTX) error {
 	if q == nil {
 		return errors.New("nil DBTX")
 	}
-	ctx := context.Background()
-	compactSQL := `DELETE FROM ` + CoreTableUnknownName + ` WHERE rowid NOT IN (
-SELECT MAX(kept.rowid)
-FROM ` + CoreTableUnknownName + ` kept
-JOIN (
-	SELECT type_name, id, MAX(at_ns) AS max_at_ns
-	FROM ` + CoreTableUnknownName + `
-	GROUP BY type_name, id
-) latest
-ON latest.type_name = kept.type_name AND latest.id = kept.id AND latest.max_at_ns = kept.at_ns
-GROUP BY kept.type_name, kept.id
-)`
-	if _, err := q.ExecContext(ctx, compactSQL); err != nil {
-		return fmt.Errorf("compact unknown rows: %w", err)
-	}
 	return nil
+}
+
+func canonicalJSON(data json.RawMessage) ([]byte, error) {
+	var value any
+	decoder := json.NewDecoder(strings.NewReader(string(data)))
+	decoder.UseNumber()
+	if err := decoder.Decode(&value); err != nil {
+		return nil, err
+	}
+	canonical, err := json.Marshal(value)
+	if err != nil {
+		return nil, err
+	}
+	return canonical, nil
 }
 
 func ReplayUnknownByType(q DBTX, typeName string, apply func(JSONLRecord) error) error {
@@ -358,11 +808,27 @@ func ReplayUnknownByType(q DBTX, typeName string, apply func(JSONLRecord) error)
 	return nil
 }
 
+func TransferUnknownSyncContext(ctx context.Context, q DBTX, typeName, tableName, objectID string) error {
+	query := `INSERT INTO ` + CoreTableSyncName + ` (object_id, table_name, at_ns, remote)
+SELECT id, ?, at_ns, remote FROM ` + CoreTableUnknownSyncName + ` WHERE type_name = ? AND id = ?
+ON CONFLICT(object_id, table_name, remote) DO UPDATE SET at_ns = max(at_ns, excluded.at_ns)`
+	if _, err := q.ExecContext(ctx, query, tableName, typeName, objectID); err != nil {
+		return fmt.Errorf("transfer unknown sync state for %s/%s: %w", typeName, objectID, err)
+	}
+	if _, err := q.ExecContext(ctx, `DELETE FROM `+CoreTableUnknownSyncName+` WHERE type_name = ? AND id = ?`, typeName, objectID); err != nil {
+		return fmt.Errorf("delete transferred unknown sync state for %s/%s: %w", typeName, objectID, err)
+	}
+	return nil
+}
+
 func SyncNeedsSend(q DBTX, objectID, tableName, remote string, atNs int64) (bool, error) {
+	return SyncNeedsSendContext(context.Background(), q, objectID, tableName, remote, atNs)
+}
+
+func SyncNeedsSendContext(ctx context.Context, q DBTX, objectID, tableName, remote string, atNs int64) (bool, error) {
 	if remote == "" {
 		return true, nil
 	}
-	ctx := context.Background()
 	var syncedAtNs int64
 	selectSyncSQL := `SELECT at_ns FROM ` + CoreTableSyncName + ` WHERE object_id = ? AND table_name = ? AND remote = ?`
 	err := q.QueryRowContext(ctx, selectSyncSQL, objectID, tableName, remote).Scan(&syncedAtNs)
@@ -376,10 +842,13 @@ func SyncNeedsSend(q DBTX, objectID, tableName, remote string, atNs int64) (bool
 }
 
 func SyncUpsert(q DBTX, objectID, tableName, remote string, atNs int64) error {
+	return SyncUpsertContext(context.Background(), q, objectID, tableName, remote, atNs)
+}
+
+func SyncUpsertContext(ctx context.Context, q DBTX, objectID, tableName, remote string, atNs int64) error {
 	if remote == "" {
 		return nil
 	}
-	ctx := context.Background()
 	upsertSyncSQL := `INSERT INTO ` + CoreTableSyncName + ` (object_id, table_name, at_ns, remote) VALUES (?, ?, ?, ?) ON CONFLICT(object_id, table_name, remote) DO UPDATE SET at_ns = CASE WHEN excluded.at_ns > at_ns THEN excluded.at_ns ELSE at_ns END`
 	if _, err := q.ExecContext(ctx, upsertSyncSQL, objectID, tableName, atNs, remote); err != nil {
 		return fmt.Errorf("upsert sync row for %s/%s/%s: %w", tableName, objectID, remote, err)
@@ -388,7 +857,10 @@ func SyncUpsert(q DBTX, objectID, tableName, remote string, atNs int64) error {
 }
 
 func LocalMaxAtNs(q DBTX, tableName, objectID string) (int64, error) {
-	ctx := context.Background()
+	return LocalMaxAtNsContext(context.Background(), q, tableName, objectID)
+}
+
+func LocalMaxAtNsContext(ctx context.Context, q DBTX, tableName, objectID string) (int64, error) {
 	maxAtNs := int64(-1)
 	var rowAtNs int64
 	rowErr := q.QueryRowContext(ctx, `SELECT at_ns FROM "`+tableName+`" WHERE id = ?`, objectID).Scan(&rowAtNs)
@@ -410,6 +882,48 @@ func LocalMaxAtNs(q DBTX, tableName, objectID string) (int64, error) {
 	return maxAtNs, nil
 }
 
+func NextObjectAtNsContext(ctx context.Context, q DBTX, tableName, objectID string) (int64, error) {
+	currentAtNs, err := LocalMaxAtNsContext(ctx, q, tableName, objectID)
+	if err != nil {
+		return 0, err
+	}
+	wallAtNs := NowNs()
+	if currentAtNs >= wallAtNs {
+		if currentAtNs == int64(^uint64(0)>>1) {
+			return 0, errors.New("object timestamp exhausted int64")
+		}
+		return currentAtNs + 1, nil
+	}
+	return wallAtNs, nil
+}
+
+func UnknownSyncNeedsSendContext(ctx context.Context, q DBTX, typeName, objectID, remote string, atNs int64) (bool, error) {
+	if remote == "" {
+		return true, nil
+	}
+	var syncedAtNs int64
+	err := q.QueryRowContext(ctx, `SELECT at_ns FROM `+CoreTableUnknownSyncName+` WHERE type_name = ? AND id = ? AND remote = ?`, typeName, objectID, remote).Scan(&syncedAtNs)
+	if errors.Is(err, sql.ErrNoRows) {
+		return true, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("read unknown sync state for %s/%s/%s: %w", typeName, objectID, remote, err)
+	}
+	return syncedAtNs < atNs, nil
+}
+
+func UnknownSyncUpsertContext(ctx context.Context, q DBTX, typeName, objectID, remote string, atNs int64) error {
+	if remote == "" {
+		return nil
+	}
+	query := `INSERT INTO ` + CoreTableUnknownSyncName + ` (type_name, id, at_ns, remote) VALUES (?, ?, ?, ?)
+ON CONFLICT(type_name, id, remote) DO UPDATE SET at_ns = max(at_ns, excluded.at_ns)`
+	if _, err := q.ExecContext(ctx, query, typeName, objectID, atNs, remote); err != nil {
+		return fmt.Errorf("upsert unknown sync state for %s/%s/%s: %w", typeName, objectID, remote, err)
+	}
+	return nil
+}
+
 func IntrospectTables(q DBTX, descriptors []GeneratedTableDescriptor) ([]TableIntrospection, error) {
 	if q == nil {
 		return nil, errors.New("nil DBTX")
@@ -420,14 +934,14 @@ func IntrospectTables(q DBTX, descriptors []GeneratedTableDescriptor) ([]TableIn
 		if err != nil {
 			return nil, err
 		}
-		diskUsageBytes, err := tableDiskUsageBytes(q, descriptor.TableName)
+		payloadBytes, err := tablePayloadBytes(q, descriptor.TableName)
 		if err != nil {
 			return nil, err
 		}
 		introspectionRows = append(introspectionRows, TableIntrospection{
-			Descriptor:     descriptor,
-			ObjectCount:    objectCount,
-			DiskUsageBytes: diskUsageBytes,
+			Descriptor:   descriptor,
+			ObjectCount:  objectCount,
+			PayloadBytes: payloadBytes,
 		})
 	}
 	return introspectionRows, nil
@@ -444,24 +958,24 @@ func tableObjectCount(q DBTX, tableName string) (int64, error) {
 	return objectCount, nil
 }
 
-func tableDiskUsageBytes(q DBTX, tableName string) (int64, error) {
+func tablePayloadBytes(q DBTX, tableName string) (int64, error) {
 	ctx := context.Background()
 	columnNames, err := tableColumnNames(q, tableName)
 	if err != nil {
 		return 0, err
 	}
 	tableNameIdentifier := quoteSQLiteIdentifier(tableName)
-	var diskUsageBytes int64
+	var payloadBytes int64
 	var query string
 	if containsColumn(columnNames, dataColumnName) {
 		query = `SELECT COALESCE(SUM(LENGTH(` + quoteSQLiteIdentifier(dataColumnName) + `)), 0) FROM ` + tableNameIdentifier
 	} else {
 		query = `SELECT COALESCE(SUM(` + estimatedRowPayloadBytesSQL(columnNames) + `), 0) FROM ` + tableNameIdentifier
 	}
-	if err := q.QueryRowContext(ctx, query).Scan(&diskUsageBytes); err != nil {
-		return 0, fmt.Errorf("read disk usage for table %s: %w", tableName, err)
+	if err := q.QueryRowContext(ctx, query).Scan(&payloadBytes); err != nil {
+		return 0, fmt.Errorf("read payload size for table %s: %w", tableName, err)
 	}
-	return diskUsageBytes, nil
+	return payloadBytes, nil
 }
 
 func tableColumnNames(q DBTX, tableName string) ([]string, error) {

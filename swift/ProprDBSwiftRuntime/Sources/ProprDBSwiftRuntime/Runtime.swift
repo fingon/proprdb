@@ -71,17 +71,18 @@ public struct GeneratedTableDescriptor: Equatable {
 public struct TableIntrospection: Equatable {
     public let descriptor: GeneratedTableDescriptor
     public let objectCount: Int64
-    public let diskUsageBytes: Int64
+    public let payloadBytes: Int64
 
-    public init(descriptor: GeneratedTableDescriptor, objectCount: Int64, diskUsageBytes: Int64) {
+    public init(descriptor: GeneratedTableDescriptor, objectCount: Int64, payloadBytes: Int64) {
         self.descriptor = descriptor
         self.objectCount = objectCount
-        self.diskUsageBytes = diskUsageBytes
+        self.payloadBytes = payloadBytes
     }
 }
 
 public protocol DBTX: AnyObject {
     var sqliteHandle: OpaquePointer? { get }
+    func withTransaction<T>(_ body: (any DBTX) throws -> T) throws -> T
 }
 
 public final class SQLiteDatabase: DBTX {
@@ -98,14 +99,25 @@ public final class SQLiteDatabase: DBTX {
             }
             throw ProprDBError("open sqlite database \(path): \(errorMessage)")
         }
-        sqlite3_busy_timeout(handle, 5_000)
-        sqlite3_extended_result_codes(handle, 1)
+        guard sqlite3_busy_timeout(handle, 5_000) == SQLITE_OK else {
+            let message = sqliteErrorMessage(database: handle)
+            _ = sqlite3_close(handle)
+            throw ProprDBError("configure sqlite busy timeout: \(message)")
+        }
+        guard sqlite3_extended_result_codes(handle, 1) == SQLITE_OK else {
+            let message = sqliteErrorMessage(database: handle)
+            _ = sqlite3_close(handle)
+            throw ProprDBError("configure sqlite extended result codes: \(message)")
+        }
         self.sqliteHandle = handle
     }
 
     deinit {
         if let sqliteHandle {
-            sqlite3_close(sqliteHandle)
+            let result = sqlite3_close(sqliteHandle)
+            if result != SQLITE_OK {
+                logger.error("fallback sqlite close failed", metadata: ["result": .stringConvertible(result)])
+            }
         }
     }
 
@@ -124,6 +136,38 @@ public final class SQLiteDatabase: DBTX {
         let transaction = SQLiteTransaction(database: self)
         try transaction.begin()
         return transaction
+    }
+
+    public func withTransaction<T>(_ body: (any DBTX) throws -> T) throws -> T {
+        let transaction = try beginTransaction()
+        do {
+            let result = try body(transaction)
+            try transaction.commit()
+            return result
+        } catch {
+            do {
+                try transaction.rollback()
+            } catch let rollbackError {
+                throw ProprDBError("\(error) (additionally, rollback transaction: \(rollbackError))")
+            }
+            throw error
+        }
+    }
+}
+
+public actor ProprDBActor {
+    private let database: SQLiteDatabase
+
+    public init(path: String) throws {
+        database = try SQLiteDatabase(path: path)
+    }
+
+    public func withDatabase<T: Sendable>(_ body: (SQLiteDatabase) throws -> T) throws -> T {
+        try body(database)
+    }
+
+    public func close() throws {
+        try database.close()
     }
 }
 
@@ -144,13 +188,47 @@ public final class SQLiteTransaction: DBTX {
     }
 
     public func commit() throws {
+        guard !finished else {
+            throw ProprDBError("transaction already finished")
+        }
         try execute("COMMIT")
         finished = true
     }
 
     public func rollback() throws {
+        guard !finished else {
+            throw ProprDBError("transaction already finished")
+        }
         try execute("ROLLBACK")
         finished = true
+    }
+
+    public func withTransaction<T>(_ body: (any DBTX) throws -> T) throws -> T {
+        let savepoint = "proprdb_\(UUID().uuidString.replacingOccurrences(of: "-", with: ""))"
+        try execute("SAVEPOINT \(savepoint)")
+        do {
+            let result = try body(self)
+            try execute("RELEASE \(savepoint)")
+            return result
+        } catch {
+            do {
+                try execute("ROLLBACK TO \(savepoint)")
+                try execute("RELEASE \(savepoint)")
+            } catch let rollbackError {
+                throw ProprDBError("\(error) (additionally, rollback savepoint: \(rollbackError))")
+            }
+            throw error
+        }
+    }
+
+    deinit {
+        if !finished {
+            do {
+                try rollback()
+            } catch {
+                logger.error("fallback sqlite rollback failed", metadata: ["error": .string(String(describing: error))])
+            }
+        }
     }
 }
 
@@ -169,7 +247,11 @@ public final class SQLiteRows {
         let result = sqlite3_step(statement)
         switch result {
         case SQLITE_ROW:
-            return SQLiteRow(statement: statement)
+            var values: [SQLiteValue] = []
+            for column in 0 ..< sqlite3_column_count(statement) {
+                values.append(try SQLiteValue(statement: statement, column: column))
+            }
+            return SQLiteRow(values: values)
         case SQLITE_DONE:
             return nil
         default:
@@ -192,54 +274,110 @@ public final class SQLiteRows {
             throw ProprDBError("finalize sqlite rows: \(sqliteErrorMessage(database: database))")
         }
     }
+
+    deinit {
+        if !closed {
+            do {
+                try close()
+            } catch {
+                logger.error("fallback sqlite rows finalize failed", metadata: ["error": .string(String(describing: error))])
+            }
+        }
+    }
 }
 
 public struct SQLiteRow {
-    fileprivate let statement: OpaquePointer
+    fileprivate let values: [SQLiteValue]
 
     public func string(at column: Int32) throws -> String {
-        guard let value = sqlite3_column_text(statement, column) else {
+        guard case let .text(value) = try value(at: column) else {
             throw ProprDBError("expected text at column \(column)")
         }
-        return String(cString: value)
+        return value
     }
 
     public func int64(at column: Int32) throws -> Int64 {
-        guard sqlite3_column_type(statement, column) != SQLITE_NULL else {
+        guard case let .integer(value) = try value(at: column) else {
             throw ProprDBError("expected integer at column \(column)")
         }
-        return sqlite3_column_int64(statement, column)
+        return value
     }
 
     public func data(at column: Int32) throws -> Data {
-        guard sqlite3_column_type(statement, column) != SQLITE_NULL else {
+        guard case let .blob(value) = try value(at: column) else {
             throw ProprDBError("expected blob at column \(column)")
         }
-        let bytes = sqlite3_column_blob(statement, column)
-        let count = Int(sqlite3_column_bytes(statement, column))
-        guard count >= 0 else {
-            throw ProprDBError("invalid blob size at column \(column)")
+        return value
+    }
+
+    private func value(at column: Int32) throws -> SQLiteValue {
+        let index = Int(column)
+        guard values.indices.contains(index) else {
+            throw ProprDBError("sqlite column \(column) out of range")
         }
-        if count == 0 {
-            return Data()
+        return values[index]
+    }
+}
+
+private enum SQLiteValue {
+    case null
+    case integer(Int64)
+    case real(Double)
+    case text(String)
+    case blob(Data)
+
+    init(statement: OpaquePointer, column: Int32) throws {
+        switch sqlite3_column_type(statement, column) {
+        case SQLITE_NULL:
+            self = .null
+        case SQLITE_INTEGER:
+            self = .integer(sqlite3_column_int64(statement, column))
+        case SQLITE_FLOAT:
+            self = .real(sqlite3_column_double(statement, column))
+        case SQLITE_TEXT:
+            let count = Int(sqlite3_column_bytes(statement, column))
+            guard count >= 0, let pointer = sqlite3_column_text(statement, column) else {
+                throw ProprDBError("read sqlite text at column \(column)")
+            }
+            let data = Data(bytes: pointer, count: count)
+            guard let value = String(data: data, encoding: .utf8) else {
+                throw ProprDBError("invalid utf8 text at column \(column)")
+            }
+            self = .text(value)
+        case SQLITE_BLOB:
+            let count = Int(sqlite3_column_bytes(statement, column))
+            if count == 0 {
+                self = .blob(Data())
+            } else if let pointer = sqlite3_column_blob(statement, column) {
+                self = .blob(Data(bytes: pointer, count: count))
+            } else {
+                throw ProprDBError("read sqlite blob at column \(column)")
+            }
+        default:
+            throw ProprDBError("unsupported sqlite type at column \(column)")
         }
-        guard let bytes else {
-            throw ProprDBError("missing blob bytes at column \(column)")
-        }
-        return Data(bytes: bytes, count: count)
     }
 }
 
 public extension DBTX {
     func execute(_ sql: String, arguments: [Any?] = []) throws {
         let statement = try prepare(sql)
-        defer {
-            sqlite3_finalize(statement)
-        }
-        try bind(arguments, to: statement)
-        let result = sqlite3_step(statement)
-        if result != SQLITE_DONE {
-            throw ProprDBError("execute sqlite statement: \(sqliteErrorMessage(statement: statement))")
+        do {
+            try bind(arguments, to: statement)
+            let result = sqlite3_step(statement)
+            if result != SQLITE_DONE {
+                throw ProprDBError("execute sqlite statement: \(sqliteErrorMessage(statement: statement))")
+            }
+            let finalizeResult = sqlite3_finalize(statement)
+            if finalizeResult != SQLITE_OK {
+                throw ProprDBError("finalize sqlite statement: result=\(finalizeResult)")
+            }
+        } catch {
+            let finalizeResult = sqlite3_finalize(statement)
+            if finalizeResult != SQLITE_OK {
+                throw ProprDBError("\(error) (additionally, finalize sqlite statement: result=\(finalizeResult))")
+            }
+            throw error
         }
     }
 
@@ -249,7 +387,10 @@ public extension DBTX {
             try bind(arguments, to: statement)
             return SQLiteRows(statement: statement)
         } catch {
-            sqlite3_finalize(statement)
+            let finalizeResult = sqlite3_finalize(statement)
+            if finalizeResult != SQLITE_OK {
+                throw ProprDBError("\(error) (additionally, finalize sqlite query: result=\(finalizeResult))")
+            }
             throw error
         }
     }
@@ -519,13 +660,25 @@ public func localMaxAtNs(_ q: any DBTX, tableName: String, objectID: String) thr
     return max(rowAtNs ?? -1, tombstoneAtNs ?? -1)
 }
 
+public func nextObjectAtNs(_ q: any DBTX, tableName: String, objectID: String) throws -> Int64 {
+    let currentAtNs = try localMaxAtNs(q, tableName: tableName, objectID: objectID)
+    let wallAtNs = nowNs()
+    if currentAtNs >= wallAtNs {
+        guard currentAtNs < Int64.max else {
+            throw ProprDBError("object timestamp exhausted Int64")
+        }
+        return currentAtNs + 1
+    }
+    return wallAtNs
+}
+
 public func introspectTables(_ q: any DBTX, descriptors: [GeneratedTableDescriptor]) throws -> [TableIntrospection] {
     var result: [TableIntrospection] = []
     for descriptor in descriptors {
         result.append(TableIntrospection(
             descriptor: descriptor,
             objectCount: try tableObjectCount(q, tableName: descriptor.tableName),
-            diskUsageBytes: try tableDiskUsageBytes(q, tableName: descriptor.tableName)
+            payloadBytes: try tablePayloadBytes(q, tableName: descriptor.tableName)
         ))
     }
     return result
@@ -570,8 +723,11 @@ private func bind(_ arguments: [Any?], to statement: OpaquePointer) throws {
                 throw ProprDBError("bind sqlite null: \(sqliteErrorMessage(statement: statement))")
             }
         case let value as String:
-            if sqlite3_bind_text(statement, parameterIndex, value, -1, sqliteTransient) != SQLITE_OK {
-                throw ProprDBError("bind sqlite text: \(sqliteErrorMessage(statement: statement))")
+            try value.utf8CString.withUnsafeBufferPointer { buffer in
+                let result = sqlite3_bind_text(statement, parameterIndex, buffer.baseAddress, Int32(buffer.count - 1), sqliteTransient)
+                if result != SQLITE_OK {
+                    throw ProprDBError("bind sqlite text: \(sqliteErrorMessage(statement: statement))")
+                }
             }
         case let value as Int:
             if sqlite3_bind_int64(statement, parameterIndex, Int64(value)) != SQLITE_OK {
@@ -594,6 +750,12 @@ private func bind(_ arguments: [Any?], to statement: OpaquePointer) throws {
                 throw ProprDBError("bind sqlite float: \(sqliteErrorMessage(statement: statement))")
             }
         case let value as Data:
+            if value.isEmpty {
+                if sqlite3_bind_zeroblob(statement, parameterIndex, 0) != SQLITE_OK {
+                    throw ProprDBError("bind empty sqlite blob: \(sqliteErrorMessage(statement: statement))")
+                }
+                continue
+            }
             try value.withUnsafeBytes { buffer in
                 let pointer = buffer.baseAddress?.assumingMemoryBound(to: UInt8.self)
                 let result = sqlite3_bind_blob(statement, parameterIndex, pointer, Int32(buffer.count), sqliteTransient)
@@ -614,9 +776,16 @@ private func jsonObject(from data: Data) throws -> Any {
 private func decodeInt64(_ value: Any?, fieldName: String, lineNumber: Int) throws -> Int64 {
     switch value {
     case let number as NSNumber:
-        return number.int64Value
+        let type = String(cString: number.objCType)
+        guard ["c", "s", "i", "l", "q"].contains(type),
+              let parsed = Int64(number.stringValue),
+              String(parsed) == number.stringValue
+        else {
+            throw ProprDBError("decode jsonl line \(lineNumber): invalid \(fieldName)")
+        }
+        return parsed
     case let string as String:
-        guard let parsed = Int64(string) else {
+        guard let parsed = Int64(string), String(parsed) == string else {
             throw ProprDBError("decode jsonl line \(lineNumber): invalid \(fieldName)")
         }
         return parsed
@@ -636,7 +805,7 @@ private func tableObjectCount(_ q: any DBTX, tableName: String) throws -> Int64 
     return objectCount
 }
 
-private func tableDiskUsageBytes(_ q: any DBTX, tableName: String) throws -> Int64 {
+private func tablePayloadBytes(_ q: any DBTX, tableName: String) throws -> Int64 {
     let columnNames = try tableColumnNames(q, tableName: tableName)
     let quotedTableName = quoteSQLiteIdentifier(tableName)
     let query: String
