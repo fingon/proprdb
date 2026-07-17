@@ -8,11 +8,19 @@ public let coreTableDeletedName = "_deleted"
 public let coreTableSyncName = "_sync"
 public let coreTableSchemaStateName = "_proprdb_schema"
 public let coreTableUnknownName = "_unknown_types"
+public let coreTableUnknownSyncName = "_unknown_sync"
+public let coreTableMetadataName = "_proprdb_metadata"
+public let coreTableExportBatchName = "_export_batches"
+public let coreTableExportEntryName = "_export_batch_entries"
 
 public let _deletedTableName = quoteSQLiteIdentifier(coreTableDeletedName)
 public let _syncTableName = quoteSQLiteIdentifier(coreTableSyncName)
 public let _proprdbSchemaTableName = quoteSQLiteIdentifier(coreTableSchemaStateName)
 public let _unknownTypesTableName = quoteSQLiteIdentifier(coreTableUnknownName)
+public let _unknownSyncTableName = quoteSQLiteIdentifier(coreTableUnknownSyncName)
+public let _metadataTableName = quoteSQLiteIdentifier(coreTableMetadataName)
+public let _exportBatchesTableName = quoteSQLiteIdentifier(coreTableExportBatchName)
+public let _exportBatchEntriesTableName = quoteSQLiteIdentifier(coreTableExportEntryName)
 
 private let dataColumnName = "data"
 private let logger = Logger(label: "ProprDBSwiftRuntime")
@@ -40,7 +48,7 @@ public func validateForWrite<T>(_ value: T) throws {
     }
 }
 
-public struct JSONLRecord: Equatable {
+public struct JSONLRecord: Equatable, Sendable {
     public let id: String
     public let deleted: Bool
     public let atNs: Int64
@@ -54,7 +62,47 @@ public struct JSONLRecord: Equatable {
     }
 }
 
-public struct GeneratedTableDescriptor: Equatable {
+public struct JSONLCheckpoint: Codable, Equatable, Sendable {
+    public let version: Int
+    public let databaseId: String
+    public let batchId: String
+
+    public func serialized() throws -> String {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        return String(decoding: try encoder.encode(self), as: UTF8.self)
+    }
+
+    public static func parse(_ text: String) throws -> Self {
+        guard let data = text.data(using: .utf8) else {
+            throw ProprDBError("checkpoint is not utf8")
+        }
+        let checkpoint = try JSONDecoder().decode(Self.self, from: data)
+        guard checkpoint.version == 1, !checkpoint.databaseId.isEmpty, !checkpoint.batchId.isEmpty else {
+            throw ProprDBError("invalid jsonl checkpoint")
+        }
+        return checkpoint
+    }
+}
+
+public struct PreparedJSONLExport: Equatable, Sendable {
+    public let text: String
+    public let checkpoint: JSONLCheckpoint
+}
+
+public struct ConflictError: Error, Equatable, Sendable, CustomStringConvertible {
+    public let typeName: String
+    public let id: String
+    public let atNs: Int64
+    public let localDeleted: Bool
+    public let remoteDeleted: Bool
+
+    public var description: String {
+        "conflicting state type=\(typeName) id=\(id) at_ns=\(atNs) local_deleted=\(localDeleted) remote_deleted=\(remoteDeleted)"
+    }
+}
+
+public struct GeneratedTableDescriptor: Equatable, Sendable {
     public let tableName: String
     public let typeName: String
     public let isCore: Bool
@@ -66,6 +114,84 @@ public struct GeneratedTableDescriptor: Equatable {
         self.isCore = isCore
         self.syncEnabled = syncEnabled
     }
+}
+
+public enum SQLiteBindValue: Sendable {
+    case null
+    case string(String)
+    case int64(Int64)
+    case double(Double)
+    case bool(Bool)
+    case data(Data)
+
+    fileprivate var sqliteValue: Any? {
+        switch self {
+        case .null: nil
+        case let .string(value): value
+        case let .int64(value): value
+        case let .double(value): value
+        case let .bool(value): value
+        case let .data(value): value
+        }
+    }
+}
+
+public func sqliteBindValue(_ value: String) -> SQLiteBindValue { .string(value) }
+public func sqliteBindValue(_ value: Bool) -> SQLiteBindValue { .bool(value) }
+public func sqliteBindValue(_ value: Int32) -> SQLiteBindValue { .int64(Int64(value)) }
+public func sqliteBindValue(_ value: Int64) -> SQLiteBindValue { .int64(value) }
+public func sqliteBindValue(_ value: UInt32) -> SQLiteBindValue { .int64(Int64(value)) }
+public func sqliteBindValue(_ value: UInt64) -> SQLiteBindValue { .int64(Int64(bitPattern: value)) }
+public func sqliteBindValue(_ value: Float) -> SQLiteBindValue { .double(Double(value)) }
+public func sqliteBindValue(_ value: Double) -> SQLiteBindValue { .double(value) }
+public func sqliteBindValue(_ value: Data) -> SQLiteBindValue { .data(value) }
+public func sqliteBindValue<T: Enum>(_ value: T) -> SQLiteBindValue { .int64(Int64(value.rawValue)) }
+
+public struct GeneratedTableBinding: @unchecked Sendable {
+    public let descriptor: GeneratedTableDescriptor
+    public let messageType: any Message.Type
+    public let insertSQL: String
+    public let upsertSQL: String
+    public let decodeAnyJSON: @Sendable (Data) throws -> any Message
+    public let decodeBinary: @Sendable (Data) throws -> any Message
+    public let encodeAnyJSON: @Sendable (any Message) throws -> Data
+    public let messagesEqual: @Sendable (any Message, any Message) -> Bool
+    public let projectedValues: @Sendable (any Message) throws -> [SQLiteBindValue]
+
+    public init(
+        descriptor: GeneratedTableDescriptor,
+        messageType: any Message.Type,
+        insertSQL: String,
+        upsertSQL: String,
+        decodeAnyJSON: @escaping @Sendable (Data) throws -> any Message,
+        decodeBinary: @escaping @Sendable (Data) throws -> any Message,
+        encodeAnyJSON: @escaping @Sendable (any Message) throws -> Data,
+        messagesEqual: @escaping @Sendable (any Message, any Message) -> Bool,
+        projectedValues: @escaping @Sendable (any Message) throws -> [SQLiteBindValue]
+    ) {
+        self.descriptor = descriptor
+        self.messageType = messageType
+        self.insertSQL = insertSQL
+        self.upsertSQL = upsertSQL
+        self.decodeAnyJSON = decodeAnyJSON
+        self.decodeBinary = decodeBinary
+        self.encodeAnyJSON = encodeAnyJSON
+        self.messagesEqual = messagesEqual
+        self.projectedValues = projectedValues
+    }
+}
+
+public func coreTableDescriptors() -> [GeneratedTableDescriptor] {
+    [
+        GeneratedTableDescriptor(tableName: coreTableDeletedName, typeName: "", isCore: true, syncEnabled: false),
+        GeneratedTableDescriptor(tableName: coreTableSyncName, typeName: "", isCore: true, syncEnabled: false),
+        GeneratedTableDescriptor(tableName: coreTableSchemaStateName, typeName: "", isCore: true, syncEnabled: false),
+        GeneratedTableDescriptor(tableName: coreTableUnknownName, typeName: "", isCore: true, syncEnabled: false),
+        GeneratedTableDescriptor(tableName: coreTableUnknownSyncName, typeName: "", isCore: true, syncEnabled: false),
+        GeneratedTableDescriptor(tableName: coreTableMetadataName, typeName: "", isCore: true, syncEnabled: false),
+        GeneratedTableDescriptor(tableName: coreTableExportBatchName, typeName: "", isCore: true, syncEnabled: false),
+        GeneratedTableDescriptor(tableName: coreTableExportEntryName, typeName: "", isCore: true, syncEnabled: false),
+    ]
 }
 
 public struct TableIntrospection: Equatable {
@@ -425,10 +551,52 @@ public extension DBTX {
 }
 
 public func ensureCoreTables(_ q: any DBTX) throws {
-    try q.execute("CREATE TABLE IF NOT EXISTS \(quoteSQLiteIdentifier(coreTableDeletedName)) (table_name TEXT NOT NULL, id TEXT NOT NULL, at_ns INTEGER NOT NULL, PRIMARY KEY (table_name, id))")
-    try q.execute("CREATE TABLE IF NOT EXISTS \(quoteSQLiteIdentifier(coreTableSyncName)) (object_id TEXT NOT NULL, table_name TEXT NOT NULL, at_ns INTEGER NOT NULL, remote TEXT NOT NULL, PRIMARY KEY (object_id, table_name, remote))")
-    try q.execute("CREATE TABLE IF NOT EXISTS \(quoteSQLiteIdentifier(coreTableSchemaStateName)) (table_name TEXT PRIMARY KEY, schema_hash TEXT NOT NULL)")
-    try q.execute("CREATE TABLE IF NOT EXISTS \(quoteSQLiteIdentifier(coreTableUnknownName)) (type_name TEXT NOT NULL, id TEXT NOT NULL, at_ns INTEGER NOT NULL, deleted INTEGER NOT NULL, data_json TEXT NOT NULL, PRIMARY KEY (type_name, id, at_ns))")
+    try q.withTransaction { transaction in
+        try transaction.execute("CREATE TABLE IF NOT EXISTS \(_deletedTableName) (table_name TEXT NOT NULL, id TEXT NOT NULL, at_ns INTEGER NOT NULL, PRIMARY KEY (table_name, id))")
+        try transaction.execute("CREATE TABLE IF NOT EXISTS \(_syncTableName) (object_id TEXT NOT NULL, table_name TEXT NOT NULL, at_ns INTEGER NOT NULL, remote TEXT NOT NULL, PRIMARY KEY (object_id, table_name, remote))")
+        try transaction.execute("CREATE TABLE IF NOT EXISTS \(_proprdbSchemaTableName) (table_name TEXT PRIMARY KEY, schema_hash TEXT NOT NULL)")
+        try transaction.execute("CREATE TABLE IF NOT EXISTS \(_metadataTableName) (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
+        try transaction.execute("CREATE TABLE IF NOT EXISTS \(_unknownSyncTableName) (type_name TEXT NOT NULL, id TEXT NOT NULL, at_ns INTEGER NOT NULL, remote TEXT NOT NULL, PRIMARY KEY (type_name, id, remote))")
+        try transaction.execute("CREATE TABLE IF NOT EXISTS \(_exportBatchesTableName) (batch_id TEXT PRIMARY KEY, database_id TEXT NOT NULL, remote TEXT NOT NULL, complete INTEGER NOT NULL DEFAULT 0)")
+        try transaction.execute("CREATE TABLE IF NOT EXISTS \(_exportBatchEntriesTableName) (batch_id TEXT NOT NULL, sequence INTEGER NOT NULL, table_name TEXT NOT NULL, object_id TEXT NOT NULL, at_ns INTEGER NOT NULL, record_json BLOB, PRIMARY KEY (batch_id, sequence), FOREIGN KEY (batch_id) REFERENCES \(_exportBatchesTableName)(batch_id) ON DELETE CASCADE)")
+        try ensureLatestUnknownSchema(transaction)
+        let databaseID = try transaction.withRows("SELECT value FROM \(_metadataTableName) WHERE key = ?", arguments: ["database_id"]) { rows in
+            try rows.next()?.string(at: 0)
+        }
+        if databaseID == nil {
+            try transaction.execute("INSERT INTO \(_metadataTableName) (key, value) VALUES (?, ?)", arguments: ["database_id", try uuidV7()])
+        }
+    }
+}
+
+private func ensureLatestUnknownSchema(_ q: any DBTX) throws {
+    let createSQL = try q.withRows("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?", arguments: [coreTableUnknownName]) { rows in
+        try rows.next()?.string(at: 0)
+    }
+    guard let createSQL else {
+        try q.execute("CREATE TABLE \(_unknownTypesTableName) (type_name TEXT NOT NULL, id TEXT NOT NULL, at_ns INTEGER NOT NULL, deleted INTEGER NOT NULL, data_json TEXT NOT NULL, PRIMARY KEY (type_name, id))")
+        return
+    }
+    let normalizedSQL = createSQL.lowercased().replacingOccurrences(of: " ", with: "")
+    if normalizedSQL.contains("primarykey(type_name,id)") {
+        return
+    }
+    let replacementTableName = "_unknown_types_replacement"
+    let replacementTable = quoteSQLiteIdentifier(replacementTableName)
+    try q.execute("DROP TABLE IF EXISTS \(replacementTable)")
+    try q.execute("CREATE TABLE \(replacementTable) (type_name TEXT NOT NULL, id TEXT NOT NULL, at_ns INTEGER NOT NULL, deleted INTEGER NOT NULL, data_json TEXT NOT NULL, PRIMARY KEY (type_name, id))")
+    try q.execute("""
+    INSERT INTO \(replacementTable) (type_name, id, at_ns, deleted, data_json)
+    SELECT old.type_name, old.id, old.at_ns, old.deleted, old.data_json
+    FROM \(_unknownTypesTableName) old
+    WHERE old.rowid = (
+        SELECT candidate.rowid FROM \(_unknownTypesTableName) candidate
+        WHERE candidate.type_name = old.type_name AND candidate.id = old.id
+        ORDER BY candidate.at_ns DESC, candidate.rowid DESC LIMIT 1
+    )
+    """)
+    try q.execute("DROP TABLE \(_unknownTypesTableName)")
+    try q.execute("ALTER TABLE \(replacementTable) RENAME TO \(coreTableUnknownName)")
 }
 
 public func ensureManagedIndexes(_ q: any DBTX, tableName: String, generatedIndexPrefix: String, createIndexSQL: [String], desiredIndexNames: [String]) throws {
@@ -587,24 +755,23 @@ public func unknownInsert(_ q: any DBTX, typeName: String, record: JSONLRecord) 
     guard !typeName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
         throw ProprDBError("empty type name")
     }
-    try q.execute("INSERT INTO \(_unknownTypesTableName) (type_name, id, at_ns, deleted, data_json) VALUES (?, ?, ?, ?, ?)", arguments: [typeName, record.id, record.atNs, record.deleted ? 1 : 0, String(decoding: record.data, as: UTF8.self)])
+    let canonicalData = try JSONSerialization.data(withJSONObject: jsonObject(from: record.data), options: [.sortedKeys])
+    let dataJSON = String(decoding: canonicalData, as: UTF8.self)
+    let existing = try q.withRows("SELECT at_ns, deleted, data_json FROM \(_unknownTypesTableName) WHERE type_name = ? AND id = ?", arguments: [typeName, record.id]) { rows -> (Int64, Bool, String)? in
+        guard let row = try rows.next() else { return nil }
+        return (try row.int64(at: 0), try row.int64(at: 1) != 0, try row.string(at: 2))
+    }
+    if let existing, existing.0 == record.atNs {
+        if existing.1 == record.deleted, existing.2 == dataJSON {
+            return
+        }
+        throw ConflictError(typeName: typeName, id: record.id, atNs: record.atNs, localDeleted: existing.1, remoteDeleted: record.deleted)
+    }
+    try q.execute("INSERT INTO \(_unknownTypesTableName) (type_name, id, at_ns, deleted, data_json) VALUES (?, ?, ?, ?, ?) ON CONFLICT(type_name, id) DO UPDATE SET at_ns = excluded.at_ns, deleted = excluded.deleted, data_json = excluded.data_json WHERE excluded.at_ns > at_ns", arguments: [typeName, record.id, record.atNs, record.deleted ? 1 : 0, dataJSON])
 }
 
 public func compactUnknownLatest(_ q: any DBTX) throws {
-    let sql = """
-    DELETE FROM \(_unknownTypesTableName) WHERE rowid NOT IN (
-    SELECT MAX(kept.rowid)
-    FROM \(_unknownTypesTableName) kept
-    JOIN (
-        SELECT type_name, id, MAX(at_ns) AS max_at_ns
-        FROM \(_unknownTypesTableName)
-        GROUP BY type_name, id
-    ) latest
-    ON latest.type_name = kept.type_name AND latest.id = kept.id AND latest.max_at_ns = kept.at_ns
-    GROUP BY kept.type_name, kept.id
-    )
-    """
-    try q.execute(sql)
+    _ = q
 }
 
 public func replayUnknownByType(_ q: any DBTX, typeName: String, apply: (JSONLRecord) throws -> Void) throws {
@@ -670,6 +837,252 @@ public func nextObjectAtNs(_ q: any DBTX, tableName: String, objectID: String) t
         return currentAtNs + 1
     }
     return wallAtNs
+}
+
+private func bindingArguments(_ binding: GeneratedTableBinding, id: String, atNs: Int64, message: any Message) throws -> [Any?] {
+    var arguments: [Any?] = [id, atNs, try message.serializedData()]
+    arguments.append(contentsOf: try binding.projectedValues(message).map(\.sqliteValue))
+    return arguments
+}
+
+public func writeLocalObject(
+    _ q: any DBTX,
+    binding: GeneratedTableBinding,
+    id: String,
+    message: any Message,
+    insert: Bool
+) throws -> Int64 {
+    try q.withTransaction { transaction in
+        let atNs = try nextObjectAtNs(transaction, tableName: binding.descriptor.tableName, objectID: id)
+        let arguments = try bindingArguments(binding, id: id, atNs: atNs, message: message)
+        try transaction.execute("DELETE FROM \(_deletedTableName) WHERE table_name = ? AND id = ?", arguments: [binding.descriptor.tableName, id])
+        try transaction.execute(insert ? binding.insertSQL : binding.upsertSQL, arguments: arguments)
+        return atNs
+    }
+}
+
+public func deleteLocalObject(_ q: any DBTX, tableName: String, id: String) throws {
+    try q.withTransaction { transaction in
+        let atNs = try nextObjectAtNs(transaction, tableName: tableName, objectID: id)
+        try applyTombstone(transaction, tableName: tableName, id: id, atNs: atNs)
+    }
+}
+
+private func decodedBindingMessage(_ binding: GeneratedTableBinding, data: Data) throws -> any Message {
+    try binding.decodeAnyJSON(data)
+}
+
+public func applyIncomingObject(_ q: any DBTX, binding: GeneratedTableBinding, record: JSONLRecord) throws {
+    let localAtNs = try localMaxAtNs(q, tableName: binding.descriptor.tableName, objectID: record.id)
+    if record.atNs < localAtNs {
+        return
+    }
+    if record.deleted {
+        if record.atNs == localAtNs {
+            let tombstoneExists = try q.withRows("SELECT 1 FROM \(_deletedTableName) WHERE table_name = ? AND id = ? AND at_ns = ?", arguments: [binding.descriptor.tableName, record.id, record.atNs]) { rows in
+                try rows.next() != nil
+            }
+            if tombstoneExists {
+                return
+            }
+            throw ConflictError(typeName: binding.descriptor.typeName, id: record.id, atNs: record.atNs, localDeleted: false, remoteDeleted: true)
+        }
+        try applyTombstone(q, tableName: binding.descriptor.tableName, id: record.id, atNs: record.atNs)
+        return
+    }
+    let message = try decodedBindingMessage(binding, data: record.data)
+    if record.atNs == localAtNs {
+        let localData = try q.withRows("SELECT data FROM \(quoteSQLiteIdentifier(binding.descriptor.tableName)) WHERE id = ? AND at_ns = ?", arguments: [record.id, record.atNs]) { rows in
+            try rows.next()?.data(at: 0)
+        }
+        guard let localData else {
+            throw ConflictError(typeName: binding.descriptor.typeName, id: record.id, atNs: record.atNs, localDeleted: true, remoteDeleted: false)
+        }
+        let localMessage = try binding.decodeBinary(localData)
+        if binding.messagesEqual(localMessage, message) {
+            return
+        }
+        throw ConflictError(typeName: binding.descriptor.typeName, id: record.id, atNs: record.atNs, localDeleted: false, remoteDeleted: false)
+    }
+    try q.execute("DELETE FROM \(_deletedTableName) WHERE table_name = ? AND id = ?", arguments: [binding.descriptor.tableName, record.id])
+    try q.execute(binding.upsertSQL, arguments: try bindingArguments(binding, id: record.id, atNs: record.atNs, message: message))
+}
+
+private func applyTombstone(_ q: any DBTX, tableName: String, id: String, atNs: Int64) throws {
+    try q.execute("INSERT INTO \(_deletedTableName) (table_name, id, at_ns) VALUES (?, ?, ?) ON CONFLICT(table_name, id) DO UPDATE SET at_ns = excluded.at_ns", arguments: [tableName, id, atNs])
+    try q.execute("DELETE FROM \(quoteSQLiteIdentifier(tableName)) WHERE id = ?", arguments: [id])
+}
+
+public func readBoundJSONL(_ q: any DBTX, bindings: [GeneratedTableBinding], remote: String, text: String) throws {
+    let bindingsByType = Dictionary(uniqueKeysWithValues: bindings.map { ($0.descriptor.typeName, $0) })
+    try readJSONL(text: text) { record, lineNumber in
+        guard !record.id.isEmpty, !record.data.isEmpty else {
+            throw ProprDBError("jsonl line \(lineNumber) has empty id or data")
+        }
+        let typeName = try typeNameFromAnyJSON(record.data)
+        if let binding = bindingsByType[typeName], !binding.descriptor.syncEnabled {
+            logIgnoredUnsyncedJSONLRecord(typeName: typeName, id: record.id, remote: remote, lineNumber: lineNumber)
+            return
+        }
+        try q.withTransaction { transaction in
+            if let binding = bindingsByType[typeName] {
+                try applyIncomingObject(transaction, binding: binding, record: record)
+                try syncUpsert(transaction, objectID: record.id, tableName: binding.descriptor.tableName, remote: remote, atNs: record.atNs)
+            } else {
+                try unknownInsert(transaction, typeName: typeName, record: record)
+                if !remote.isEmpty {
+                    try transaction.execute("INSERT INTO \(_unknownSyncTableName) (type_name, id, at_ns, remote) VALUES (?, ?, ?, ?) ON CONFLICT(type_name, id, remote) DO UPDATE SET at_ns = max(at_ns, excluded.at_ns)", arguments: [typeName, record.id, record.atNs, remote])
+                }
+            }
+        }
+    }
+}
+
+public func drainBoundUnknown(_ q: any DBTX, bindings: [GeneratedTableBinding]) throws {
+    for binding in bindings where binding.descriptor.syncEnabled {
+        let records = try q.withRows("SELECT id, at_ns, deleted, data_json FROM \(_unknownTypesTableName) WHERE type_name = ? ORDER BY id", arguments: [binding.descriptor.typeName]) { rows in
+            var result: [JSONLRecord] = []
+            while let row = try rows.next() {
+                result.append(JSONLRecord(
+                    id: try row.string(at: 0),
+                    deleted: try row.int64(at: 2) != 0,
+                    atNs: try row.int64(at: 1),
+                    data: Data((try row.string(at: 3)).utf8)
+                ))
+            }
+            return result
+        }
+        for record in records {
+            try q.withTransaction { transaction in
+                try applyIncomingObject(transaction, binding: binding, record: record)
+                try transaction.execute("INSERT INTO \(_syncTableName) (object_id, table_name, at_ns, remote) SELECT id, ?, at_ns, remote FROM \(_unknownSyncTableName) WHERE type_name = ? AND id = ? ON CONFLICT(object_id, table_name, remote) DO UPDATE SET at_ns = max(at_ns, excluded.at_ns)", arguments: [binding.descriptor.tableName, binding.descriptor.typeName, record.id])
+                try transaction.execute("DELETE FROM \(_unknownSyncTableName) WHERE type_name = ? AND id = ?", arguments: [binding.descriptor.typeName, record.id])
+                try transaction.execute("DELETE FROM \(_unknownTypesTableName) WHERE type_name = ? AND id = ?", arguments: [binding.descriptor.typeName, record.id])
+            }
+        }
+    }
+}
+
+private func databaseID(_ q: any DBTX) throws -> String {
+    try q.withRows("SELECT value FROM \(_metadataTableName) WHERE key = ?", arguments: ["database_id"]) { rows in
+        guard let value = try rows.next()?.string(at: 0) else {
+            throw ProprDBError("missing database id")
+        }
+        return value
+    }
+}
+
+public func prepareBoundJSONL(_ q: any DBTX, bindings: [GeneratedTableBinding], remote: String) throws -> PreparedJSONLExport {
+    try ensureCoreTables(q)
+    let checkpoint = try q.withTransaction { transaction in
+        let checkpoint = JSONLCheckpoint(version: 1, databaseId: try databaseID(transaction), batchId: try uuidV7())
+        try transaction.execute("INSERT INTO \(_exportBatchesTableName) (batch_id, database_id, remote, complete) VALUES (?, ?, ?, 0)", arguments: [checkpoint.batchId, checkpoint.databaseId, remote])
+        var sequence = 0
+        for binding in bindings where binding.descriptor.syncEnabled {
+            let tableName = binding.descriptor.tableName
+            let rows = try transaction.withRows("""
+            SELECT row.id, row.at_ns, row.data FROM \(quoteSQLiteIdentifier(tableName)) row
+            LEFT JOIN \(_syncTableName) sync_row
+            ON sync_row.object_id = row.id AND sync_row.table_name = ? AND sync_row.remote = ?
+            WHERE ? = '' OR sync_row.at_ns IS NULL OR sync_row.at_ns < row.at_ns ORDER BY row.id
+            """, arguments: [tableName, remote, remote]) { rows in
+                var result: [(String, Int64, Data)] = []
+                while let row = try rows.next() {
+                    result.append((try row.string(at: 0), try row.int64(at: 1), try row.data(at: 2)))
+                }
+                return result
+            }
+            for (id, atNs, data) in rows {
+                let message = try binding.decodeBinary(data)
+                let record = JSONLRecord(id: id, deleted: false, atNs: atNs, data: try binding.encodeAnyJSON(message))
+                try stageJSONLRecord(transaction, checkpoint: checkpoint, sequence: sequence, tableName: tableName, record: record)
+                sequence += 1
+            }
+        }
+        let bindingsByTable = Dictionary(uniqueKeysWithValues: bindings.filter { $0.descriptor.syncEnabled }.map { ($0.descriptor.tableName, $0) })
+        let tombstones = try transaction.withRows("SELECT table_name, id, at_ns FROM \(_deletedTableName) ORDER BY table_name, id") { rows in
+            var result: [(String, String, Int64)] = []
+            while let row = try rows.next() {
+                result.append((try row.string(at: 0), try row.string(at: 1), try row.int64(at: 2)))
+            }
+            return result
+        }
+        for (tableName, id, atNs) in tombstones {
+            guard let binding = bindingsByTable[tableName], try syncNeedsSend(transaction, objectID: id, tableName: tableName, remote: remote, atNs: atNs) else {
+                continue
+            }
+            let record = JSONLRecord(id: id, deleted: true, atNs: atNs, data: try marshalTypeOnlyAnyJSON(typeName: binding.descriptor.typeName))
+            try stageJSONLRecord(transaction, checkpoint: checkpoint, sequence: sequence, tableName: tableName, record: record)
+            sequence += 1
+        }
+        let unknownRows = try transaction.withRows("SELECT type_name, id, at_ns, deleted, data_json FROM \(_unknownTypesTableName) ORDER BY type_name, id") { rows in
+            var result: [(String, JSONLRecord)] = []
+            while let row = try rows.next() {
+                let typeName = try row.string(at: 0)
+                let record = JSONLRecord(id: try row.string(at: 1), deleted: try row.int64(at: 3) != 0, atNs: try row.int64(at: 2), data: Data((try row.string(at: 4)).utf8))
+                result.append((typeName, record))
+            }
+            return result
+        }
+        for (typeName, record) in unknownRows {
+            if try remote.isEmpty || unknownSyncNeedsSend(transaction, typeName: typeName, record: record, remote: remote) {
+                try stageJSONLRecord(transaction, checkpoint: checkpoint, sequence: sequence, tableName: "@unknown:\(typeName)", record: record)
+                sequence += 1
+            }
+        }
+        try transaction.execute("UPDATE \(_exportBatchesTableName) SET complete = 1 WHERE batch_id = ?", arguments: [checkpoint.batchId])
+        return checkpoint
+    }
+    let text = try q.withRows("SELECT record_json FROM \(_exportBatchEntriesTableName) WHERE batch_id = ? ORDER BY sequence", arguments: [checkpoint.batchId]) { rows in
+        var output = ""
+        while let row = try rows.next() {
+            output += String(decoding: try row.data(at: 0), as: UTF8.self)
+        }
+        return output
+    }
+    return PreparedJSONLExport(text: text, checkpoint: checkpoint)
+}
+
+private func stageJSONLRecord(_ q: any DBTX, checkpoint: JSONLCheckpoint, sequence: Int, tableName: String, record: JSONLRecord) throws {
+    try q.execute("INSERT INTO \(_exportBatchEntriesTableName) (batch_id, sequence, table_name, object_id, at_ns, record_json) VALUES (?, ?, ?, ?, ?, ?)", arguments: [checkpoint.batchId, sequence, tableName, record.id, record.atNs, Data(try encodeJSONLRecord(record).utf8)])
+}
+
+private func unknownSyncNeedsSend(_ q: any DBTX, typeName: String, record: JSONLRecord, remote: String) throws -> Bool {
+    let atNs = try q.withRows("SELECT at_ns FROM \(_unknownSyncTableName) WHERE type_name = ? AND id = ? AND remote = ?", arguments: [typeName, record.id, remote]) { rows in
+        try rows.next()?.int64(at: 0)
+    }
+    return atNs == nil || atNs! < record.atNs
+}
+
+public func acknowledgeBoundJSONL(_ q: any DBTX, checkpoint: JSONLCheckpoint) throws {
+    try q.withTransaction { transaction in
+        guard checkpoint.version == 1, checkpoint.databaseId == (try databaseID(transaction)) else {
+            throw ProprDBError("export checkpoint belongs to a different database")
+        }
+        let batch = try transaction.withRows("SELECT remote, complete FROM \(_exportBatchesTableName) WHERE batch_id = ?", arguments: [checkpoint.batchId]) { rows -> (String, Int64)? in
+            guard let row = try rows.next() else { return nil }
+            return (try row.string(at: 0), try row.int64(at: 1))
+        }
+        guard let (remote, complete) = batch else { return }
+        guard complete == 1 else { throw ProprDBError("cannot acknowledge incomplete export batch") }
+        if !remote.isEmpty {
+            try transaction.execute("INSERT INTO \(_syncTableName) (object_id, table_name, at_ns, remote) SELECT object_id, table_name, at_ns, ? FROM \(_exportBatchEntriesTableName) WHERE batch_id = ? AND table_name NOT LIKE '@unknown:%' ON CONFLICT(object_id, table_name, remote) DO UPDATE SET at_ns = max(at_ns, excluded.at_ns)", arguments: [remote, checkpoint.batchId])
+            try transaction.execute("INSERT INTO \(_unknownSyncTableName) (type_name, id, at_ns, remote) SELECT substr(table_name, 10), object_id, at_ns, ? FROM \(_exportBatchEntriesTableName) WHERE batch_id = ? AND table_name LIKE '@unknown:%' ON CONFLICT(type_name, id, remote) DO UPDATE SET at_ns = max(at_ns, excluded.at_ns)", arguments: [remote, checkpoint.batchId])
+        }
+        try deleteJSONLBatch(transaction, batchID: checkpoint.batchId)
+    }
+}
+
+public func discardBoundJSONL(_ q: any DBTX, checkpoint: JSONLCheckpoint) throws {
+    guard checkpoint.version == 1, checkpoint.databaseId == (try databaseID(q)) else {
+        throw ProprDBError("export checkpoint belongs to a different database")
+    }
+    try deleteJSONLBatch(q, batchID: checkpoint.batchId)
+}
+
+private func deleteJSONLBatch(_ q: any DBTX, batchID: String) throws {
+    try q.execute("DELETE FROM \(_exportBatchEntriesTableName) WHERE batch_id = ?", arguments: [batchID])
+    try q.execute("DELETE FROM \(_exportBatchesTableName) WHERE batch_id = ?", arguments: [batchID])
 }
 
 public func introspectTables(_ q: any DBTX, descriptors: [GeneratedTableDescriptor]) throws -> [TableIntrospection] {

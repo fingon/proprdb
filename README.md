@@ -89,7 +89,15 @@ application. Other SQLite tables are ignored.
 Generated CRUD wrappers include:
 
 - `WriteJSONL(remote string, w io.Writer) error`
+- `PrepareJSONL`, `AcknowledgeJSONL`, and `DiscardJSONL`
 - `ReadJSONL(remote string, r io.Reader) error`
+
+Swift exposes the same workflow as `prepareJSONL`, `acknowledgeJSONL`,
+`discardJSONL`, `writeJSONL`, and `readJSONL`. A prepared export is a stable
+database snapshot. Acknowledging its checkpoint advances sync watermarks;
+discarding it leaves them unchanged. `WriteJSONL`/`writeJSONL` are convenience
+operations that prepare and then acknowledge. Acknowledging or discarding an
+already-consumed checkpoint from the same database succeeds.
 
 `remote` controls whether `_sync` bookkeeping is used:
 
@@ -100,6 +108,12 @@ Generated CRUD wrappers include:
   - Both methods use `_sync` rows scoped by that remote value.
 
 Whitespace-only strings are treated as non-empty remote names.
+
+Imports commit one JSONL record at a time. State changes and their sync
+watermark are atomic, so a failing record leaves no partial state while earlier
+successful records remain committed. Older timestamps are ignored. Equal
+timestamps must describe semantically equal protobuf state (or the same
+tombstone); otherwise import returns a conflict.
 
 ## Protobuf extensions
 

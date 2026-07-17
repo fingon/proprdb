@@ -10,6 +10,23 @@ private let unknownID = "018f4f3f-6f9f-7a1b-8f55-1234567890aa"
 private let drainPersonID = "018f4f3f-6f9f-7a1b-8f55-1234567890ac"
 
 final class GeneratedSyncTests: XCTestCase {
+    func testPreparedExportCheckpointLifecycle() throws {
+        let db = try SQLiteDatabase(path: ":memory:")
+        let crud = CRUD(db)
+        try crud.initialize()
+        _ = try crud.person.insert(makePerson(name: "Prepared", age: 1))
+
+        let prepared = try crud.prepareJSONL(remote: testRemoteA)
+        XCTAssertFalse(prepared.text.isEmpty)
+        XCTAssertEqual(try JSONLCheckpoint.parse(prepared.checkpoint.serialized()), prepared.checkpoint)
+        XCTAssertFalse(try crud.prepareJSONL(remote: testRemoteA).text.isEmpty)
+
+        try crud.acknowledgeJSONL(prepared.checkpoint)
+        try crud.acknowledgeJSONL(prepared.checkpoint)
+        try crud.discardJSONL(prepared.checkpoint)
+        XCTAssertEqual(try crud.writeJSONL(remote: testRemoteA), "")
+    }
+
     func testGeneratedJSONLSync() throws {
         let sourceDB = try SQLiteDatabase(path: ":memory:")
         let targetDB = try SQLiteDatabase(path: ":memory:")

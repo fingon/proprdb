@@ -89,12 +89,8 @@ func GenerateFiles(plugin *protogen.Plugin, files []*protogen.File) error {
 	file := files[0]
 	filename := file.GeneratedFilenamePrefix + ".proprdb.pb.go"
 	g := plugin.NewGeneratedFile(filename, file.GoImportPath)
-	hasOmitSync := false
 	hasOptionalProjectedFields := false
 	for _, model := range models {
-		if model.OmitSync {
-			hasOmitSync = true
-		}
 		if model.hasOptionalProjectedFields() {
 			hasOptionalProjectedFields = true
 		}
@@ -106,21 +102,15 @@ func GenerateFiles(plugin *protogen.Plugin, files []*protogen.File) error {
 	g.P("import (")
 	g.P(`"context"`)
 	g.P(`"database/sql"`)
-	g.P(`"encoding/json"`)
 	g.P(`"errors"`)
 	g.P(`"fmt"`)
 	g.P(`"io"`)
-	if hasOmitSync {
-		g.P(`"log/slog"`)
-	}
 	g.P(`"strings"`)
 	g.P()
-	g.P(`"google.golang.org/protobuf/encoding/protojson"`)
 	g.P(`"google.golang.org/protobuf/proto"`)
 	if hasOptionalProjectedFields {
 		g.P(`"google.golang.org/protobuf/reflect/protoreflect"`)
 	}
-	g.P(`"google.golang.org/protobuf/types/known/anypb"`)
 	g.P(`rt "github.com/fingon/proprdb/rt"`)
 	g.P(")")
 	g.P()
@@ -131,6 +121,7 @@ func GenerateFiles(plugin *protogen.Plugin, files []*protogen.File) error {
 		emitter.emitModel(model)
 	}
 	emitter.emitWrapper(models)
+	_ = emitter.emitLegacyWrapper
 
 	return nil
 }
@@ -530,6 +521,22 @@ func (e generatorEmitter) emitModel(model messageModel) {
 	g.P("\tq DBTX")
 	g.P("}")
 	g.P()
+	g.P("var ", model.GoName, "GeneratedBinding = rt.GeneratedTableBinding{")
+	g.P("\tDescriptor: rt.GeneratedTableDescriptor{TableName: ", tableNameConst, ", TypeName: ", typeNameConst, ", SyncEnabled: ", strconv.FormatBool(!model.OmitSync), "},")
+	g.P("\tNewMessage: func() proto.Message { return &", model.GoName, "{} },")
+	g.P("\tInsertSQL: ", insertConst, ",")
+	g.P("\tUpsertSQL: ", upsertConst, ",")
+	g.P("\tProjectedValues: func(message proto.Message) ([]any, error) {")
+	g.P("\t\tdata, ok := message.(*", model.GoName, ")")
+	g.P("\t\tif !ok { return nil, fmt.Errorf(\"expected *", model.GoName, ", got %T\", message) }")
+	g.P("\t\tvalues := []any{}")
+	for _, projectedField := range model.ProjectedFields {
+		e.emitProjectedFieldAppend("values", "data", projectedField, "\t\t")
+	}
+	g.P("\t\treturn values, nil")
+	g.P("\t},")
+	g.P("}")
+	g.P()
 
 	g.P("func New", model.TableTypeName, "(q DBTX) *", model.TableTypeName, " {")
 	g.P("\treturn &", model.TableTypeName, "{q: q}")
@@ -643,7 +650,7 @@ func (e generatorEmitter) emitInitMethod(model messageModel, tableNameConst, typ
 	g.P()
 }
 
-func (e generatorEmitter) emitDrainUnknownMethod(model messageModel, tableNameConst, typeNameConst string) {
+func (e generatorEmitter) emitDrainUnknownMethod(model messageModel, _, typeNameConst string) {
 	g := e.g
 	g.P("func (t *", model.TableTypeName, ") drainUnknownRows(typeName string) error {")
 	g.P("\tif t.q == nil {")
@@ -652,22 +659,7 @@ func (e generatorEmitter) emitDrainUnknownMethod(model messageModel, tableNameCo
 	g.P("\tif typeName == \"\" {")
 	g.P("\t\treturn errors.New(\"empty type name\")")
 	g.P("\t}")
-	g.P("\treturn rt.ReplayUnknownByType(t.q, typeName, func(record proprdbJSONLRecord) error {")
-	g.P("\t\tif record.Deleted {")
-	g.P("\t\t\tif err := t.tombstoneWithAtNs(record.ID, record.AtNs); err != nil { return err }")
-	g.P("\t\t\treturn rt.TransferUnknownSyncContext(context.Background(), t.q, typeName, ", tableNameConst, ", record.ID)")
-	g.P("\t\t}")
-	g.P("\t\tanyMessage := &anypb.Any{}")
-	g.P("\t\tif err := protojson.Unmarshal(record.Data, anyMessage); err != nil {")
-	g.P("\t\t\treturn fmt.Errorf(\"unmarshal unknown data for ", model.GoName, " %s: %w\", record.ID, err)")
-	g.P("\t\t}")
-	g.P("\t\tdata := &", model.GoName, "{}")
-	g.P("\t\tif err := anypb.UnmarshalTo(anyMessage, data, proto.UnmarshalOptions{}); err != nil {")
-	g.P("\t\t\treturn fmt.Errorf(\"unmarshal unknown payload for ", model.GoName, " %s: %w\", record.ID, err)")
-	g.P("\t\t}")
-	g.P("\t\tif err := t.upsertWithAtNs(record.ID, record.AtNs, data); err != nil { return err }")
-	g.P("\t\treturn rt.TransferUnknownSyncContext(context.Background(), t.q, typeName, ", tableNameConst, ", record.ID)")
-	g.P("\t})")
+	g.P("\treturn rt.DrainUnknownBindingsContext(context.Background(), t.q, []rt.GeneratedTableBinding{", model.GoName, "GeneratedBinding})")
 	g.P("}")
 	g.P()
 	g.P("func (t *", model.TableTypeName, ") DrainUnknownRows() error {")
@@ -725,7 +717,7 @@ func (e generatorEmitter) emitSelectMethod(model messageModel, tableNameConst st
 	g.P()
 }
 
-func (e generatorEmitter) emitInsertMethod(model messageModel, tableNameConst, insertConst string) {
+func (e generatorEmitter) emitInsertMethod(model messageModel, _, _ string) {
 	g := e.g
 	g.P("func (t *", model.TableTypeName, ") Insert(data *", model.GoName, ") (", model.RowTypeName, ", error) {")
 	g.P("\tif t.q == nil {")
@@ -776,35 +768,14 @@ func (e generatorEmitter) emitInsertMethod(model messageModel, tableNameConst, i
 		g.P("\t\treturn ", model.RowTypeName, "{}, fmt.Errorf(\"validate ", model.GoName, ": %w\", err)")
 		g.P("\t}")
 	}
-	g.P("\tctx := context.Background()")
-	g.P("\tdataBytes, err := proto.Marshal(data)")
-	g.P("\tif err != nil {")
-	g.P("\t\treturn ", model.RowTypeName, "{}, fmt.Errorf(\"marshal ", model.GoName, ": %w\", err)")
-	g.P("\t}")
-	g.P("\tinsertArgs := []any{id, int64(0), dataBytes}")
-	for _, projectedField := range model.ProjectedFields {
-		e.emitProjectedFieldAppend("insertArgs", "data", projectedField, "\t")
-	}
-	g.P("\tvar atNs int64")
-	g.P("\tif err := t.q.WithTransaction(ctx, func(tx rt.DBTX) error {")
-	g.P("\t\tallocatedAtNs, allocateErr := rt.NextObjectAtNsContext(ctx, tx, ", tableNameConst, ", id)")
-	g.P("\t\tif allocateErr != nil { return allocateErr }")
-	g.P("\t\tatNs = allocatedAtNs")
-	g.P("\t\tinsertArgs[1] = atNs")
-	g.P("\t\tif _, deleteErr := tx.ExecContext(ctx, `DELETE FROM _deleted WHERE table_name = ? AND id = ?`, ", tableNameConst, ", id); deleteErr != nil {")
-	g.P("\t\t\treturn fmt.Errorf(\"delete tombstone for %s/%s: %w\", ", tableNameConst, ", id, deleteErr)")
-	g.P("\t\t}")
-	g.P("\t\tif _, insertErr := tx.ExecContext(ctx, ", insertConst, ", insertArgs...); insertErr != nil {")
-	g.P("\t\t\treturn fmt.Errorf(\"insert into %s: %w\", ", tableNameConst, ", insertErr)")
-	g.P("\t\t}")
-	g.P("\t\treturn nil")
-	g.P("\t}); err != nil { return ", model.RowTypeName, "{}, err }")
+	g.P("\tatNs, err := rt.WriteLocalObjectContext(context.Background(), t.q, ", model.GoName, "GeneratedBinding, id, data, true)")
+	g.P("\tif err != nil { return ", model.RowTypeName, "{}, err }")
 	g.P("\treturn ", model.RowTypeName, "{ID: id, AtNs: atNs, Data: data}, nil")
 	g.P("}")
 	g.P()
 }
 
-func (e generatorEmitter) emitUpdateMethod(model messageModel, tableNameConst, upsertConst string) {
+func (e generatorEmitter) emitUpdateMethod(model messageModel, _, _ string) {
 	g := e.g
 	g.P("func (t *", model.TableTypeName, ") UpdateByID(id string, data *", model.GoName, ") (", model.RowTypeName, ", error) {")
 	g.P("\tif t.q == nil {")
@@ -824,29 +795,8 @@ func (e generatorEmitter) emitUpdateMethod(model messageModel, tableNameConst, u
 		g.P("\t\treturn ", model.RowTypeName, "{}, fmt.Errorf(\"validate ", model.GoName, ": %w\", err)")
 		g.P("\t}")
 	}
-	g.P("\tctx := context.Background()")
-	g.P("\tdataBytes, err := proto.Marshal(data)")
-	g.P("\tif err != nil {")
-	g.P("\t\treturn ", model.RowTypeName, "{}, fmt.Errorf(\"marshal ", model.GoName, ": %w\", err)")
-	g.P("\t}")
-	g.P("\tupdateArgs := []any{id, int64(0), dataBytes}")
-	for _, projectedField := range model.ProjectedFields {
-		e.emitProjectedFieldAppend("updateArgs", "data", projectedField, "\t")
-	}
-	g.P("\tvar atNs int64")
-	g.P("\tif err := t.q.WithTransaction(ctx, func(tx rt.DBTX) error {")
-	g.P("\t\tallocatedAtNs, allocateErr := rt.NextObjectAtNsContext(ctx, tx, ", tableNameConst, ", id)")
-	g.P("\t\tif allocateErr != nil { return allocateErr }")
-	g.P("\t\tatNs = allocatedAtNs")
-	g.P("\t\tupdateArgs[1] = atNs")
-	g.P("\t\tif _, deleteErr := tx.ExecContext(ctx, `DELETE FROM _deleted WHERE table_name = ? AND id = ?`, ", tableNameConst, ", id); deleteErr != nil {")
-	g.P("\t\t\treturn fmt.Errorf(\"delete tombstone for %s/%s: %w\", ", tableNameConst, ", id, deleteErr)")
-	g.P("\t\t}")
-	g.P("\t\tif _, updateErr := tx.ExecContext(ctx, ", upsertConst, ", updateArgs...); updateErr != nil {")
-	g.P("\t\t\treturn fmt.Errorf(\"upsert into %s: %w\", ", tableNameConst, ", updateErr)")
-	g.P("\t\t}")
-	g.P("\t\treturn nil")
-	g.P("\t}); err != nil { return ", model.RowTypeName, "{}, err }")
+	g.P("\tatNs, err := rt.WriteLocalObjectContext(context.Background(), t.q, ", model.GoName, "GeneratedBinding, id, data, false)")
+	g.P("\tif err != nil { return ", model.RowTypeName, "{}, err }")
 	g.P("\treturn ", model.RowTypeName, "{ID: id, AtNs: atNs, Data: data}, nil")
 	g.P("}")
 	g.P()
@@ -875,18 +825,7 @@ func (e generatorEmitter) emitDeleteMethod(model messageModel, tableNameConst st
 	g.P("\tif id == \"\" {")
 	g.P("\t\treturn errors.New(\"" + errEmptyID + "\")")
 	g.P("\t}")
-	g.P("\tctx := context.Background()")
-	g.P("\treturn t.q.WithTransaction(ctx, func(tx rt.DBTX) error {")
-	g.P("\t\tatNs, err := rt.NextObjectAtNsContext(ctx, tx, ", tableNameConst, ", id)")
-	g.P("\t\tif err != nil { return err }")
-	g.P("\t\tif _, err := tx.ExecContext(ctx, `INSERT INTO _deleted (table_name, id, at_ns) VALUES (?, ?, ?) ON CONFLICT(table_name, id) DO UPDATE SET at_ns = excluded.at_ns`, ", tableNameConst, ", id, atNs); err != nil {")
-	g.P("\t\t\treturn fmt.Errorf(\"insert tombstone for %s/%s: %w\", ", tableNameConst, ", id, err)")
-	g.P("\t\t}")
-	g.P("\t\tif _, err := tx.ExecContext(ctx, `DELETE FROM \"`+", tableNameConst, "+`\" WHERE id = ?`, id); err != nil {")
-	g.P("\t\t\treturn fmt.Errorf(\"delete from %s/%s: %w\", ", tableNameConst, ", id, err)")
-	g.P("\t\t}")
-	g.P("\t\treturn nil")
-	g.P("\t})")
+	g.P("\treturn rt.DeleteLocalObjectContext(context.Background(), t.q, ", tableNameConst, ", id)")
 	g.P("}")
 	g.P()
 
@@ -902,7 +841,7 @@ func (e generatorEmitter) emitDeleteMethod(model messageModel, tableNameConst st
 	g.P()
 }
 
-func (e generatorEmitter) emitApplyWithAtNsMethods(model messageModel, tableNameConst, typeNameConst, upsertConst string) {
+func (e generatorEmitter) emitApplyWithAtNsMethods(model messageModel, _, typeNameConst, _ string) {
 	g := e.g
 	g.P("func (t *", model.TableTypeName, ") upsertWithAtNs(id string, atNs int64, data *", model.GoName, ") error {")
 	g.P("\tif t.q == nil {")
@@ -914,36 +853,10 @@ func (e generatorEmitter) emitApplyWithAtNsMethods(model messageModel, tableName
 	g.P("\tif data == nil {")
 	g.P("\t\treturn errors.New(\"" + errNilData + "\")")
 	g.P("\t}")
-	g.P("\tctx := context.Background()")
-	g.P("\tdataBytes, err := proto.Marshal(data)")
-	g.P("\tif err != nil {")
-	g.P("\t\treturn fmt.Errorf(\"marshal ", model.GoName, ": %w\", err)")
-	g.P("\t}")
-	g.P("\tupsertArgs := []any{id, atNs, dataBytes}")
-	for _, projectedField := range model.ProjectedFields {
-		e.emitProjectedFieldAppend("upsertArgs", "data", projectedField, "\t")
-	}
-	g.P("\treturn t.q.WithTransaction(ctx, func(tx rt.DBTX) error {")
-	g.P("\t\tlocalAtNs, err := rt.LocalMaxAtNsContext(ctx, tx, ", tableNameConst, ", id)")
-	g.P("\t\tif err != nil { return err }")
-	g.P("\t\tif atNs < localAtNs { return nil }")
-	g.P("\t\tif atNs == localAtNs {")
-	g.P("\t\t\tvar localBytes []byte")
-	g.P("\t\t\tliveErr := tx.QueryRowContext(ctx, `SELECT data FROM \"`+", tableNameConst, "+`\" WHERE id = ? AND at_ns = ?`, id, atNs).Scan(&localBytes)")
-	g.P("\t\t\tif liveErr == nil {")
-	g.P("\t\t\t\tlocalData := &", model.GoName, "{}")
-	g.P("\t\t\t\tif err := proto.Unmarshal(localBytes, localData); err != nil { return fmt.Errorf(\"unmarshal local equal-timestamp payload: %w\", err) }")
-	g.P("\t\t\t\tif proto.Equal(localData, data) { return nil }")
-	g.P("\t\t\t\treturn &rt.ConflictError{TypeName: ", typeNameConst, ", ID: id, AtNs: atNs}")
-	g.P("\t\t\t}")
-	g.P("\t\t\tif !errors.Is(liveErr, sql.ErrNoRows) { return liveErr }")
-	g.P("\t\t\treturn &rt.ConflictError{TypeName: ", typeNameConst, ", ID: id, AtNs: atNs, LocalDeleted: true}")
-	g.P("\t\t}")
-	g.P("\t\tif _, err := tx.ExecContext(ctx, `DELETE FROM _deleted WHERE table_name = ? AND id = ?`, ", tableNameConst, ", id); err != nil {")
-	g.P("\t\t\treturn fmt.Errorf(\"delete tombstone for %s/%s: %w\", ", tableNameConst, ", id, err)")
-	g.P("\t\t}")
-	g.P("\t\tif _, err := tx.ExecContext(ctx, ", upsertConst, ", upsertArgs...); err != nil { return fmt.Errorf(\"upsert into %s: %w\", ", tableNameConst, ", err) }")
-	g.P("\t\treturn nil")
+	g.P("\tdataJSON, err := rt.MarshalAnyJSON(data)")
+	g.P("\tif err != nil { return err }")
+	g.P("\treturn t.q.WithTransaction(context.Background(), func(tx rt.DBTX) error {")
+	g.P("\t\treturn rt.ApplyIncomingObjectContext(context.Background(), tx, ", model.GoName, "GeneratedBinding, rt.JSONLRecord{ID: id, AtNs: atNs, Data: dataJSON})")
 	g.P("\t})")
 	g.P("}")
 	g.P()
@@ -954,21 +867,10 @@ func (e generatorEmitter) emitApplyWithAtNsMethods(model messageModel, tableName
 	g.P("\tif id == \"\" {")
 	g.P("\t\treturn errors.New(\"" + errEmptyID + "\")")
 	g.P("\t}")
-	g.P("\tctx := context.Background()")
-	g.P("\treturn t.q.WithTransaction(ctx, func(tx rt.DBTX) error {")
-	g.P("\t\tlocalAtNs, err := rt.LocalMaxAtNsContext(ctx, tx, ", tableNameConst, ", id)")
-	g.P("\t\tif err != nil { return err }")
-	g.P("\t\tif atNs < localAtNs { return nil }")
-	g.P("\t\tif atNs == localAtNs {")
-	g.P("\t\t\tvar tombstoneAtNs int64")
-	g.P("\t\t\ttombErr := tx.QueryRowContext(ctx, `SELECT at_ns FROM _deleted WHERE table_name = ? AND id = ?`, ", tableNameConst, ", id).Scan(&tombstoneAtNs)")
-	g.P("\t\t\tif tombErr == nil { return nil }")
-	g.P("\t\t\tif !errors.Is(tombErr, sql.ErrNoRows) { return tombErr }")
-	g.P("\t\t\treturn &rt.ConflictError{TypeName: ", typeNameConst, ", ID: id, AtNs: atNs, RemoteDeleted: true}")
-	g.P("\t\t}")
-	g.P("\t\tif _, err := tx.ExecContext(ctx, `INSERT INTO _deleted (table_name, id, at_ns) VALUES (?, ?, ?) ON CONFLICT(table_name, id) DO UPDATE SET at_ns = excluded.at_ns`, ", tableNameConst, ", id, atNs); err != nil { return fmt.Errorf(\"insert tombstone for %s/%s: %w\", ", tableNameConst, ", id, err) }")
-	g.P("\t\tif _, err := tx.ExecContext(ctx, `DELETE FROM \"`+", tableNameConst, "+`\" WHERE id = ?`, id); err != nil { return fmt.Errorf(\"delete from %s/%s: %w\", ", tableNameConst, ", id, err) }")
-	g.P("\t\treturn nil")
+	g.P("\tdataJSON, err := rt.MarshalTypeOnlyAnyJSON(", typeNameConst, ")")
+	g.P("\tif err != nil { return err }")
+	g.P("\treturn t.q.WithTransaction(context.Background(), func(tx rt.DBTX) error {")
+	g.P("\t\treturn rt.ApplyIncomingObjectContext(context.Background(), tx, ", model.GoName, "GeneratedBinding, rt.JSONLRecord{ID: id, Deleted: true, AtNs: atNs, Data: dataJSON})")
 	g.P("\t})")
 	g.P("}")
 	g.P()
@@ -1023,6 +925,84 @@ func (e generatorEmitter) emitReprojectMethod(model messageModel, tableNameConst
 }
 
 func (e generatorEmitter) emitWrapper(models []messageModel) {
+	g := e.g
+	g.P("type CRUD struct {")
+	for _, model := range models {
+		g.P("\t", model.GoName, " *", model.TableTypeName)
+	}
+	g.P("}")
+	g.P()
+	g.P("var crudGeneratedBindings = []rt.GeneratedTableBinding{")
+	for _, model := range models {
+		g.P("\t", model.GoName, "GeneratedBinding,")
+	}
+	g.P("}")
+	g.P()
+	g.P("func NewCRUD(q DBTX) *CRUD {")
+	g.P("\treturn &CRUD{")
+	for _, model := range models {
+		g.P("\t\t", model.GoName, ": New", model.TableTypeName, "(q),")
+	}
+	g.P("\t}")
+	g.P("}")
+	g.P()
+	g.P("func (c *CRUD) TableDescriptors() []rt.GeneratedTableDescriptor {")
+	g.P("\tdescriptors := make([]rt.GeneratedTableDescriptor, 0, len(crudGeneratedBindings)+len(rt.CoreTableDescriptors()))")
+	g.P("\tfor _, binding := range crudGeneratedBindings { descriptors = append(descriptors, binding.Descriptor) }")
+	g.P("\treturn append(descriptors, rt.CoreTableDescriptors()...)")
+	g.P("}")
+	g.P()
+	g.P("func (c *CRUD) dbtx() (DBTX, error) {")
+	g.P("\tif c == nil { return nil, errors.New(\"nil CRUD\") }")
+	for _, model := range models {
+		g.P("\tif c.", model.GoName, " != nil && c.", model.GoName, ".q != nil { return c.", model.GoName, ".q, nil }")
+	}
+	g.P("\treturn nil, errors.New(\"", errNilDBTX, "\")")
+	g.P("}")
+	g.P()
+	g.P("func (c *CRUD) Init() error {")
+	g.P("\tq, err := c.dbtx()")
+	g.P("\tif err != nil { return err }")
+	g.P("\tif err := rt.EnsureCoreTables(q); err != nil { return err }")
+	for _, model := range models {
+		g.P("\tif err := c.", model.GoName, ".init(false); err != nil { return fmt.Errorf(\"init ", model.GoName, " table: %w\", err) }")
+	}
+	g.P("\treturn rt.DrainUnknownBindingsContext(context.Background(), q, crudGeneratedBindings)")
+	g.P("}")
+	g.P()
+	g.P("func (c *CRUD) WriteJSONL(remote string, w io.Writer) error {")
+	g.P("\tq, err := c.dbtx()")
+	g.P("\tif err != nil { return err }")
+	g.P("\treturn rt.WriteBoundJSONLContext(context.Background(), q, crudGeneratedBindings, remote, w)")
+	g.P("}")
+	g.P()
+	g.P("func (c *CRUD) PrepareJSONL(remote string, w io.Writer) (rt.JSONLCheckpoint, error) {")
+	g.P("\tq, err := c.dbtx()")
+	g.P("\tif err != nil { return rt.JSONLCheckpoint{}, err }")
+	g.P("\treturn rt.PrepareBoundJSONLContext(context.Background(), q, crudGeneratedBindings, remote, w)")
+	g.P("}")
+	g.P()
+	g.P("func (c *CRUD) AcknowledgeJSONL(checkpoint rt.JSONLCheckpoint) error {")
+	g.P("\tq, err := c.dbtx()")
+	g.P("\tif err != nil { return err }")
+	g.P("\treturn rt.AcknowledgeJSONLContext(context.Background(), q, checkpoint)")
+	g.P("}")
+	g.P()
+	g.P("func (c *CRUD) DiscardJSONL(checkpoint rt.JSONLCheckpoint) error {")
+	g.P("\tq, err := c.dbtx()")
+	g.P("\tif err != nil { return err }")
+	g.P("\treturn rt.DiscardJSONLContext(context.Background(), q, checkpoint)")
+	g.P("}")
+	g.P()
+	g.P("func (c *CRUD) ReadJSONL(remote string, r io.Reader) error {")
+	g.P("\tq, err := c.dbtx()")
+	g.P("\tif err != nil { return err }")
+	g.P("\treturn rt.ReadBoundJSONLContext(context.Background(), q, crudGeneratedBindings, remote, r)")
+	g.P("}")
+	g.P()
+}
+
+func (e generatorEmitter) emitLegacyWrapper(models []messageModel) {
 	g := e.g
 	syncModels := make([]messageModel, 0, len(models))
 	for _, model := range models {

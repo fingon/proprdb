@@ -92,6 +92,10 @@ final class GeneratedCRUDTests: XCTestCase {
                 GeneratedTableDescriptor(tableName: coreTableSyncName, typeName: "", isCore: true, syncEnabled: false),
                 GeneratedTableDescriptor(tableName: coreTableSchemaStateName, typeName: "", isCore: true, syncEnabled: false),
                 GeneratedTableDescriptor(tableName: coreTableUnknownName, typeName: "", isCore: true, syncEnabled: false),
+                GeneratedTableDescriptor(tableName: coreTableUnknownSyncName, typeName: "", isCore: true, syncEnabled: false),
+                GeneratedTableDescriptor(tableName: coreTableMetadataName, typeName: "", isCore: true, syncEnabled: false),
+                GeneratedTableDescriptor(tableName: coreTableExportBatchName, typeName: "", isCore: true, syncEnabled: false),
+                GeneratedTableDescriptor(tableName: coreTableExportEntryName, typeName: "", isCore: true, syncEnabled: false),
             ]
         )
     }

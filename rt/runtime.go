@@ -288,7 +288,9 @@ func AcknowledgeJSONLContext(ctx context.Context, q DBTX, checkpoint JSONLCheckp
 		}
 		var remote string
 		var complete int
-		if err := tx.QueryRowContext(ctx, `SELECT remote, complete FROM `+CoreTableExportBatchName+` WHERE batch_id = ?`, checkpoint.BatchID).Scan(&remote, &complete); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT remote, complete FROM `+CoreTableExportBatchName+` WHERE batch_id = ?`, checkpoint.BatchID).Scan(&remote, &complete); errors.Is(err, sql.ErrNoRows) {
+			return nil
+		} else if err != nil {
 			return fmt.Errorf("read export batch: %w", err)
 		}
 		if complete != 1 {
@@ -406,6 +408,27 @@ type GeneratedTableDescriptor struct {
 	SyncEnabled bool
 }
 
+type GeneratedTableBinding struct {
+	Descriptor      GeneratedTableDescriptor
+	NewMessage      func() proto.Message
+	InsertSQL       string
+	UpsertSQL       string
+	ProjectedValues func(proto.Message) ([]any, error)
+}
+
+func CoreTableDescriptors() []GeneratedTableDescriptor {
+	return []GeneratedTableDescriptor{
+		{TableName: CoreTableDeletedName, IsCore: true},
+		{TableName: CoreTableSyncName, IsCore: true},
+		{TableName: CoreTableSchemaStateName, IsCore: true},
+		{TableName: CoreTableUnknownName, IsCore: true},
+		{TableName: CoreTableUnknownSyncName, IsCore: true},
+		{TableName: CoreTableMetadataName, IsCore: true},
+		{TableName: CoreTableExportBatchName, IsCore: true},
+		{TableName: CoreTableExportEntryName, IsCore: true},
+	}
+}
+
 type TableIntrospection struct {
 	Descriptor   GeneratedTableDescriptor
 	ObjectCount  int64
@@ -453,9 +476,6 @@ func EnsureCoreTablesContext(ctx context.Context, q DBTX) error {
 			}
 		} else if err != nil {
 			return fmt.Errorf("read database id: %w", err)
-		}
-		if _, err := tx.ExecContext(ctx, `DELETE FROM `+CoreTableExportBatchName+` WHERE complete = 0`); err != nil {
-			return fmt.Errorf("clean incomplete export batches: %w", err)
 		}
 		return nil
 	})

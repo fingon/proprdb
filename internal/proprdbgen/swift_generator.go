@@ -71,6 +71,7 @@ func GenerateSwiftFiles(plugin *protogen.Plugin, files []*protogen.File, options
 		emitter.emitModel(modelFiles[model.TypeName], model)
 	}
 	emitter.emitWrapper(modelFiles, models)
+	_ = emitter.emitLegacyWrapper
 	return nil
 }
 
@@ -102,6 +103,37 @@ func (e swiftEmitter) emitModel(file *protogen.File, model messageModel) {
 		g.P("private let ", reprojectConst, " = ", strconv.Quote(model.reprojectSQL()))
 	}
 	g.P()
+	g.P("private let ", model.GoName, "GeneratedBinding = GeneratedTableBinding(")
+	g.P("\tdescriptor: GeneratedTableDescriptor(tableName: ", tableNameConst, ", typeName: ", typeNameConst, ", isCore: false, syncEnabled: ", strconv.FormatBool(!model.OmitSync), "),")
+	g.P("\tmessageType: ", swiftTypeName, ".self,")
+	g.P("\tinsertSQL: ", insertConst, ",")
+	g.P("\tupsertSQL: ", upsertConst, ",")
+	g.P("\tdecodeAnyJSON: { try decodeAnyJSON($0, as: ", swiftTypeName, ".self) },")
+	g.P("\tdecodeBinary: { try ", swiftTypeName, "(serializedBytes: $0) },")
+	g.P("\tencodeAnyJSON: { message in")
+	g.P("\t\tguard let data = message as? ", swiftTypeName, " else { throw ProprDBError(\"expected ", swiftTypeName, "\") }")
+	g.P("\t\treturn try marshalAnyJSON(data, typeName: ", typeNameConst, ")")
+	g.P("\t},")
+	g.P("\tmessagesEqual: { left, right in")
+	g.P("\t\tguard let left = left as? ", swiftTypeName, ", let right = right as? ", swiftTypeName, " else { return false }")
+	g.P("\t\treturn left == right")
+	g.P("\t},")
+	g.P("\tprojectedValues: { message in")
+	g.P("\t\tguard let data = message as? ", swiftTypeName, " else { throw ProprDBError(\"expected ", swiftTypeName, "\") }")
+	g.P("\t\tvar values: [SQLiteBindValue] = []")
+	for _, projectedField := range model.ProjectedFields {
+		propertyName := swiftPropertyNameFromGoName(projectedField.GetterName[3:])
+		if projectedField.IsOptional {
+			presenceName := "has" + projectedField.GetterName[3:]
+			g.P("\t\tif data.", presenceName, " { values.append(sqliteBindValue(data.", propertyName, ")) } else { values.append(.null) }")
+		} else {
+			g.P("\t\tvalues.append(sqliteBindValue(data.", propertyName, "))")
+		}
+	}
+	g.P("\t\treturn values")
+	g.P("\t}")
+	g.P(")")
+	g.P()
 
 	g.P(visibility, "struct ", model.RowTypeName, ": Equatable, Sendable {")
 	g.P("\t", visibility, "var id: String")
@@ -131,7 +163,7 @@ func (e swiftEmitter) emitModel(file *protogen.File, model messageModel) {
 	if len(model.ProjectedFields) > 0 {
 		e.emitSwiftReprojectMethod(file, model, swiftTypeName, tableNameConst, reprojectConst)
 	}
-	e.emitSwiftDrainUnknownMethod(file, swiftTypeName, typeNameConst)
+	e.emitSwiftDrainUnknownMethod(file, model, swiftTypeName, typeNameConst)
 	g.P("}")
 	g.P()
 }
@@ -209,7 +241,7 @@ func (e swiftEmitter) emitSwiftSelectMethod(model messageModel, swiftTypeName, t
 	g.P()
 }
 
-func (e swiftEmitter) emitSwiftInsertMethod(model messageModel, swiftTypeName, tableNameConst, insertConst string) {
+func (e swiftEmitter) emitSwiftInsertMethod(model messageModel, swiftTypeName, _, _ string) {
 	g := e.g
 	g.P("\t", e.visibilityPrefix(), "func insert(_ data: ", swiftTypeName, ") throws -> ", model.RowTypeName, " {")
 	g.P("\t\tlet id = try uuidV7()")
@@ -231,24 +263,13 @@ func (e swiftEmitter) emitSwiftInsertMethod(model messageModel, swiftTypeName, t
 	if model.ValidateWrite {
 		g.P("\t\ttry validateForWrite(data)")
 	}
-	g.P("\t\tlet dataBytes = try data.serializedData()")
-	g.P("\t\tvar atNs: Int64 = 0")
-	g.P("\t\tvar insertArguments: [Any?] = [id, atNs, dataBytes]")
-	for _, projectedField := range model.ProjectedFields {
-		e.emitSwiftProjectedFieldAppend("insertArguments", "data", projectedField, "\t\t")
-	}
-	g.P("\t\ttry q.withTransaction { transaction in")
-	g.P("\t\t\tatNs = try nextObjectAtNs(transaction, tableName: ", tableNameConst, ", objectID: id)")
-	g.P("\t\t\tinsertArguments[1] = atNs")
-	g.P("\t\t\ttry transaction.execute(\"DELETE FROM \\(_deletedTableName) WHERE table_name = ? AND id = ?\", arguments: [", tableNameConst, ", id])")
-	g.P("\t\t\ttry transaction.execute(", insertConst, ", arguments: insertArguments)")
-	g.P("\t\t}")
+	g.P("\t\tlet atNs = try writeLocalObject(q, binding: ", model.GoName, "GeneratedBinding, id: id, message: data, insert: true)")
 	g.P("\t\treturn ", model.RowTypeName, "(id: id, atNs: atNs, data: data)")
 	g.P("\t}")
 	g.P()
 }
 
-func (e swiftEmitter) emitSwiftUpdateMethod(model messageModel, swiftTypeName, tableNameConst, upsertConst string) {
+func (e swiftEmitter) emitSwiftUpdateMethod(model messageModel, swiftTypeName, _, _ string) {
 	g := e.g
 	g.P("\t", e.visibilityPrefix(), "func updateByID(_ id: String, data: ", swiftTypeName, ") throws -> ", model.RowTypeName, " {")
 	g.P("\t\tif id.isEmpty {")
@@ -258,18 +279,7 @@ func (e swiftEmitter) emitSwiftUpdateMethod(model messageModel, swiftTypeName, t
 	if model.ValidateWrite {
 		g.P("\t\ttry validateForWrite(data)")
 	}
-	g.P("\t\tlet dataBytes = try data.serializedData()")
-	g.P("\t\tvar atNs: Int64 = 0")
-	g.P("\t\tvar updateArguments: [Any?] = [id, atNs, dataBytes]")
-	for _, projectedField := range model.ProjectedFields {
-		e.emitSwiftProjectedFieldAppend("updateArguments", "data", projectedField, "\t\t")
-	}
-	g.P("\t\ttry q.withTransaction { transaction in")
-	g.P("\t\t\tatNs = try nextObjectAtNs(transaction, tableName: ", tableNameConst, ", objectID: id)")
-	g.P("\t\t\tupdateArguments[1] = atNs")
-	g.P("\t\t\ttry transaction.execute(\"DELETE FROM \\(_deletedTableName) WHERE table_name = ? AND id = ?\", arguments: [", tableNameConst, ", id])")
-	g.P("\t\t\ttry transaction.execute(", upsertConst, ", arguments: updateArguments)")
-	g.P("\t\t}")
+	g.P("\t\tlet atNs = try writeLocalObject(q, binding: ", model.GoName, "GeneratedBinding, id: id, message: data, insert: false)")
 	g.P("\t\treturn ", model.RowTypeName, "(id: id, atNs: atNs, data: data)")
 	g.P("\t}")
 	g.P()
@@ -285,11 +295,7 @@ func (e swiftEmitter) emitSwiftDeleteMethod(model messageModel, tableNameConst s
 	g.P("\t\tif id.isEmpty {")
 	g.P("\t\t\tthrow ProprDBError(\"empty id\")")
 	g.P("\t\t}")
-	g.P("\t\ttry q.withTransaction { transaction in")
-	g.P("\t\t\tlet atNs = try nextObjectAtNs(transaction, tableName: ", tableNameConst, ", objectID: id)")
-	g.P("\t\t\ttry transaction.execute(\"INSERT INTO \\(_deletedTableName) (table_name, id, at_ns) VALUES (?, ?, ?) ON CONFLICT(table_name, id) DO UPDATE SET at_ns = excluded.at_ns\", arguments: [", tableNameConst, ", id, atNs])")
-	g.P("\t\t\ttry transaction.execute(\"DELETE FROM \" + ", tableNameConst, "Quoted + \" WHERE id = ?\", arguments: [id])")
-	g.P("\t\t}")
+	g.P("\t\ttry deleteLocalObject(q, tableName: ", tableNameConst, ", id: id)")
 	g.P("\t}")
 	g.P()
 	g.P("\t", e.visibilityPrefix(), "func deleteRow(_ row: ", model.RowTypeName, ") throws {")
@@ -298,27 +304,22 @@ func (e swiftEmitter) emitSwiftDeleteMethod(model messageModel, tableNameConst s
 	g.P()
 }
 
-func (e swiftEmitter) emitSwiftApplyWithAtNsMethods(model messageModel, swiftTypeName, tableNameConst, upsertConst string) {
+func (e swiftEmitter) emitSwiftApplyWithAtNsMethods(model messageModel, swiftTypeName, _, _ string) {
 	g := e.g
 	g.P("\tfileprivate func upsertWithAtNs(id: String, atNs: Int64, data: ", swiftTypeName, ") throws {")
 	g.P("\t\tif id.isEmpty {")
 	g.P("\t\t\tthrow ProprDBError(\"empty id\")")
 	g.P("\t\t}")
-	g.P("\t\tlet dataBytes = try data.serializedData()")
-	g.P("\t\ttry q.execute(\"DELETE FROM \\(_deletedTableName) WHERE table_name = ? AND id = ?\", arguments: [", tableNameConst, ", id])")
-	g.P("\t\tvar upsertArguments: [Any?] = [id, atNs, dataBytes]")
-	for _, projectedField := range model.ProjectedFields {
-		e.emitSwiftProjectedFieldAppend("upsertArguments", "data", projectedField, "\t\t")
-	}
-	g.P("\t\ttry q.execute(", upsertConst, ", arguments: upsertArguments)")
+	g.P("\t\tlet dataJSON = try marshalAnyJSON(data, typeName: ", model.GoName, "TypeName)")
+	g.P("\t\ttry applyIncomingObject(q, binding: ", model.GoName, "GeneratedBinding, record: JSONLRecord(id: id, deleted: false, atNs: atNs, data: dataJSON))")
 	g.P("\t}")
 	g.P()
 	g.P("\tfileprivate func tombstoneWithAtNs(id: String, atNs: Int64) throws {")
 	g.P("\t\tif id.isEmpty {")
 	g.P("\t\t\tthrow ProprDBError(\"empty id\")")
 	g.P("\t\t}")
-	g.P("\t\ttry q.execute(\"INSERT INTO \\(_deletedTableName) (table_name, id, at_ns) VALUES (?, ?, ?) ON CONFLICT(table_name, id) DO UPDATE SET at_ns = excluded.at_ns\", arguments: [", tableNameConst, ", id, atNs])")
-	g.P("\t\ttry q.execute(\"DELETE FROM \" + ", tableNameConst, "Quoted + \" WHERE id = ?\", arguments: [id])")
+	g.P("\t\tlet dataJSON = try marshalTypeOnlyAnyJSON(typeName: ", model.GoName, "TypeName)")
+	g.P("\t\ttry applyIncomingObject(q, binding: ", model.GoName, "GeneratedBinding, record: JSONLRecord(id: id, deleted: true, atNs: atNs, data: dataJSON))")
 	g.P("\t}")
 	g.P()
 }
@@ -347,17 +348,11 @@ func (e swiftEmitter) emitSwiftReprojectMethod(file *protogen.File, model messag
 	_ = file
 }
 
-func (e swiftEmitter) emitSwiftDrainUnknownMethod(file *protogen.File, swiftTypeName, typeNameConst string) {
+func (e swiftEmitter) emitSwiftDrainUnknownMethod(file *protogen.File, model messageModel, _, typeNameConst string) {
 	g := e.g
 	g.P("\tfileprivate func drainUnknownRows(_ typeName: String) throws {")
-	g.P("\t\ttry replayUnknownByType(q, typeName: typeName) { record in")
-	g.P("\t\t\tif record.deleted {")
-	g.P("\t\t\t\ttry tombstoneWithAtNs(id: record.id, atNs: record.atNs)")
-	g.P("\t\t\t\treturn")
-	g.P("\t\t\t}")
-	g.P("\t\t\tlet data = try decodeAnyJSON(record.data, as: ", swiftTypeName, ".self)")
-	g.P("\t\t\ttry upsertWithAtNs(id: record.id, atNs: record.atNs, data: data)")
-	g.P("\t\t}")
+	g.P("\t\tguard typeName == ", typeNameConst, " else { throw ProprDBError(\"unexpected type name \\(typeName)\") }")
+	g.P("\t\ttry drainBoundUnknown(q, bindings: [", model.GoName, "GeneratedBinding])")
 	g.P("\t}")
 	g.P()
 	g.P("\t", e.visibilityPrefix(), "func drainUnknownRows() throws {")
@@ -383,6 +378,59 @@ func (e swiftEmitter) emitSwiftProjectedFieldAppend(argumentsName, dataName stri
 }
 
 func (e swiftEmitter) emitWrapper(modelFiles map[string]*protogen.File, models []messageModel) {
+	g := e.g
+	visibility := e.visibilityPrefix()
+	g.P("private let crudGeneratedBindings = [")
+	for _, model := range models {
+		g.P("\t", model.GoName, "GeneratedBinding,")
+	}
+	g.P("]")
+	g.P()
+	g.P(visibility, "struct CRUD {")
+	for _, model := range models {
+		g.P("\t", visibility, "let ", swiftPropertyNameFromGoName(model.GoName), ": ", model.TableTypeName)
+	}
+	g.P("\t", visibility, "init(_ q: any DBTX) {")
+	for _, model := range models {
+		g.P("\t\tself.", swiftPropertyNameFromGoName(model.GoName), " = ", model.TableTypeName, "(q)")
+	}
+	g.P("\t}")
+	g.P("\tprivate func dbtx() -> any DBTX { ", swiftPropertyNameFromGoName(models[0].GoName), ".q }")
+	g.P("\t", visibility, "func tableDescriptors() -> [GeneratedTableDescriptor] { crudGeneratedBindings.map(\\.descriptor) + coreTableDescriptors() }")
+	g.P("\t", visibility, "func initialize() throws {")
+	for _, model := range models {
+		g.P("\t\ttry ", swiftPropertyNameFromGoName(model.GoName), ".initialize()")
+	}
+	g.P("\t}")
+	g.P("\t", visibility, "func prepareJSONL(remote: String) throws -> PreparedJSONLExport { try prepareBoundJSONL(dbtx(), bindings: crudGeneratedBindings, remote: remote) }")
+	g.P("\t", visibility, "func acknowledgeJSONL(_ checkpoint: JSONLCheckpoint) throws { try acknowledgeBoundJSONL(dbtx(), checkpoint: checkpoint) }")
+	g.P("\t", visibility, "func discardJSONL(_ checkpoint: JSONLCheckpoint) throws { try discardBoundJSONL(dbtx(), checkpoint: checkpoint) }")
+	g.P("\t", visibility, "func writeJSONL(remote: String) throws -> String {")
+	g.P("\t\tlet prepared = try prepareJSONL(remote: remote)")
+	g.P("\t\ttry acknowledgeJSONL(prepared.checkpoint)")
+	g.P("\t\treturn prepared.text")
+	g.P("\t}")
+	g.P("\t", visibility, "func readJSONL(remote: String, text: String) throws { try readBoundJSONL(dbtx(), bindings: crudGeneratedBindings, remote: remote, text: text) }")
+	g.P("}")
+	g.P()
+	g.P(visibility, "extension ProprDBActor {")
+	g.P("\t", visibility, "func initialize() throws { try withDatabase { try CRUD($0).initialize() } }")
+	for _, model := range models {
+		swiftTypeName := swiftMessageTypeName(modelFiles[model.TypeName], model.GoName)
+		g.P("\t", visibility, "func select", model.GoName, "() throws -> [", model.RowTypeName, "] { try withDatabase { try ", model.TableTypeName, "($0).select() } }")
+		g.P("\t", visibility, "func insert", model.GoName, "(_ data: ", swiftTypeName, ") throws -> ", model.RowTypeName, " { try withDatabase { try ", model.TableTypeName, "($0).insert(data) } }")
+		g.P("\t", visibility, "func update", model.GoName, "ByID(_ id: String, data: ", swiftTypeName, ") throws -> ", model.RowTypeName, " { try withDatabase { try ", model.TableTypeName, "($0).updateByID(id, data: data) } }")
+		g.P("\t", visibility, "func delete", model.GoName, "ByID(_ id: String) throws { try withDatabase { try ", model.TableTypeName, "($0).deleteByID(id) } }")
+	}
+	g.P("\t", visibility, "func prepareJSONL(remote: String) throws -> PreparedJSONLExport { try withDatabase { try CRUD($0).prepareJSONL(remote: remote) } }")
+	g.P("\t", visibility, "func acknowledgeJSONL(_ checkpoint: JSONLCheckpoint) throws { try withDatabase { try CRUD($0).acknowledgeJSONL(checkpoint) } }")
+	g.P("\t", visibility, "func discardJSONL(_ checkpoint: JSONLCheckpoint) throws { try withDatabase { try CRUD($0).discardJSONL(checkpoint) } }")
+	g.P("\t", visibility, "func writeJSONL(remote: String) throws -> String { try withDatabase { try CRUD($0).writeJSONL(remote: remote) } }")
+	g.P("\t", visibility, "func readJSONL(remote: String, text: String) throws { try withDatabase { try CRUD($0).readJSONL(remote: remote, text: text) } }")
+	g.P("}")
+}
+
+func (e swiftEmitter) emitLegacyWrapper(modelFiles map[string]*protogen.File, models []messageModel) {
 	g := e.g
 	syncModels := make([]messageModel, 0, len(models))
 	for _, model := range models {

@@ -196,7 +196,7 @@ message Person {
 	assert.Check(t, strings.Contains(generatedText, `\"age\" INTEGER NOT NULL DEFAULT 0`))
 	assert.Check(t, strings.Contains(generatedText, `const PersonProjectionSchema = "nick:string:optional;age:int64"`))
 	assert.Check(t, strings.Contains(generatedText, `fieldDescriptorGetNick := data.ProtoReflect().Descriptor().Fields().ByName(protoreflect.Name("nick"))`))
-	assert.Check(t, strings.Contains(generatedText, `insertArgs = append(insertArgs, nil)`))
+	assert.Check(t, strings.Contains(generatedText, `values = append(values, nil)`))
 }
 
 func runCommand(t *testing.T, workDir string, extraEnv []string, name string, args ...string) {

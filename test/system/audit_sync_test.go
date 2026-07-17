@@ -60,6 +60,8 @@ func TestPrepareAcknowledgeAndWriterRetry(t *testing.T) {
 	var decodedCheckpoint rt.JSONLCheckpoint
 	assert.NilError(t, decodedCheckpoint.UnmarshalText(encodedCheckpoint))
 	assert.NilError(t, crud.AcknowledgeJSONL(decodedCheckpoint))
+	assert.NilError(t, crud.AcknowledgeJSONL(decodedCheckpoint))
+	assert.NilError(t, crud.DiscardJSONL(decodedCheckpoint))
 
 	var afterAck bytes.Buffer
 	assert.NilError(t, crud.WriteJSONL("remote", &afterAck))

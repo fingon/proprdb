@@ -155,7 +155,7 @@ message Person {
 	assert.Check(t, strings.Contains(generatedText, `\"age\" INTEGER NOT NULL DEFAULT 0`))
 	assert.Check(t, strings.Contains(generatedText, `let PersonProjectionSchema = "nick:string:optional;age:int64"`))
 	assert.Check(t, strings.Contains(generatedText, `if data.hasNick {`))
-	assert.Check(t, strings.Contains(generatedText, `insertArguments.append(nil)`))
+	assert.Check(t, strings.Contains(generatedText, `values.append(.null)`))
 }
 
 func TestProtocSwiftPluginSupportsPublicVisibility(t *testing.T) {
