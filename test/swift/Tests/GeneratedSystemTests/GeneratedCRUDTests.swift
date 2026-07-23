@@ -86,7 +86,7 @@ final class GeneratedCRUDTests: XCTestCase {
         XCTAssertEqual(
             crud.tableDescriptors(),
             [
-                GeneratedTableDescriptor(tableName: PersonTableName, typeName: PersonTypeName, isCore: false, syncEnabled: true, changeListenersEnabled: true),
+                GeneratedTableDescriptor(tableName: PersonTableName, typeName: PersonTypeName, isCore: false, syncEnabled: true, changeListenersEnabled: true, queryStatisticsEnabled: true),
                 GeneratedTableDescriptor(tableName: NoteTableName, typeName: NoteTypeName, isCore: false, syncEnabled: false, changeListenersEnabled: true),
                 GeneratedTableDescriptor(tableName: coreTableDeletedName, typeName: "", isCore: true, syncEnabled: false),
                 GeneratedTableDescriptor(tableName: coreTableSyncName, typeName: "", isCore: true, syncEnabled: false),
@@ -96,6 +96,7 @@ final class GeneratedCRUDTests: XCTestCase {
                 GeneratedTableDescriptor(tableName: coreTableMetadataName, typeName: "", isCore: true, syncEnabled: false),
                 GeneratedTableDescriptor(tableName: coreTableExportBatchName, typeName: "", isCore: true, syncEnabled: false),
                 GeneratedTableDescriptor(tableName: coreTableExportEntryName, typeName: "", isCore: true, syncEnabled: false),
+                GeneratedTableDescriptor(tableName: coreTableQueryStatName, typeName: "", isCore: true, syncEnabled: false),
             ]
         )
     }

@@ -17,7 +17,7 @@ private let PersonCreateIndexSQL2 = "CREATE INDEX IF NOT EXISTS \"idx_generatedt
 private let PersonReprojectSQL = "UPDATE \"generatedtest_example_person\" SET \"name\" = ?, \"age\" = ? WHERE id = ?"
 
 private let PersonGeneratedBinding = GeneratedTableBinding(
-	descriptor: GeneratedTableDescriptor(tableName: PersonTableName, typeName: PersonTypeName, isCore: false, syncEnabled: true, changeListenersEnabled: true),
+	descriptor: GeneratedTableDescriptor(tableName: PersonTableName, typeName: PersonTypeName, isCore: false, syncEnabled: true, changeListenersEnabled: true, queryStatisticsEnabled: true),
 	messageType: Generatedtest_Example_Person.self,
 	insertSQL: PersonInsertSQL,
 	upsertSQL: PersonUpsertSQL,
@@ -102,6 +102,7 @@ struct PersonTable {
 		if !whereClause.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
 			query += " WHERE " + whereClause
 		}
+		return try measureQuery(q, tableName: PersonTableName, query: query) {
 		return try q.withRows(query, bindValues: arguments) { rows in
 			var result: [PersonRow] = []
 			while let row = try rows.next() {
@@ -112,6 +113,7 @@ struct PersonTable {
 				result.append(PersonRow(id: id, atNs: atNs, data: data))
 			}
 			return result
+		}
 		}
 	}
 
@@ -220,7 +222,7 @@ private let NoteGeneratedIndexPrefix = "idx_generatedtest_example_note__"
 private let NoteReprojectSQL = "UPDATE \"generatedtest_example_note\" SET \"text\" = ? WHERE id = ?"
 
 private let NoteGeneratedBinding = GeneratedTableBinding(
-	descriptor: GeneratedTableDescriptor(tableName: NoteTableName, typeName: NoteTypeName, isCore: false, syncEnabled: false, changeListenersEnabled: true),
+	descriptor: GeneratedTableDescriptor(tableName: NoteTableName, typeName: NoteTypeName, isCore: false, syncEnabled: false, changeListenersEnabled: true, queryStatisticsEnabled: false),
 	messageType: Generatedtest_Example_Note.self,
 	insertSQL: NoteInsertSQL,
 	upsertSQL: NoteUpsertSQL,

@@ -43,6 +43,7 @@ type messageModel struct {
 	ValidateWrite       bool
 	AllowCustomIDInsert bool
 	ChangeListeners     bool
+	QueryStatistics     bool
 }
 
 type modelCollector struct{}
@@ -217,6 +218,10 @@ func (c modelCollector) buildModel(message *protogen.Message) (messageModel, err
 	if err != nil {
 		return messageModel{}, fmt.Errorf("message %s change_listeners option: %w", message.Desc.FullName(), err)
 	}
+	queryStatistics, err := c.messageOptionBool(message, proprdbpb.E_QueryStatistics)
+	if err != nil {
+		return messageModel{}, fmt.Errorf("message %s query_statistics option: %w", message.Desc.FullName(), err)
+	}
 	projected := make([]projectedField, 0)
 	signatures := make([]string, 0)
 	fieldsByName := make(map[string]*protogen.Field)
@@ -267,6 +272,7 @@ func (c modelCollector) buildModel(message *protogen.Message) (messageModel, err
 		ValidateWrite:       validateWrite,
 		AllowCustomIDInsert: allowCustomIDInsert,
 		ChangeListeners:     changeListeners,
+		QueryStatistics:     queryStatistics,
 	}, nil
 }
 
@@ -544,7 +550,7 @@ func (e generatorEmitter) emitModel(model messageModel) {
 	g.P("}")
 	g.P()
 	g.P("var ", model.GoName, "GeneratedBinding = rt.GeneratedTableBinding{")
-	g.P("\tDescriptor: rt.GeneratedTableDescriptor{TableName: ", tableNameConst, ", TypeName: ", typeNameConst, ", SyncEnabled: ", strconv.FormatBool(!model.OmitSync), ", ChangeListenersEnabled: ", strconv.FormatBool(model.ChangeListeners), "},")
+	g.P("\tDescriptor: rt.GeneratedTableDescriptor{TableName: ", tableNameConst, ", TypeName: ", typeNameConst, ", SyncEnabled: ", strconv.FormatBool(!model.OmitSync), ", ChangeListenersEnabled: ", strconv.FormatBool(model.ChangeListeners), ", QueryStatisticsEnabled: ", strconv.FormatBool(model.QueryStatistics), "},")
 	g.P("\tNewMessage: func() proto.Message { return &", model.GoName, "{} },")
 	g.P("\tInsertSQL: ", insertConst, ",")
 	g.P("\tUpsertSQL: ", upsertConst, ",")
@@ -707,6 +713,9 @@ func (e generatorEmitter) emitSelectMethod(model messageModel, tableNameConst st
 	g.P("\tif strings.TrimSpace(where) != \"\" {")
 	g.P("\t\tquery += \" WHERE \" + where")
 	g.P("\t}")
+	if model.QueryStatistics {
+		g.P("\treturn rt.MeasureQueryContext(ctx, t.q, ", tableNameConst, ", query, func() ([]", model.RowTypeName, ", error) {")
+	}
 	g.P("\trows, err := t.q.QueryContext(ctx, query, args...)")
 	g.P("\tif err != nil {")
 	g.P("\t\treturn nil, fmt.Errorf(\"select from %s: %w\", ", tableNameConst, ", err)")
@@ -741,6 +750,9 @@ func (e generatorEmitter) emitSelectMethod(model messageModel, tableNameConst st
 	g.P("\t\treturn nil, err")
 	g.P("\t}")
 	g.P("\treturn result, nil")
+	if model.QueryStatistics {
+		g.P("\t})")
+	}
 	g.P("}")
 	g.P()
 }

@@ -159,7 +159,7 @@ func TestGeneratedCRUDTableDescriptors(t *testing.T) {
 	crud := NewCRUD(rt.WrapDB(db))
 	descriptors := crud.TableDescriptors()
 	expected := []rt.GeneratedTableDescriptor{
-		{TableName: PersonTableName, TypeName: PersonTypeName, IsCore: false, SyncEnabled: true, ChangeListenersEnabled: true},
+		{TableName: PersonTableName, TypeName: PersonTypeName, IsCore: false, SyncEnabled: true, ChangeListenersEnabled: true, QueryStatisticsEnabled: true},
 		{TableName: NoteTableName, TypeName: NoteTypeName, IsCore: false, SyncEnabled: false, ChangeListenersEnabled: true},
 		{TableName: rt.CoreTableDeletedName, TypeName: "", IsCore: true, SyncEnabled: false},
 		{TableName: rt.CoreTableSyncName, TypeName: "", IsCore: true, SyncEnabled: false},
@@ -169,6 +169,7 @@ func TestGeneratedCRUDTableDescriptors(t *testing.T) {
 		{TableName: rt.CoreTableMetadataName, TypeName: "", IsCore: true, SyncEnabled: false},
 		{TableName: rt.CoreTableExportBatchName, TypeName: "", IsCore: true, SyncEnabled: false},
 		{TableName: rt.CoreTableExportEntryName, TypeName: "", IsCore: true, SyncEnabled: false},
+		{TableName: rt.CoreTableQueryStatName, TypeName: "", IsCore: true, SyncEnabled: false},
 	}
 	assert.DeepEqual(t, descriptors, expected)
 

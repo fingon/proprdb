@@ -115,7 +115,7 @@ func (e swiftEmitter) emitModel(file *protogen.File, model messageModel) {
 	}
 	g.P()
 	g.P("private let ", model.GoName, "GeneratedBinding = GeneratedTableBinding(")
-	g.P("\tdescriptor: GeneratedTableDescriptor(tableName: ", tableNameConst, ", typeName: ", typeNameConst, ", isCore: false, syncEnabled: ", strconv.FormatBool(!model.OmitSync), ", changeListenersEnabled: ", strconv.FormatBool(model.ChangeListeners), "),")
+	g.P("\tdescriptor: GeneratedTableDescriptor(tableName: ", tableNameConst, ", typeName: ", typeNameConst, ", isCore: false, syncEnabled: ", strconv.FormatBool(!model.OmitSync), ", changeListenersEnabled: ", strconv.FormatBool(model.ChangeListeners), ", queryStatisticsEnabled: ", strconv.FormatBool(model.QueryStatistics), "),")
 	g.P("\tmessageType: ", swiftTypeName, ".self,")
 	g.P("\tinsertSQL: ", insertConst, ",")
 	g.P("\tupsertSQL: ", upsertConst, ",")
@@ -247,6 +247,9 @@ func (e swiftEmitter) emitSwiftSelectMethod(model messageModel, swiftTypeName, t
 	g.P("\t\tif !whereClause.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {")
 	g.P("\t\t\tquery += \" WHERE \" + whereClause")
 	g.P("\t\t}")
+	if model.QueryStatistics {
+		g.P("\t\treturn try measureQuery(q, tableName: ", tableNameConst, ", query: query) {")
+	}
 	g.P("\t\treturn try q.withRows(query, bindValues: arguments) { rows in")
 	g.P("\t\t\tvar result: [", model.RowTypeName, "] = []")
 	g.P("\t\t\twhile let row = try rows.next() {")
@@ -258,6 +261,9 @@ func (e swiftEmitter) emitSwiftSelectMethod(model messageModel, swiftTypeName, t
 	g.P("\t\t\t}")
 	g.P("\t\t\treturn result")
 	g.P("\t\t}")
+	if model.QueryStatistics {
+		g.P("\t\t}")
+	}
 	g.P("\t}")
 	g.P()
 }

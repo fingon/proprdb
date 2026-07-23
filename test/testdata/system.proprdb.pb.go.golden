@@ -41,7 +41,7 @@ type PersonTable struct {
 }
 
 var PersonGeneratedBinding = rt.GeneratedTableBinding{
-	Descriptor: rt.GeneratedTableDescriptor{TableName: PersonTableName, TypeName: PersonTypeName, SyncEnabled: true, ChangeListenersEnabled: true},
+	Descriptor: rt.GeneratedTableDescriptor{TableName: PersonTableName, TypeName: PersonTypeName, SyncEnabled: true, ChangeListenersEnabled: true, QueryStatisticsEnabled: true},
 	NewMessage: func() proto.Message { return &Person{} },
 	InsertSQL:  PersonInsertSQL,
 	UpsertSQL:  PersonUpsertSQL,
@@ -158,40 +158,42 @@ func (t *PersonTable) Select(where string, args ...any) ([]PersonRow, error) {
 	if strings.TrimSpace(where) != "" {
 		query += " WHERE " + where
 	}
-	rows, err := t.q.QueryContext(ctx, query, args...)
-	if err != nil {
-		return nil, fmt.Errorf("select from %s: %w", PersonTableName, err)
-	}
-	result := make([]PersonRow, 0)
-	for rows.Next() {
-		var id string
-		var atNs int64
-		var dataBytes []byte
-		if err := rows.Scan(&id, &atNs, &dataBytes); err != nil {
-			if closeErr := rt.CloseRows(rows, "select"); closeErr != nil {
-				return nil, fmt.Errorf("scan row from %s: %w (additionally, %v)", PersonTableName, err, closeErr)
+	return rt.MeasureQueryContext(ctx, t.q, PersonTableName, query, func() ([]PersonRow, error) {
+		rows, err := t.q.QueryContext(ctx, query, args...)
+		if err != nil {
+			return nil, fmt.Errorf("select from %s: %w", PersonTableName, err)
+		}
+		result := make([]PersonRow, 0)
+		for rows.Next() {
+			var id string
+			var atNs int64
+			var dataBytes []byte
+			if err := rows.Scan(&id, &atNs, &dataBytes); err != nil {
+				if closeErr := rt.CloseRows(rows, "select"); closeErr != nil {
+					return nil, fmt.Errorf("scan row from %s: %w (additionally, %v)", PersonTableName, err, closeErr)
+				}
+				return nil, fmt.Errorf("scan row from %s: %w", PersonTableName, err)
 			}
-			return nil, fmt.Errorf("scan row from %s: %w", PersonTableName, err)
-		}
-		data := &Person{}
-		if err := proto.Unmarshal(dataBytes, data); err != nil {
-			if closeErr := rt.CloseRows(rows, "select"); closeErr != nil {
-				return nil, fmt.Errorf("unmarshal Person row: %w (additionally, %v)", err, closeErr)
+			data := &Person{}
+			if err := proto.Unmarshal(dataBytes, data); err != nil {
+				if closeErr := rt.CloseRows(rows, "select"); closeErr != nil {
+					return nil, fmt.Errorf("unmarshal Person row: %w (additionally, %v)", err, closeErr)
+				}
+				return nil, fmt.Errorf("unmarshal Person row: %w", err)
 			}
-			return nil, fmt.Errorf("unmarshal Person row: %w", err)
+			result = append(result, PersonRow{ID: id, AtNs: atNs, Data: data})
 		}
-		result = append(result, PersonRow{ID: id, AtNs: atNs, Data: data})
-	}
-	if err := rows.Err(); err != nil {
-		if closeErr := rt.CloseRows(rows, "select"); closeErr != nil {
-			return nil, fmt.Errorf("iterate rows from %s: %w (additionally, %v)", PersonTableName, err, closeErr)
+		if err := rows.Err(); err != nil {
+			if closeErr := rt.CloseRows(rows, "select"); closeErr != nil {
+				return nil, fmt.Errorf("iterate rows from %s: %w (additionally, %v)", PersonTableName, err, closeErr)
+			}
+			return nil, fmt.Errorf("iterate rows from %s: %w", PersonTableName, err)
 		}
-		return nil, fmt.Errorf("iterate rows from %s: %w", PersonTableName, err)
-	}
-	if err := rt.CloseRows(rows, "select"); err != nil {
-		return nil, err
-	}
-	return result, nil
+		if err := rt.CloseRows(rows, "select"); err != nil {
+			return nil, err
+		}
+		return result, nil
+	})
 }
 
 func (t *PersonTable) Insert(data *Person) (PersonRow, error) {
@@ -421,7 +423,7 @@ type NoteTable struct {
 }
 
 var NoteGeneratedBinding = rt.GeneratedTableBinding{
-	Descriptor: rt.GeneratedTableDescriptor{TableName: NoteTableName, TypeName: NoteTypeName, SyncEnabled: false, ChangeListenersEnabled: true},
+	Descriptor: rt.GeneratedTableDescriptor{TableName: NoteTableName, TypeName: NoteTypeName, SyncEnabled: false, ChangeListenersEnabled: true, QueryStatisticsEnabled: false},
 	NewMessage: func() proto.Message { return &Note{} },
 	InsertSQL:  NoteInsertSQL,
 	UpsertSQL:  NoteUpsertSQL,

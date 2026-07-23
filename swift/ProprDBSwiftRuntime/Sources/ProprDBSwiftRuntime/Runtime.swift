@@ -12,6 +12,7 @@ public let coreTableUnknownSyncName = "_unknown_sync"
 public let coreTableMetadataName = "_proprdb_metadata"
 public let coreTableExportBatchName = "_export_batches"
 public let coreTableExportEntryName = "_export_batch_entries"
+public let coreTableQueryStatName = "_querystat"
 
 public let _deletedTableName = quoteSQLiteIdentifier(coreTableDeletedName)
 public let _syncTableName = quoteSQLiteIdentifier(coreTableSyncName)
@@ -21,10 +22,26 @@ public let _unknownSyncTableName = quoteSQLiteIdentifier(coreTableUnknownSyncNam
 public let _metadataTableName = quoteSQLiteIdentifier(coreTableMetadataName)
 public let _exportBatchesTableName = quoteSQLiteIdentifier(coreTableExportBatchName)
 public let _exportBatchEntriesTableName = quoteSQLiteIdentifier(coreTableExportEntryName)
+public let _queryStatTableName = quoteSQLiteIdentifier(coreTableQueryStatName)
 
 private let dataColumnName = "data"
 private let logger = Logger(label: "ProprDBSwiftRuntime")
 private let sqliteTransient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
+private let nanosecondsPerSecond: Int64 = 1_000_000_000
+private let attosecondsPerNanosecond: Int64 = 1_000_000_000
+private let upsertQueryStatisticSQL = """
+INSERT INTO \(_queryStatTableName) (table_name, query, calls, duration_sum_ns)
+VALUES (?, ?, 1, ?)
+ON CONFLICT(table_name, query) DO UPDATE SET
+calls = calls + excluded.calls,
+duration_sum_ns = duration_sum_ns + excluded.duration_sum_ns
+"""
+private let selectQueryStatisticsSQL = """
+SELECT table_name, query, calls, duration_sum_ns
+FROM \(_queryStatTableName)
+ORDER BY table_name, query
+"""
+private let clearQueryStatisticsSQL = "DELETE FROM \(_queryStatTableName)"
 
 public struct ProprDBError: Error, CustomStringConvertible {
     public let message: String
@@ -113,19 +130,22 @@ public struct GeneratedTableDescriptor: Equatable, Sendable {
     public let isCore: Bool
     public let syncEnabled: Bool
     public let changeListenersEnabled: Bool
+    public let queryStatisticsEnabled: Bool
 
     public init(
         tableName: String,
         typeName: String,
         isCore: Bool,
         syncEnabled: Bool,
-        changeListenersEnabled: Bool = false
+        changeListenersEnabled: Bool = false,
+        queryStatisticsEnabled: Bool = false
     ) {
         self.tableName = tableName
         self.typeName = typeName
         self.isCore = isCore
         self.syncEnabled = syncEnabled
         self.changeListenersEnabled = changeListenersEnabled
+        self.queryStatisticsEnabled = queryStatisticsEnabled
     }
 }
 
@@ -220,6 +240,7 @@ public func coreTableDescriptors() -> [GeneratedTableDescriptor] {
         GeneratedTableDescriptor(tableName: coreTableMetadataName, typeName: "", isCore: true, syncEnabled: false),
         GeneratedTableDescriptor(tableName: coreTableExportBatchName, typeName: "", isCore: true, syncEnabled: false),
         GeneratedTableDescriptor(tableName: coreTableExportEntryName, typeName: "", isCore: true, syncEnabled: false),
+        GeneratedTableDescriptor(tableName: coreTableQueryStatName, typeName: "", isCore: true, syncEnabled: false),
     ]
 }
 
@@ -233,6 +254,13 @@ public struct TableIntrospection: Equatable {
         self.objectCount = objectCount
         self.payloadBytes = payloadBytes
     }
+}
+
+public struct QueryStatistic: Equatable, Sendable {
+    public let tableName: String
+    public let query: String
+    public let calls: Int64
+    public let durationSumNs: Int64
 }
 
 public protocol DBTX: AnyObject {
@@ -760,6 +788,59 @@ public extension DBTX {
     }
 }
 
+public func measureQuery<T>(
+    _ q: any DBTX,
+    tableName: String,
+    query: String,
+    body: () throws -> T
+) throws -> T {
+    guard !tableName.isEmpty else {
+        throw ProprDBError("empty table name")
+    }
+    guard !query.isEmpty else {
+        throw ProprDBError("empty query")
+    }
+    let clock = ContinuousClock()
+    let startedAt = clock.now
+    let result = try body()
+    let durationSumNs = try durationNanoseconds(startedAt.duration(to: clock.now))
+    try q.execute(upsertQueryStatisticSQL, arguments: [tableName, query, durationSumNs])
+    return result
+}
+
+public func queryStatistics(_ q: any DBTX) throws -> [QueryStatistic] {
+    try q.withRows(selectQueryStatisticsSQL) { rows in
+        var statistics: [QueryStatistic] = []
+        while let row = try rows.next() {
+            statistics.append(QueryStatistic(
+                tableName: try row.string(at: 0),
+                query: try row.string(at: 1),
+                calls: try row.int64(at: 2),
+                durationSumNs: try row.int64(at: 3)
+            ))
+        }
+        return statistics
+    }
+}
+
+public func clearQueryStatistics(_ q: any DBTX) throws {
+    try q.execute(clearQueryStatisticsSQL)
+}
+
+private func durationNanoseconds(_ duration: Duration) throws -> Int64 {
+    let components = duration.components
+    let (secondsNs, secondsOverflow) = components.seconds.multipliedReportingOverflow(by: nanosecondsPerSecond)
+    guard !secondsOverflow else {
+        throw ProprDBError("query duration exceeds nanosecond range")
+    }
+    let fractionalNs = components.attoseconds / attosecondsPerNanosecond
+    let (durationNs, durationOverflow) = secondsNs.addingReportingOverflow(fractionalNs)
+    guard !durationOverflow, durationNs >= 0 else {
+        throw ProprDBError("query duration is outside nanosecond range")
+    }
+    return durationNs
+}
+
 public func ensureCoreTables(_ q: any DBTX) throws {
     try q.withTransaction { transaction in
         try transaction.execute("CREATE TABLE IF NOT EXISTS \(_deletedTableName) (table_name TEXT NOT NULL, id TEXT NOT NULL, at_ns INTEGER NOT NULL, PRIMARY KEY (table_name, id))")
@@ -769,6 +850,7 @@ public func ensureCoreTables(_ q: any DBTX) throws {
         try transaction.execute("CREATE TABLE IF NOT EXISTS \(_unknownSyncTableName) (type_name TEXT NOT NULL, id TEXT NOT NULL, at_ns INTEGER NOT NULL, remote TEXT NOT NULL, PRIMARY KEY (type_name, id, remote))")
         try transaction.execute("CREATE TABLE IF NOT EXISTS \(_exportBatchesTableName) (batch_id TEXT PRIMARY KEY, database_id TEXT NOT NULL, remote TEXT NOT NULL, complete INTEGER NOT NULL DEFAULT 0)")
         try transaction.execute("CREATE TABLE IF NOT EXISTS \(_exportBatchEntriesTableName) (batch_id TEXT NOT NULL, sequence INTEGER NOT NULL, table_name TEXT NOT NULL, object_id TEXT NOT NULL, at_ns INTEGER NOT NULL, record_json BLOB, PRIMARY KEY (batch_id, sequence), FOREIGN KEY (batch_id) REFERENCES \(_exportBatchesTableName)(batch_id) ON DELETE CASCADE)")
+        try transaction.execute("CREATE TABLE IF NOT EXISTS \(_queryStatTableName) (table_name TEXT NOT NULL, query TEXT NOT NULL, calls INTEGER NOT NULL, duration_sum_ns INTEGER NOT NULL, PRIMARY KEY (table_name, query))")
         try ensureLatestUnknownSchema(transaction)
         let databaseID = try transaction.withRows("SELECT value FROM \(_metadataTableName) WHERE key = ?", arguments: ["database_id"]) { rows in
             try rows.next()?.string(at: 0)

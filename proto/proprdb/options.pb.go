@@ -123,6 +123,14 @@ var file_proto_proprdb_options_proto_extTypes = []protoimpl.ExtensionInfo{
 		Tag:           "varint,50007,opt,name=change_listeners",
 		Filename:      "proto/proprdb/options.proto",
 	},
+	{
+		ExtendedType:  (*descriptorpb.MessageOptions)(nil),
+		ExtensionType: (*bool)(nil),
+		Field:         50008,
+		Name:          "com.github.fingon.proprdb.query_statistics",
+		Tag:           "varint,50008,opt,name=query_statistics",
+		Filename:      "proto/proprdb/options.proto",
+	},
 }
 
 // Extension fields to descriptorpb.FieldOptions.
@@ -145,6 +153,8 @@ var (
 	E_Indexes = &file_proto_proprdb_options_proto_extTypes[5]
 	// optional bool change_listeners = 50007;
 	E_ChangeListeners = &file_proto_proprdb_options_proto_extTypes[6]
+	// optional bool query_statistics = 50008;
+	E_QueryStatistics = &file_proto_proprdb_options_proto_extTypes[7]
 )
 
 var File_proto_proprdb_options_proto protoreflect.FileDescriptor
@@ -161,7 +171,8 @@ const file_proto_proprdb_options_proto_rawDesc = "" +
 	"\x0evalidate_write\x12\x1f.google.protobuf.MessageOptions\x18Ԇ\x03 \x01(\bR\rvalidateWrite:V\n" +
 	"\x16allow_custom_id_insert\x12\x1f.google.protobuf.MessageOptions\x18Ն\x03 \x01(\bR\x13allowCustomIdInsert:]\n" +
 	"\aindexes\x12\x1f.google.protobuf.MessageOptions\x18ֆ\x03 \x03(\v2 .com.github.fingon.proprdb.IndexR\aindexes:L\n" +
-	"\x10change_listeners\x12\x1f.google.protobuf.MessageOptions\x18׆\x03 \x01(\bR\x0fchangeListenersB3Z1github.com/fingon/proprdb/proto/proprdb;proprdbpbb\x06proto3"
+	"\x10change_listeners\x12\x1f.google.protobuf.MessageOptions\x18׆\x03 \x01(\bR\x0fchangeListeners:L\n" +
+	"\x10query_statistics\x12\x1f.google.protobuf.MessageOptions\x18؆\x03 \x01(\bR\x0fqueryStatisticsB3Z1github.com/fingon/proprdb/proto/proprdb;proprdbpbb\x06proto3"
 
 var (
 	file_proto_proprdb_options_proto_rawDescOnce sync.Once
@@ -189,11 +200,12 @@ var file_proto_proprdb_options_proto_depIdxs = []int32{
 	2, // 4: com.github.fingon.proprdb.allow_custom_id_insert:extendee -> google.protobuf.MessageOptions
 	2, // 5: com.github.fingon.proprdb.indexes:extendee -> google.protobuf.MessageOptions
 	2, // 6: com.github.fingon.proprdb.change_listeners:extendee -> google.protobuf.MessageOptions
-	0, // 7: com.github.fingon.proprdb.indexes:type_name -> com.github.fingon.proprdb.Index
-	8, // [8:8] is the sub-list for method output_type
-	8, // [8:8] is the sub-list for method input_type
-	7, // [7:8] is the sub-list for extension type_name
-	0, // [0:7] is the sub-list for extension extendee
+	2, // 7: com.github.fingon.proprdb.query_statistics:extendee -> google.protobuf.MessageOptions
+	0, // 8: com.github.fingon.proprdb.indexes:type_name -> com.github.fingon.proprdb.Index
+	9, // [9:9] is the sub-list for method output_type
+	9, // [9:9] is the sub-list for method input_type
+	8, // [8:9] is the sub-list for extension type_name
+	0, // [0:8] is the sub-list for extension extendee
 	0, // [0:0] is the sub-list for field type_name
 }
 
@@ -209,7 +221,7 @@ func file_proto_proprdb_options_proto_init() {
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_proto_proprdb_options_proto_rawDesc), len(file_proto_proprdb_options_proto_rawDesc)),
 			NumEnums:      0,
 			NumMessages:   1,
-			NumExtensions: 7,
+			NumExtensions: 8,
 			NumServices:   0,
 		},
 		GoTypes:           file_proto_proprdb_options_proto_goTypes,

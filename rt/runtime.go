@@ -30,6 +30,7 @@ const (
 	CoreTableMetadataName    = "_proprdb_metadata"
 	CoreTableExportBatchName = "_export_batches"
 	CoreTableExportEntryName = "_export_batch_entries"
+	CoreTableQueryStatName   = "_querystat"
 	dataColumnName           = "data"
 	DefaultBatchRecords      = 256
 	metadataDatabaseIDKey    = "database_id"
@@ -407,6 +408,7 @@ type GeneratedTableDescriptor struct {
 	IsCore                 bool
 	SyncEnabled            bool
 	ChangeListenersEnabled bool
+	QueryStatisticsEnabled bool
 }
 
 type GeneratedTableBinding struct {
@@ -427,6 +429,7 @@ func CoreTableDescriptors() []GeneratedTableDescriptor {
 		{TableName: CoreTableMetadataName, IsCore: true},
 		{TableName: CoreTableExportBatchName, IsCore: true},
 		{TableName: CoreTableExportEntryName, IsCore: true},
+		{TableName: CoreTableQueryStatName, IsCore: true},
 	}
 }
 
@@ -456,6 +459,7 @@ func EnsureCoreTablesContext(ctx context.Context, q DBTX) error {
 			{"_unknown_sync", `CREATE TABLE IF NOT EXISTS ` + CoreTableUnknownSyncName + ` (type_name TEXT NOT NULL, id TEXT NOT NULL, at_ns INTEGER NOT NULL, remote TEXT NOT NULL, PRIMARY KEY (type_name, id, remote))`},
 			{"_export_batches", `CREATE TABLE IF NOT EXISTS ` + CoreTableExportBatchName + ` (batch_id TEXT PRIMARY KEY, database_id TEXT NOT NULL, remote TEXT NOT NULL, complete INTEGER NOT NULL DEFAULT 0)`},
 			{"_export_batch_entries", `CREATE TABLE IF NOT EXISTS ` + CoreTableExportEntryName + ` (batch_id TEXT NOT NULL, sequence INTEGER NOT NULL, table_name TEXT NOT NULL, object_id TEXT NOT NULL, at_ns INTEGER NOT NULL, record_json BLOB, PRIMARY KEY (batch_id, sequence), FOREIGN KEY (batch_id) REFERENCES ` + CoreTableExportBatchName + `(batch_id) ON DELETE CASCADE)`},
+			{"_querystat", `CREATE TABLE IF NOT EXISTS ` + CoreTableQueryStatName + ` (table_name TEXT NOT NULL, query TEXT NOT NULL, calls INTEGER NOT NULL, duration_sum_ns INTEGER NOT NULL, PRIMARY KEY (table_name, query))`},
 		}
 		for _, statement := range statements {
 			if _, err := tx.ExecContext(ctx, statement.sql); err != nil {

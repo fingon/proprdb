@@ -130,6 +130,19 @@ The synchronous `CRUD` and table APIs remain internal. Pass
 synchronous API public as well. `Visibility=Public|Internal|Package` controls
 the actor-facing API and defaults to `Public`.
 
+## Query statistics
+
+Tables with `proprdb.query_statistics = true` accumulate statistics for
+successful generated `Select`/`select` calls. Statistics are stored in the
+`_querystat` core table by table name and exact parameterized SQL string.
+Bind values are not stored. Each row contains a call count and the sum of
+full select durations in nanoseconds, including row decoding but excluding
+the statistics update.
+
+Go exposes `rt.QueryStatistics` and `rt.ClearQueryStatistics`. Swift exposes
+`queryStatistics(_:)` and `clearQueryStatistics(_:)`; actor users can call
+them through `withDatabase`. Statistics persist until cleared.
+
 ## Protobuf extensions
 
 `proprdb` defines generator options in `proto/proprdb/options.proto`.
@@ -169,6 +182,9 @@ message Person {
 
 - `proprdb.change_listeners` (`bool`, message-level):
   - Generates a typed change stream for the table.
+
+- `proprdb.query_statistics` (`bool`, message-level):
+  - Accumulates generated select call counts and duration sums for the table.
 
 - `proprdb.indexes` (`repeated proprdb.Index`, message-level):
   - Declares non-unique SQLite indexes for projected fields (`(proprdb.external)=true`).
