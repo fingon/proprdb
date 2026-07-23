@@ -21,6 +21,7 @@ message Person {
 
 message Note {
   option (com.github.fingon.proprdb.omit_sync) = true;
+  option (com.github.fingon.proprdb.change_listeners) = true;
   string text = 1 [(com.github.fingon.proprdb.external) = true];
 }
 

@@ -2,6 +2,8 @@
 import ProprDBSwiftRuntime
 import XCTest
 
+private let countTombstoneByIDSQL = "SELECT COUNT(*) FROM _deleted WHERE table_name = ? AND id = ?"
+
 final class GeneratedChangeListenerTests: XCTestCase {
     func testLocalChangesThroughSynchronousAPI() async throws {
         let database = try SQLiteDatabase(path: ":memory:")
@@ -23,6 +25,23 @@ final class GeneratedChangeListenerTests: XCTestCase {
         }
         XCTAssertEqual(deletedID, inserted.id)
         XCTAssertGreaterThan(deletedAtNs, inserted.atNs)
+
+        var noteChanges = crud.note.changes().makeAsyncIterator()
+        let insertedNote = try crud.note.insert(makeNote(text: "Local only"))
+        guard case let .upsert(noteID, noteAtNs, _) = await noteChanges.next() else {
+            return XCTFail("expected note insert change")
+        }
+        XCTAssertEqual(noteID, insertedNote.id)
+        XCTAssertEqual(noteAtNs, insertedNote.atNs)
+
+        try crud.note.deleteByID(insertedNote.id)
+        guard case let .delete(deletedNoteID, deletedNoteAtNs) = await noteChanges.next() else {
+            return XCTFail("expected note delete change")
+        }
+        XCTAssertEqual(deletedNoteID, insertedNote.id)
+        XCTAssertGreaterThan(deletedNoteAtNs, insertedNote.atNs)
+        XCTAssertEqual(try crud.note.select(where: "id = ?", arguments: [.string(insertedNote.id)]).count, 0)
+        XCTAssertEqual(try scalarInt(database, sql: countTombstoneByIDSQL, arguments: [NoteTableName, insertedNote.id]), 0)
     }
 
     func testActorProxyAPI() async throws {

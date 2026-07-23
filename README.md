@@ -64,7 +64,7 @@ Each object table stores:
 - `at_ns` (`INTEGER NOT NULL`)
 - `data` (`BLOB NOT NULL`) as encoded `protobuf.Any`
 
-`_deleted` table stores tombstones:
+`_deleted` table stores tombstones for sync-enabled tables:
 
 - `id` (`TEXT NOT NULL`)
 - `table_name` (`TEXT NOT NULL`)

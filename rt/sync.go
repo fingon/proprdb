@@ -80,22 +80,6 @@ func WriteLocalObjectContext(ctx context.Context, q DBTX, binding GeneratedTable
 	})
 }
 
-func DeleteLocalObjectContext(ctx context.Context, q DBTX, tableName, id string) error {
-	if q == nil {
-		return errors.New("nil DBTX")
-	}
-	if tableName == "" || id == "" {
-		return errors.New("empty table name or id")
-	}
-	return q.WithTransaction(ctx, func(tx DBTX) error {
-		atNs, err := NextObjectAtNsContext(ctx, tx, tableName, id)
-		if err != nil {
-			return err
-		}
-		return applyTombstoneSQL(ctx, tx, tableName, id, atNs)
-	})
-}
-
 func DeleteLocalBoundObjectContext(ctx context.Context, q DBTX, binding GeneratedTableBinding, id string) error {
 	if q == nil {
 		return errors.New("nil DBTX")
@@ -111,7 +95,7 @@ func DeleteLocalBoundObjectContext(ctx context.Context, q DBTX, binding Generate
 		if err != nil {
 			return err
 		}
-		if err := applyTombstoneSQL(ctx, tx, binding.Descriptor.TableName, id, atNs); err != nil {
+		if err := applyBoundDeletionSQL(ctx, tx, binding, id, atNs); err != nil {
 			return err
 		}
 		queueGeneratedTableChange(tx, binding, id, atNs, true, nil)
@@ -195,7 +179,7 @@ func applyIncomingTombstoneContext(ctx context.Context, q DBTX, binding Generate
 		}
 		return &ConflictError{TypeName: binding.Descriptor.TypeName, ID: record.ID, AtNs: record.AtNs, RemoteDeleted: true}
 	}
-	if err := applyTombstoneSQL(ctx, q, binding.Descriptor.TableName, record.ID, record.AtNs); err != nil {
+	if err := applyBoundDeletionSQL(ctx, q, binding, record.ID, record.AtNs); err != nil {
 		return err
 	}
 	queueGeneratedTableChange(q, binding, record.ID, record.AtNs, true, nil)
@@ -210,6 +194,16 @@ ON CONFLICT(table_name, id) DO UPDATE SET at_ns = excluded.at_ns`
 	}
 	if _, err := q.ExecContext(ctx, `DELETE FROM "`+tableName+`" WHERE id = ?`, id); err != nil {
 		return fmt.Errorf("delete from %s/%s: %w", tableName, id, err)
+	}
+	return nil
+}
+
+func applyBoundDeletionSQL(ctx context.Context, q DBTX, binding GeneratedTableBinding, id string, atNs int64) error {
+	if binding.Descriptor.SyncEnabled {
+		return applyTombstoneSQL(ctx, q, binding.Descriptor.TableName, id, atNs)
+	}
+	if _, err := q.ExecContext(ctx, `DELETE FROM "`+binding.Descriptor.TableName+`" WHERE id = ?`, id); err != nil {
+		return fmt.Errorf("delete from %s/%s: %w", binding.Descriptor.TableName, id, err)
 	}
 	return nil
 }

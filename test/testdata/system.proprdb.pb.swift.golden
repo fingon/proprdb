@@ -220,7 +220,7 @@ private let NoteGeneratedIndexPrefix = "idx_generatedtest_example_note__"
 private let NoteReprojectSQL = "UPDATE \"generatedtest_example_note\" SET \"text\" = ? WHERE id = ?"
 
 private let NoteGeneratedBinding = GeneratedTableBinding(
-	descriptor: GeneratedTableDescriptor(tableName: NoteTableName, typeName: NoteTypeName, isCore: false, syncEnabled: false, changeListenersEnabled: false),
+	descriptor: GeneratedTableDescriptor(tableName: NoteTableName, typeName: NoteTypeName, isCore: false, syncEnabled: false, changeListenersEnabled: true),
 	messageType: Generatedtest_Example_Note.self,
 	insertSQL: NoteInsertSQL,
 	upsertSQL: NoteUpsertSQL,
@@ -252,6 +252,8 @@ public struct NoteRow: Equatable, Sendable {
 		self.data = data
 	}
 }
+
+public typealias NoteChange = TableChange<Generatedtest_Example_Note>
 
 struct NoteTable {
 	fileprivate let q: any DBTX
@@ -389,6 +391,10 @@ struct NoteTable {
 		try drainUnknownRows(NoteTypeName)
 	}
 
+	func changes() -> AsyncStream<NoteChange> {
+		tableChanges(q, tableName: NoteTableName, as: Generatedtest_Example_Note.self)
+	}
+
 }
 
 private let crudGeneratedBindings = [
@@ -447,6 +453,7 @@ public struct NoteTableProxy: Sendable {
 	public func deleteByID(_ id: String) async throws { try await actor._noteDeleteByID(id) }
 	public func deleteRow(_ row: NoteRow) async throws { try await actor._noteDeleteRow(row) }
 	public func drainUnknownRows() async throws { try await actor._noteDrainUnknownRows() }
+	public func changes() async throws -> AsyncStream<NoteChange> { try await actor._noteChanges() }
 }
 
 extension ProprDBActor {
@@ -472,6 +479,7 @@ extension ProprDBActor {
 	fileprivate func _noteDeleteByID(_ id: String) throws { try withDatabase { try CRUD($0).note.deleteByID(id) } }
 	fileprivate func _noteDeleteRow(_ row: NoteRow) throws { try withDatabase { try CRUD($0).note.deleteRow(row) } }
 	fileprivate func _noteDrainUnknownRows() throws { try withDatabase { try CRUD($0).note.drainUnknownRows() } }
+	fileprivate func _noteChanges() throws -> AsyncStream<NoteChange> { try withDatabase { CRUD($0).note.changes() } }
 	public func prepareJSONL(remote: String) throws -> PreparedJSONLExport { try withDatabase { try CRUD($0).prepareJSONL(remote: remote) } }
 	public func acknowledgeJSONL(_ checkpoint: JSONLCheckpoint) throws { try withDatabase { try CRUD($0).acknowledgeJSONL(checkpoint) } }
 	public func discardJSONL(_ checkpoint: JSONLCheckpoint) throws { try withDatabase { try CRUD($0).discardJSONL(checkpoint) } }

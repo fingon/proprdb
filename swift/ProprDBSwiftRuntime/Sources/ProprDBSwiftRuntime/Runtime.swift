@@ -1096,17 +1096,10 @@ public func writeLocalObject(
     }
 }
 
-public func deleteLocalObject(_ q: any DBTX, tableName: String, id: String) throws {
-    try q.withTransaction { transaction in
-        let atNs = try nextObjectAtNs(transaction, tableName: tableName, objectID: id)
-        try applyTombstone(transaction, tableName: tableName, id: id, atNs: atNs)
-    }
-}
-
 public func deleteLocalObject(_ q: any DBTX, binding: GeneratedTableBinding, id: String) throws {
     try q.withTransaction { transaction in
         let atNs = try nextObjectAtNs(transaction, tableName: binding.descriptor.tableName, objectID: id)
-        try applyTombstone(transaction, tableName: binding.descriptor.tableName, id: id, atNs: atNs)
+        try applyBoundDeletion(transaction, binding: binding, id: id, atNs: atNs)
         queueGeneratedTableChange(transaction, binding: binding, id: id, atNs: atNs, deleted: true, message: nil)
     }
 }
@@ -1130,7 +1123,7 @@ public func applyIncomingObject(_ q: any DBTX, binding: GeneratedTableBinding, r
             }
             throw ConflictError(typeName: binding.descriptor.typeName, id: record.id, atNs: record.atNs, localDeleted: false, remoteDeleted: true)
         }
-        try applyTombstone(q, tableName: binding.descriptor.tableName, id: record.id, atNs: record.atNs)
+        try applyBoundDeletion(q, binding: binding, id: record.id, atNs: record.atNs)
         queueGeneratedTableChange(q, binding: binding, id: record.id, atNs: record.atNs, deleted: true, message: nil)
         return
     }
@@ -1156,6 +1149,14 @@ public func applyIncomingObject(_ q: any DBTX, binding: GeneratedTableBinding, r
 private func applyTombstone(_ q: any DBTX, tableName: String, id: String, atNs: Int64) throws {
     try q.execute("INSERT INTO \(_deletedTableName) (table_name, id, at_ns) VALUES (?, ?, ?) ON CONFLICT(table_name, id) DO UPDATE SET at_ns = excluded.at_ns", arguments: [tableName, id, atNs])
     try q.execute("DELETE FROM \(quoteSQLiteIdentifier(tableName)) WHERE id = ?", arguments: [id])
+}
+
+private func applyBoundDeletion(_ q: any DBTX, binding: GeneratedTableBinding, id: String, atNs: Int64) throws {
+    if binding.descriptor.syncEnabled {
+        try applyTombstone(q, tableName: binding.descriptor.tableName, id: id, atNs: atNs)
+        return
+    }
+    try q.execute("DELETE FROM \(quoteSQLiteIdentifier(binding.descriptor.tableName)) WHERE id = ?", arguments: [id])
 }
 
 public func readBoundJSONL(_ q: any DBTX, bindings: [GeneratedTableBinding], remote: String, text: String) throws {

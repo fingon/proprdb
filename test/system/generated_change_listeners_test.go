@@ -27,6 +27,8 @@ func TestGeneratedChangeListenersLocalWrites(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	changes, err := crud.Person.Changes(ctx)
 	assert.NilError(t, err)
+	noteChanges, err := crud.Note.Changes(ctx)
+	assert.NilError(t, err)
 
 	inserted, err := crud.Person.Insert(&Person{Name: "Ada", Age: 37})
 	assert.NilError(t, err)
@@ -48,6 +50,27 @@ func TestGeneratedChangeListenersLocalWrites(t *testing.T) {
 	assert.Check(t, deleteChange.Deleted)
 	assert.Check(t, is.Equal(deleteChange.ID, inserted.ID))
 	assert.Check(t, deleteChange.Data == nil)
+
+	insertedNote, err := crud.Note.Insert(&Note{Text: "Local only"})
+	assert.NilError(t, err)
+	noteInsertChange := receiveNoteChange(t, noteChanges)
+	assert.Check(t, !noteInsertChange.Deleted)
+	assert.Check(t, is.Equal(noteInsertChange.ID, insertedNote.ID))
+	assert.Check(t, is.Equal(noteInsertChange.AtNs, insertedNote.AtNs))
+
+	assert.NilError(t, crud.Note.DeleteByID(insertedNote.ID))
+	noteDeleteChange := receiveNoteChange(t, noteChanges)
+	assert.Check(t, noteDeleteChange.Deleted)
+	assert.Check(t, is.Equal(noteDeleteChange.ID, insertedNote.ID))
+	assert.Check(t, noteDeleteChange.AtNs > insertedNote.AtNs)
+
+	notes, err := crud.Note.Select("id = ?", insertedNote.ID)
+	assert.NilError(t, err)
+	assert.Check(t, is.Len(notes, 0))
+	var noteTombstoneCount int
+	err = db.QueryRowContext(ctx, countTombstoneByIDSQL, NoteTableName, insertedNote.ID).Scan(&noteTombstoneCount)
+	assert.NilError(t, err)
+	assert.Check(t, is.Equal(noteTombstoneCount, 0))
 
 	cancel()
 	select {
@@ -107,6 +130,18 @@ func receivePersonChange(t *testing.T, changes <-chan PersonChange) PersonChange
 	case <-time.After(changeListenerTimeout):
 		t.Fatal("timed out waiting for person change")
 		return PersonChange{}
+	}
+}
+
+func receiveNoteChange(t *testing.T, changes <-chan NoteChange) NoteChange {
+	t.Helper()
+	select {
+	case change, open := <-changes:
+		assert.Check(t, open)
+		return change
+	case <-time.After(changeListenerTimeout):
+		t.Fatal("timed out waiting for note change")
+		return NoteChange{}
 	}
 }
 

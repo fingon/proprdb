@@ -414,12 +414,14 @@ type NoteRow struct {
 	Data *Note
 }
 
+type NoteChange = rt.TableChange[*Note]
+
 type NoteTable struct {
 	q DBTX
 }
 
 var NoteGeneratedBinding = rt.GeneratedTableBinding{
-	Descriptor: rt.GeneratedTableDescriptor{TableName: NoteTableName, TypeName: NoteTypeName, SyncEnabled: false, ChangeListenersEnabled: false},
+	Descriptor: rt.GeneratedTableDescriptor{TableName: NoteTableName, TypeName: NoteTypeName, SyncEnabled: false, ChangeListenersEnabled: true},
 	NewMessage: func() proto.Message { return &Note{} },
 	InsertSQL:  NoteInsertSQL,
 	UpsertSQL:  NoteUpsertSQL,
@@ -435,6 +437,7 @@ var NoteGeneratedBinding = rt.GeneratedTableBinding{
 }
 
 func NewNoteTable(q DBTX) *NoteTable {
+	q = rt.WithChangeListeners(q)
 	return &NoteTable{q: q}
 }
 
@@ -647,6 +650,13 @@ func (t *NoteTable) DeleteRow(row NoteRow) error {
 		return errors.New("empty id")
 	}
 	return t.DeleteByID(row.ID)
+}
+
+func (t *NoteTable) Changes(ctx context.Context) (<-chan NoteChange, error) {
+	if t.q == nil {
+		return nil, errors.New("nil DBTX")
+	}
+	return rt.TableChanges[*Note](ctx, t.q, NoteTableName)
 }
 
 func (t *NoteTable) upsertWithAtNs(id string, atNs int64, data *Note) error {

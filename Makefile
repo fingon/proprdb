@@ -41,7 +41,7 @@ generate: $(BINARIES) protoc-gen-swift
 
 .PHONY: verify-generated
 verify-generated:
-	git diff --exit-code -- test/system/system.proprdb.pb.go test/swift/Sources/GeneratedSystem/system.proprdb.pb.swift test/testdata
+	go test ./test -run 'TestProtoc(Plugin|SwiftPlugin)Golden'
 
 .PHONY: swift-fixtures
 swift-fixtures: protoc-gen-swift

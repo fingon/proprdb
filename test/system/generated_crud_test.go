@@ -160,7 +160,7 @@ func TestGeneratedCRUDTableDescriptors(t *testing.T) {
 	descriptors := crud.TableDescriptors()
 	expected := []rt.GeneratedTableDescriptor{
 		{TableName: PersonTableName, TypeName: PersonTypeName, IsCore: false, SyncEnabled: true, ChangeListenersEnabled: true},
-		{TableName: NoteTableName, TypeName: NoteTypeName, IsCore: false, SyncEnabled: false},
+		{TableName: NoteTableName, TypeName: NoteTypeName, IsCore: false, SyncEnabled: false, ChangeListenersEnabled: true},
 		{TableName: rt.CoreTableDeletedName, TypeName: "", IsCore: true, SyncEnabled: false},
 		{TableName: rt.CoreTableSyncName, TypeName: "", IsCore: true, SyncEnabled: false},
 		{TableName: rt.CoreTableSchemaStateName, TypeName: "", IsCore: true, SyncEnabled: false},
