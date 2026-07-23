@@ -16,6 +16,10 @@ func main() {
 		rawOptions["Visibility"] = value
 		return nil
 	})
+	flags.Func("PublicSynchronousAPI", "make the generated synchronous Swift API public", func(value string) error {
+		rawOptions["PublicSynchronousAPI"] = value
+		return nil
+	})
 
 	opts := protogen.Options{ParamFunc: flags.Set}
 	opts.Run(func(plugin *protogen.Plugin) error {

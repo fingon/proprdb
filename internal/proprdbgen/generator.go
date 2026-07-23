@@ -42,6 +42,7 @@ type messageModel struct {
 	OmitSync            bool
 	ValidateWrite       bool
 	AllowCustomIDInsert bool
+	ChangeListeners     bool
 }
 
 type modelCollector struct{}
@@ -135,6 +136,9 @@ func validateModels(models []messageModel) error {
 		}
 		tableOwners[model.TableName] = model.TypeName
 		symbols := []string{model.GoName, model.TableTypeName, model.RowTypeName}
+		if model.ChangeListeners {
+			symbols = append(symbols, model.GoName+"Change")
+		}
 		for _, suffix := range []string{"TableName", "TypeName", "ProjectionSchema", "CreateTableSQL", "InsertSQL", "UpsertSQL"} {
 			symbols = append(symbols, model.GoName+suffix)
 		}
@@ -146,6 +150,15 @@ func validateModels(models []messageModel) error {
 		}
 	}
 	return nil
+}
+
+func modelsHaveChangeListeners(models []messageModel) bool {
+	for _, model := range models {
+		if model.ChangeListeners {
+			return true
+		}
+	}
+	return false
 }
 
 func (c modelCollector) collectModels(file *protogen.File) ([]messageModel, error) {
@@ -200,6 +213,10 @@ func (c modelCollector) buildModel(message *protogen.Message) (messageModel, err
 	if err != nil {
 		return messageModel{}, fmt.Errorf("message %s allow_custom_id_insert option: %w", message.Desc.FullName(), err)
 	}
+	changeListeners, err := c.messageOptionBool(message, proprdbpb.E_ChangeListeners)
+	if err != nil {
+		return messageModel{}, fmt.Errorf("message %s change_listeners option: %w", message.Desc.FullName(), err)
+	}
 	projected := make([]projectedField, 0)
 	signatures := make([]string, 0)
 	fieldsByName := make(map[string]*protogen.Field)
@@ -249,6 +266,7 @@ func (c modelCollector) buildModel(message *protogen.Message) (messageModel, err
 		OmitSync:            omitSync,
 		ValidateWrite:       validateWrite,
 		AllowCustomIDInsert: allowCustomIDInsert,
+		ChangeListeners:     changeListeners,
 	}, nil
 }
 
@@ -516,13 +534,17 @@ func (e generatorEmitter) emitModel(model messageModel) {
 	g.P("\tData *", model.GoName)
 	g.P("}")
 	g.P()
+	if model.ChangeListeners {
+		g.P("type ", model.GoName, "Change = rt.TableChange[*", model.GoName, "]")
+		g.P()
+	}
 
 	g.P("type ", model.TableTypeName, " struct {")
 	g.P("\tq DBTX")
 	g.P("}")
 	g.P()
 	g.P("var ", model.GoName, "GeneratedBinding = rt.GeneratedTableBinding{")
-	g.P("\tDescriptor: rt.GeneratedTableDescriptor{TableName: ", tableNameConst, ", TypeName: ", typeNameConst, ", SyncEnabled: ", strconv.FormatBool(!model.OmitSync), "},")
+	g.P("\tDescriptor: rt.GeneratedTableDescriptor{TableName: ", tableNameConst, ", TypeName: ", typeNameConst, ", SyncEnabled: ", strconv.FormatBool(!model.OmitSync), ", ChangeListenersEnabled: ", strconv.FormatBool(model.ChangeListeners), "},")
 	g.P("\tNewMessage: func() proto.Message { return &", model.GoName, "{} },")
 	g.P("\tInsertSQL: ", insertConst, ",")
 	g.P("\tUpsertSQL: ", upsertConst, ",")
@@ -539,6 +561,9 @@ func (e generatorEmitter) emitModel(model messageModel) {
 	g.P()
 
 	g.P("func New", model.TableTypeName, "(q DBTX) *", model.TableTypeName, " {")
+	if model.ChangeListeners {
+		g.P("\tq = rt.WithChangeListeners(q)")
+	}
 	g.P("\treturn &", model.TableTypeName, "{q: q}")
 	g.P("}")
 	g.P()
@@ -547,7 +572,10 @@ func (e generatorEmitter) emitModel(model messageModel) {
 	e.emitSelectMethod(model, tableNameConst)
 	e.emitInsertMethod(model, tableNameConst, insertConst)
 	e.emitUpdateMethod(model, tableNameConst, upsertConst)
-	e.emitDeleteMethod(model, tableNameConst)
+	e.emitDeleteMethod(model)
+	if model.ChangeListeners {
+		e.emitChangesMethod(model, tableNameConst)
+	}
 	e.emitApplyWithAtNsMethods(model, tableNameConst, typeNameConst, upsertConst)
 	if len(model.ProjectedFields) > 0 {
 		e.emitReprojectMethod(model, tableNameConst, reprojectConst)
@@ -816,7 +844,7 @@ func (e generatorEmitter) emitUpdateMethod(model messageModel, _, _ string) {
 	g.P()
 }
 
-func (e generatorEmitter) emitDeleteMethod(model messageModel, tableNameConst string) {
+func (e generatorEmitter) emitDeleteMethod(model messageModel) {
 	g := e.g
 	g.P("func (t *", model.TableTypeName, ") DeleteByID(id string) error {")
 	g.P("\tif t.q == nil {")
@@ -825,7 +853,7 @@ func (e generatorEmitter) emitDeleteMethod(model messageModel, tableNameConst st
 	g.P("\tif id == \"\" {")
 	g.P("\t\treturn errors.New(\"" + errEmptyID + "\")")
 	g.P("\t}")
-	g.P("\treturn rt.DeleteLocalObjectContext(context.Background(), t.q, ", tableNameConst, ", id)")
+	g.P("\treturn rt.DeleteLocalBoundObjectContext(context.Background(), t.q, ", model.GoName, "GeneratedBinding, id)")
 	g.P("}")
 	g.P()
 
@@ -837,6 +865,17 @@ func (e generatorEmitter) emitDeleteMethod(model messageModel, tableNameConst st
 	g.P("\t\treturn errors.New(\"" + errEmptyID + "\")")
 	g.P("\t}")
 	g.P("\treturn t.DeleteByID(row.ID)")
+	g.P("}")
+	g.P()
+}
+
+func (e generatorEmitter) emitChangesMethod(model messageModel, tableNameConst string) {
+	g := e.g
+	g.P("func (t *", model.TableTypeName, ") Changes(ctx context.Context) (<-chan ", model.GoName, "Change, error) {")
+	g.P("\tif t.q == nil {")
+	g.P("\t\treturn nil, errors.New(\"" + errNilDBTX + "\")")
+	g.P("\t}")
+	g.P("\treturn rt.TableChanges[*", model.GoName, "](ctx, t.q, ", tableNameConst, ")")
 	g.P("}")
 	g.P()
 }
@@ -939,6 +978,9 @@ func (e generatorEmitter) emitWrapper(models []messageModel) {
 	g.P("}")
 	g.P()
 	g.P("func NewCRUD(q DBTX) *CRUD {")
+	if modelsHaveChangeListeners(models) {
+		g.P("\tq = rt.WithChangeListeners(q)")
+	}
 	g.P("\treturn &CRUD{")
 	for _, model := range models {
 		g.P("\t\t", model.GoName, ": New", model.TableTypeName, "(q),")

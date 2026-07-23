@@ -18,10 +18,6 @@ func TestProtocSwiftPluginGolden(t *testing.T) {
 	if _, err := exec.LookPath("protoc"); err != nil {
 		t.Skipf("protoc not available: %v", err)
 	}
-	if _, err := exec.LookPath("protoc-gen-swift"); err != nil {
-		t.Skipf("protoc-gen-swift not available: %v", err)
-	}
-
 	_, currentFile, _, ok := runtime.Caller(0)
 	if !ok {
 		t.Fatal("determine current file path")
@@ -158,7 +154,7 @@ message Person {
 	assert.Check(t, strings.Contains(generatedText, `values.append(.null)`))
 }
 
-func TestProtocSwiftPluginSupportsPublicVisibility(t *testing.T) {
+func TestProtocSwiftPluginSupportsPublicSynchronousAPI(t *testing.T) {
 	t.Helper()
 
 	if _, err := exec.LookPath("protoc"); err != nil {
@@ -189,7 +185,7 @@ func TestProtocSwiftPluginSupportsPublicVisibility(t *testing.T) {
 		"-I", protoDir,
 		"-I", repoRoot,
 		"--plugin=protoc-gen-proprdb-swift="+pluginPath,
-		"--proprdb-swift_out=Visibility=Public,paths=source_relative:"+generatedDir,
+		"--proprdb-swift_out=Visibility=Public,PublicSynchronousAPI=true,paths=source_relative:"+generatedDir,
 		protoFile,
 	)
 
@@ -203,5 +199,6 @@ func TestProtocSwiftPluginSupportsPublicVisibility(t *testing.T) {
 	assert.Check(t, strings.Contains(generatedText, `public struct PersonTable {`))
 	assert.Check(t, strings.Contains(generatedText, `public func initialize() throws {`))
 	assert.Check(t, strings.Contains(generatedText, `public struct CRUD {`))
+	assert.Check(t, strings.Contains(generatedText, `public struct PersonTableProxy: Sendable {`))
 	assert.Check(t, strings.Contains(generatedText, `public func readJSONL(remote: String, text: String) throws {`))
 }

@@ -20,4 +20,5 @@ extend google.protobuf.MessageOptions {
   bool validate_write = 50004;
   bool allow_custom_id_insert = 50005;
   repeated Index indexes = 50006;
+  bool change_listeners = 50007;
 }

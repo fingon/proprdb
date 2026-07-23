@@ -46,34 +46,34 @@ final class GeneratedSyncTests: XCTestCase {
         XCTAssertEqual(try source.writeJSONL(remote: testRemoteA).trimmingCharacters(in: .whitespacesAndNewlines), "")
 
         try target.readJSONL(remote: testRemoteA, text: firstExport)
-        let targetPeople = try target.person.select(where: "id = ?", arguments: [personRow.id])
+        let targetPeople = try target.person.select(where: "id = ?", arguments: [.string(personRow.id)])
         XCTAssertEqual(targetPeople.count, 1)
         XCTAssertEqual(targetPeople[0].data.name, "Ada")
         XCTAssertEqual(try scalarInt(targetDB, sql: "SELECT COUNT(*) FROM _sync WHERE remote = ?", arguments: [testRemoteA]), 1)
 
         let noteLine = "{\"id\":\(jsonString(noteRow.id)),\"atNs\":\(personRow.atNs + 10),\"data\":{\"@type\":\(jsonString(typeURL(NoteTypeName))),\"text\":\"ignored\"}}\n"
         try target.readJSONL(remote: testRemoteA, text: noteLine)
-        XCTAssertEqual(try target.note.select(where: "id = ?", arguments: [noteRow.id]).count, 0)
+        XCTAssertEqual(try target.note.select(where: "id = ?", arguments: [.string(noteRow.id)]).count, 0)
         XCTAssertEqual(try scalarInt(targetDB, sql: "SELECT COUNT(*) FROM _sync WHERE object_id = ? AND table_name = ? AND remote = ?", arguments: [noteRow.id, NoteTableName, testRemoteA]), 0)
 
         _ = try source.person.updateByID(personRow.id, data: makePerson(name: "Ada Updated", age: 38))
         let thirdExport = try source.writeJSONL(remote: testRemoteA)
         XCTAssertEqual(thirdExport.trimmingCharacters(in: .whitespacesAndNewlines).split(separator: "\n").count, 1)
         try target.readJSONL(remote: testRemoteA, text: thirdExport)
-        XCTAssertEqual(try target.person.select(where: "id = ?", arguments: [personRow.id]).first?.data.name, "Ada Updated")
+        XCTAssertEqual(try target.person.select(where: "id = ?", arguments: [.string(personRow.id)]).first?.data.name, "Ada Updated")
 
-        let targetUpdatedAtNs = try XCTUnwrap(target.person.select(where: "id = ?", arguments: [personRow.id]).first?.atNs)
+        let targetUpdatedAtNs = try XCTUnwrap(target.person.select(where: "id = ?", arguments: [.string(personRow.id)]).first?.atNs)
         let invalidByValidateLine = "{\"id\":\(jsonString(personRow.id)),\"atNs\":\(targetUpdatedAtNs + 1),\"data\":{\"@type\":\(jsonString(typeURL(PersonTypeName))),\"name\":\"\",\"age\":\"1\"}}\n"
         try target.readJSONL(remote: testRemoteA, text: invalidByValidateLine)
-        XCTAssertEqual(try target.person.select(where: "id = ?", arguments: [personRow.id]).first?.data.name, "")
+        XCTAssertEqual(try target.person.select(where: "id = ?", arguments: [.string(personRow.id)]).first?.data.name, "")
 
         let localNewer = try target.person.updateByID(personRow.id, data: makePerson(name: "Local Newer", age: 99))
         try target.readJSONL(remote: testRemoteA, text: "{\"id\":\(jsonString(personRow.id)),\"deleted\":true,\"atNs\":\(localNewer.atNs - 1),\"data\":{\"@type\":\(jsonString(typeURL(PersonTypeName)))}}\n")
-        XCTAssertEqual(try target.person.select(where: "id = ?", arguments: [personRow.id]).first?.data.name, "Local Newer")
+        XCTAssertEqual(try target.person.select(where: "id = ?", arguments: [.string(personRow.id)]).first?.data.name, "Local Newer")
 
         let newerDeleteAtNs = localNewer.atNs + 1
         try target.readJSONL(remote: testRemoteA, text: "{\"id\":\(jsonString(personRow.id)),\"deleted\":true,\"atNs\":\(newerDeleteAtNs),\"data\":{\"@type\":\(jsonString(typeURL(PersonTypeName)))}}\n")
-        XCTAssertEqual(try target.person.select(where: "id = ?", arguments: [personRow.id]).count, 0)
+        XCTAssertEqual(try target.person.select(where: "id = ?", arguments: [.string(personRow.id)]).count, 0)
         XCTAssertEqual(try scalarInt(targetDB, sql: "SELECT at_ns FROM _deleted WHERE table_name = ? AND id = ?", arguments: [PersonTableName, personRow.id]), newerDeleteAtNs)
     }
 
@@ -91,7 +91,7 @@ final class GeneratedSyncTests: XCTestCase {
         XCTAssertEqual(try source.writeJSONL(remote: testRemoteEmpty).trimmingCharacters(in: .whitespacesAndNewlines), firstExport.trimmingCharacters(in: .whitespacesAndNewlines))
 
         try target.readJSONL(remote: testRemoteEmpty, text: firstExport)
-        XCTAssertEqual(try target.person.select(where: "id = ?", arguments: [personRow.id]).count, 1)
+        XCTAssertEqual(try target.person.select(where: "id = ?", arguments: [.string(personRow.id)]).count, 1)
         XCTAssertEqual(try scalarInt(sourceDB, sql: "SELECT COUNT(*) FROM _sync WHERE remote = ?", arguments: [testRemoteEmpty]), 0)
         XCTAssertEqual(try scalarInt(targetDB, sql: "SELECT COUNT(*) FROM _sync WHERE remote = ?", arguments: [testRemoteEmpty]), 0)
 
@@ -125,7 +125,7 @@ final class GeneratedSyncTests: XCTestCase {
         try db.execute("INSERT INTO _unknown_types (type_name, id, at_ns, deleted, data_json) VALUES (?, ?, ?, ?, ?)", arguments: [PersonTypeName, drainPersonID, Int64(77), 0, personAnyJSON])
         try crud.person.initialize()
 
-        let recovered = try crud.person.select(where: "id = ?", arguments: [drainPersonID])
+        let recovered = try crud.person.select(where: "id = ?", arguments: [.string(drainPersonID)])
         XCTAssertEqual(recovered.count, 1)
         XCTAssertEqual(recovered[0].data.name, "Recovered")
         XCTAssertEqual(recovered[0].data.age, 44)

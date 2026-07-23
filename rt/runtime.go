@@ -402,10 +402,11 @@ func (r *JSONLRecord) UnmarshalJSON(data []byte) error {
 }
 
 type GeneratedTableDescriptor struct {
-	TableName   string
-	TypeName    string
-	IsCore      bool
-	SyncEnabled bool
+	TableName              string
+	TypeName               string
+	IsCore                 bool
+	SyncEnabled            bool
+	ChangeListenersEnabled bool
 }
 
 type GeneratedTableBinding struct {

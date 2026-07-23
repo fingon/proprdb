@@ -17,7 +17,7 @@ private let PersonCreateIndexSQL2 = "CREATE INDEX IF NOT EXISTS \"idx_generatedt
 private let PersonReprojectSQL = "UPDATE \"generatedtest_example_person\" SET \"name\" = ?, \"age\" = ? WHERE id = ?"
 
 private let PersonGeneratedBinding = GeneratedTableBinding(
-	descriptor: GeneratedTableDescriptor(tableName: PersonTableName, typeName: PersonTypeName, isCore: false, syncEnabled: true),
+	descriptor: GeneratedTableDescriptor(tableName: PersonTableName, typeName: PersonTypeName, isCore: false, syncEnabled: true, changeListenersEnabled: true),
 	messageType: Generatedtest_Example_Person.self,
 	insertSQL: PersonInsertSQL,
 	upsertSQL: PersonUpsertSQL,
@@ -40,16 +40,18 @@ private let PersonGeneratedBinding = GeneratedTableBinding(
 	}
 )
 
-struct PersonRow: Equatable, Sendable {
-	var id: String
-	var atNs: Int64
-	var data: Generatedtest_Example_Person
-	init(id: String, atNs: Int64, data: Generatedtest_Example_Person) {
+public struct PersonRow: Equatable, Sendable {
+	public var id: String
+	public var atNs: Int64
+	public var data: Generatedtest_Example_Person
+	public init(id: String, atNs: Int64, data: Generatedtest_Example_Person) {
 		self.id = id
 		self.atNs = atNs
 		self.data = data
 	}
 }
+
+public typealias PersonChange = TableChange<Generatedtest_Example_Person>
 
 struct PersonTable {
 	fileprivate let q: any DBTX
@@ -95,12 +97,12 @@ struct PersonTable {
 		try drainUnknownRows(PersonTypeName)
 	}
 
-	func select(where whereClause: String = "", arguments: [Any?] = []) throws -> [PersonRow] {
+	func select(where whereClause: String = "", arguments: [SQLiteBindValue] = []) throws -> [PersonRow] {
 		var query = "SELECT id, at_ns, data FROM " + PersonTableNameQuoted
 		if !whereClause.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
 			query += " WHERE " + whereClause
 		}
-		return try q.withRows(query, arguments: arguments) { rows in
+		return try q.withRows(query, bindValues: arguments) { rows in
 			var result: [PersonRow] = []
 			while let row = try rows.next() {
 				let id = try row.string(at: 0)
@@ -151,7 +153,7 @@ struct PersonTable {
 		if id.isEmpty {
 			throw ProprDBError("empty id")
 		}
-		try deleteLocalObject(q, tableName: PersonTableName, id: id)
+		try deleteLocalObject(q, binding: PersonGeneratedBinding, id: id)
 	}
 
 	func deleteRow(_ row: PersonRow) throws {
@@ -201,6 +203,10 @@ struct PersonTable {
 		try drainUnknownRows(PersonTypeName)
 	}
 
+	func changes() -> AsyncStream<PersonChange> {
+		tableChanges(q, tableName: PersonTableName, as: Generatedtest_Example_Person.self)
+	}
+
 }
 
 let NoteTableName = "generatedtest_example_note"
@@ -214,7 +220,7 @@ private let NoteGeneratedIndexPrefix = "idx_generatedtest_example_note__"
 private let NoteReprojectSQL = "UPDATE \"generatedtest_example_note\" SET \"text\" = ? WHERE id = ?"
 
 private let NoteGeneratedBinding = GeneratedTableBinding(
-	descriptor: GeneratedTableDescriptor(tableName: NoteTableName, typeName: NoteTypeName, isCore: false, syncEnabled: false),
+	descriptor: GeneratedTableDescriptor(tableName: NoteTableName, typeName: NoteTypeName, isCore: false, syncEnabled: false, changeListenersEnabled: false),
 	messageType: Generatedtest_Example_Note.self,
 	insertSQL: NoteInsertSQL,
 	upsertSQL: NoteUpsertSQL,
@@ -236,11 +242,11 @@ private let NoteGeneratedBinding = GeneratedTableBinding(
 	}
 )
 
-struct NoteRow: Equatable, Sendable {
-	var id: String
-	var atNs: Int64
-	var data: Generatedtest_Example_Note
-	init(id: String, atNs: Int64, data: Generatedtest_Example_Note) {
+public struct NoteRow: Equatable, Sendable {
+	public var id: String
+	public var atNs: Int64
+	public var data: Generatedtest_Example_Note
+	public init(id: String, atNs: Int64, data: Generatedtest_Example_Note) {
 		self.id = id
 		self.atNs = atNs
 		self.data = data
@@ -284,12 +290,12 @@ struct NoteTable {
 		try drainUnknownRows(NoteTypeName)
 	}
 
-	func select(where whereClause: String = "", arguments: [Any?] = []) throws -> [NoteRow] {
+	func select(where whereClause: String = "", arguments: [SQLiteBindValue] = []) throws -> [NoteRow] {
 		var query = "SELECT id, at_ns, data FROM " + NoteTableNameQuoted
 		if !whereClause.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
 			query += " WHERE " + whereClause
 		}
-		return try q.withRows(query, arguments: arguments) { rows in
+		return try q.withRows(query, bindValues: arguments) { rows in
 			var result: [NoteRow] = []
 			while let row = try rows.next() {
 				let id = try row.string(at: 0)
@@ -334,7 +340,7 @@ struct NoteTable {
 		if id.isEmpty {
 			throw ProprDBError("empty id")
 		}
-		try deleteLocalObject(q, tableName: NoteTableName, id: id)
+		try deleteLocalObject(q, binding: NoteGeneratedBinding, id: id)
 	}
 
 	func deleteRow(_ row: NoteRow) throws {
@@ -394,8 +400,9 @@ struct CRUD {
 	let person: PersonTable
 	let note: NoteTable
 	init(_ q: any DBTX) {
-		self.person = PersonTable(q)
-		self.note = NoteTable(q)
+		let tracked = withChangeListeners(q)
+		self.person = PersonTable(tracked)
+		self.note = NoteTable(tracked)
 	}
 	private func dbtx() -> any DBTX { person.q }
 	func tableDescriptors() -> [GeneratedTableDescriptor] { crudGeneratedBindings.map(\.descriptor) + coreTableDescriptors() }
@@ -414,19 +421,60 @@ struct CRUD {
 	func readJSONL(remote: String, text: String) throws { try readBoundJSONL(dbtx(), bindings: crudGeneratedBindings, remote: remote, text: text) }
 }
 
+public struct PersonTableProxy: Sendable {
+	fileprivate let actor: ProprDBActor
+
+	public func initialize() async throws { try await actor._personInitialize() }
+	public func select(where whereClause: String = "", arguments: [SQLiteBindValue] = []) async throws -> [PersonRow] { try await actor._personSelect(where: whereClause, arguments: arguments) }
+	public func insert(_ data: Generatedtest_Example_Person) async throws -> PersonRow { try await actor._personInsert(data) }
+	public func insertWithID(_ id: String, data: Generatedtest_Example_Person) async throws -> PersonRow { try await actor._personInsertWithID(id, data: data) }
+	public func updateByID(_ id: String, data: Generatedtest_Example_Person) async throws -> PersonRow { try await actor._personUpdateByID(id, data: data) }
+	public func updateRow(_ row: PersonRow) async throws -> PersonRow { try await actor._personUpdateRow(row) }
+	public func deleteByID(_ id: String) async throws { try await actor._personDeleteByID(id) }
+	public func deleteRow(_ row: PersonRow) async throws { try await actor._personDeleteRow(row) }
+	public func drainUnknownRows() async throws { try await actor._personDrainUnknownRows() }
+	public func changes() async throws -> AsyncStream<PersonChange> { try await actor._personChanges() }
+}
+
+public struct NoteTableProxy: Sendable {
+	fileprivate let actor: ProprDBActor
+
+	public func initialize() async throws { try await actor._noteInitialize() }
+	public func select(where whereClause: String = "", arguments: [SQLiteBindValue] = []) async throws -> [NoteRow] { try await actor._noteSelect(where: whereClause, arguments: arguments) }
+	public func insert(_ data: Generatedtest_Example_Note) async throws -> NoteRow { try await actor._noteInsert(data) }
+	public func updateByID(_ id: String, data: Generatedtest_Example_Note) async throws -> NoteRow { try await actor._noteUpdateByID(id, data: data) }
+	public func updateRow(_ row: NoteRow) async throws -> NoteRow { try await actor._noteUpdateRow(row) }
+	public func deleteByID(_ id: String) async throws { try await actor._noteDeleteByID(id) }
+	public func deleteRow(_ row: NoteRow) async throws { try await actor._noteDeleteRow(row) }
+	public func drainUnknownRows() async throws { try await actor._noteDrainUnknownRows() }
+}
+
 extension ProprDBActor {
-	func initialize() throws { try withDatabase { try CRUD($0).initialize() } }
-	func selectPerson() throws -> [PersonRow] { try withDatabase { try PersonTable($0).select() } }
-	func insertPerson(_ data: Generatedtest_Example_Person) throws -> PersonRow { try withDatabase { try PersonTable($0).insert(data) } }
-	func updatePersonByID(_ id: String, data: Generatedtest_Example_Person) throws -> PersonRow { try withDatabase { try PersonTable($0).updateByID(id, data: data) } }
-	func deletePersonByID(_ id: String) throws { try withDatabase { try PersonTable($0).deleteByID(id) } }
-	func selectNote() throws -> [NoteRow] { try withDatabase { try NoteTable($0).select() } }
-	func insertNote(_ data: Generatedtest_Example_Note) throws -> NoteRow { try withDatabase { try NoteTable($0).insert(data) } }
-	func updateNoteByID(_ id: String, data: Generatedtest_Example_Note) throws -> NoteRow { try withDatabase { try NoteTable($0).updateByID(id, data: data) } }
-	func deleteNoteByID(_ id: String) throws { try withDatabase { try NoteTable($0).deleteByID(id) } }
-	func prepareJSONL(remote: String) throws -> PreparedJSONLExport { try withDatabase { try CRUD($0).prepareJSONL(remote: remote) } }
-	func acknowledgeJSONL(_ checkpoint: JSONLCheckpoint) throws { try withDatabase { try CRUD($0).acknowledgeJSONL(checkpoint) } }
-	func discardJSONL(_ checkpoint: JSONLCheckpoint) throws { try withDatabase { try CRUD($0).discardJSONL(checkpoint) } }
-	func writeJSONL(remote: String) throws -> String { try withDatabase { try CRUD($0).writeJSONL(remote: remote) } }
-	func readJSONL(remote: String, text: String) throws { try withDatabase { try CRUD($0).readJSONL(remote: remote, text: text) } }
+	public func initialize() throws { try withDatabase { try CRUD($0).initialize() } }
+	public func tableDescriptors() throws -> [GeneratedTableDescriptor] { try withDatabase { CRUD($0).tableDescriptors() } }
+	public nonisolated var person: PersonTableProxy { PersonTableProxy(actor: self) }
+	fileprivate func _personInitialize() throws { try withDatabase { try CRUD($0).person.initialize() } }
+	fileprivate func _personSelect(where whereClause: String, arguments: [SQLiteBindValue]) throws -> [PersonRow] { try withDatabase { try CRUD($0).person.select(where: whereClause, arguments: arguments) } }
+	fileprivate func _personInsert(_ data: Generatedtest_Example_Person) throws -> PersonRow { try withDatabase { try CRUD($0).person.insert(data) } }
+	fileprivate func _personInsertWithID(_ id: String, data: Generatedtest_Example_Person) throws -> PersonRow { try withDatabase { try CRUD($0).person.insertWithID(id, data: data) } }
+	fileprivate func _personUpdateByID(_ id: String, data: Generatedtest_Example_Person) throws -> PersonRow { try withDatabase { try CRUD($0).person.updateByID(id, data: data) } }
+	fileprivate func _personUpdateRow(_ row: PersonRow) throws -> PersonRow { try withDatabase { try CRUD($0).person.updateRow(row) } }
+	fileprivate func _personDeleteByID(_ id: String) throws { try withDatabase { try CRUD($0).person.deleteByID(id) } }
+	fileprivate func _personDeleteRow(_ row: PersonRow) throws { try withDatabase { try CRUD($0).person.deleteRow(row) } }
+	fileprivate func _personDrainUnknownRows() throws { try withDatabase { try CRUD($0).person.drainUnknownRows() } }
+	fileprivate func _personChanges() throws -> AsyncStream<PersonChange> { try withDatabase { CRUD($0).person.changes() } }
+	public nonisolated var note: NoteTableProxy { NoteTableProxy(actor: self) }
+	fileprivate func _noteInitialize() throws { try withDatabase { try CRUD($0).note.initialize() } }
+	fileprivate func _noteSelect(where whereClause: String, arguments: [SQLiteBindValue]) throws -> [NoteRow] { try withDatabase { try CRUD($0).note.select(where: whereClause, arguments: arguments) } }
+	fileprivate func _noteInsert(_ data: Generatedtest_Example_Note) throws -> NoteRow { try withDatabase { try CRUD($0).note.insert(data) } }
+	fileprivate func _noteUpdateByID(_ id: String, data: Generatedtest_Example_Note) throws -> NoteRow { try withDatabase { try CRUD($0).note.updateByID(id, data: data) } }
+	fileprivate func _noteUpdateRow(_ row: NoteRow) throws -> NoteRow { try withDatabase { try CRUD($0).note.updateRow(row) } }
+	fileprivate func _noteDeleteByID(_ id: String) throws { try withDatabase { try CRUD($0).note.deleteByID(id) } }
+	fileprivate func _noteDeleteRow(_ row: NoteRow) throws { try withDatabase { try CRUD($0).note.deleteRow(row) } }
+	fileprivate func _noteDrainUnknownRows() throws { try withDatabase { try CRUD($0).note.drainUnknownRows() } }
+	public func prepareJSONL(remote: String) throws -> PreparedJSONLExport { try withDatabase { try CRUD($0).prepareJSONL(remote: remote) } }
+	public func acknowledgeJSONL(_ checkpoint: JSONLCheckpoint) throws { try withDatabase { try CRUD($0).acknowledgeJSONL(checkpoint) } }
+	public func discardJSONL(_ checkpoint: JSONLCheckpoint) throws { try withDatabase { try CRUD($0).discardJSONL(checkpoint) } }
+	public func writeJSONL(remote: String) throws -> String { try withDatabase { try CRUD($0).writeJSONL(remote: remote) } }
+	public func readJSONL(remote: String, text: String) throws { try withDatabase { try CRUD($0).readJSONL(remote: remote, text: text) } }
 }

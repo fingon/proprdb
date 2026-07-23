@@ -34,12 +34,14 @@ type PersonRow struct {
 	Data *Person
 }
 
+type PersonChange = rt.TableChange[*Person]
+
 type PersonTable struct {
 	q DBTX
 }
 
 var PersonGeneratedBinding = rt.GeneratedTableBinding{
-	Descriptor: rt.GeneratedTableDescriptor{TableName: PersonTableName, TypeName: PersonTypeName, SyncEnabled: true},
+	Descriptor: rt.GeneratedTableDescriptor{TableName: PersonTableName, TypeName: PersonTypeName, SyncEnabled: true, ChangeListenersEnabled: true},
 	NewMessage: func() proto.Message { return &Person{} },
 	InsertSQL:  PersonInsertSQL,
 	UpsertSQL:  PersonUpsertSQL,
@@ -56,6 +58,7 @@ var PersonGeneratedBinding = rt.GeneratedTableBinding{
 }
 
 func NewPersonTable(q DBTX) *PersonTable {
+	q = rt.WithChangeListeners(q)
 	return &PersonTable{q: q}
 }
 
@@ -284,7 +287,7 @@ func (t *PersonTable) DeleteByID(id string) error {
 	if id == "" {
 		return errors.New("empty id")
 	}
-	return rt.DeleteLocalObjectContext(context.Background(), t.q, PersonTableName, id)
+	return rt.DeleteLocalBoundObjectContext(context.Background(), t.q, PersonGeneratedBinding, id)
 }
 
 func (t *PersonTable) DeleteRow(row PersonRow) error {
@@ -295,6 +298,13 @@ func (t *PersonTable) DeleteRow(row PersonRow) error {
 		return errors.New("empty id")
 	}
 	return t.DeleteByID(row.ID)
+}
+
+func (t *PersonTable) Changes(ctx context.Context) (<-chan PersonChange, error) {
+	if t.q == nil {
+		return nil, errors.New("nil DBTX")
+	}
+	return rt.TableChanges[*Person](ctx, t.q, PersonTableName)
 }
 
 func (t *PersonTable) upsertWithAtNs(id string, atNs int64, data *Person) error {
@@ -409,7 +419,7 @@ type NoteTable struct {
 }
 
 var NoteGeneratedBinding = rt.GeneratedTableBinding{
-	Descriptor: rt.GeneratedTableDescriptor{TableName: NoteTableName, TypeName: NoteTypeName, SyncEnabled: false},
+	Descriptor: rt.GeneratedTableDescriptor{TableName: NoteTableName, TypeName: NoteTypeName, SyncEnabled: false, ChangeListenersEnabled: false},
 	NewMessage: func() proto.Message { return &Note{} },
 	InsertSQL:  NoteInsertSQL,
 	UpsertSQL:  NoteUpsertSQL,
@@ -626,7 +636,7 @@ func (t *NoteTable) DeleteByID(id string) error {
 	if id == "" {
 		return errors.New("empty id")
 	}
-	return rt.DeleteLocalObjectContext(context.Background(), t.q, NoteTableName, id)
+	return rt.DeleteLocalBoundObjectContext(context.Background(), t.q, NoteGeneratedBinding, id)
 }
 
 func (t *NoteTable) DeleteRow(row NoteRow) error {
@@ -741,6 +751,7 @@ var crudGeneratedBindings = []rt.GeneratedTableBinding{
 }
 
 func NewCRUD(q DBTX) *CRUD {
+	q = rt.WithChangeListeners(q)
 	return &CRUD{
 		Person: NewPersonTable(q),
 		Note:   NewNoteTable(q),

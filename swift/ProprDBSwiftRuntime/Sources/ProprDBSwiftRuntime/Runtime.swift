@@ -102,27 +102,56 @@ public struct ConflictError: Error, Equatable, Sendable, CustomStringConvertible
     }
 }
 
+public enum TableChange<Value: Sendable>: Sendable {
+    case upsert(id: String, atNs: Int64, data: Value)
+    case delete(id: String, atNs: Int64)
+}
+
 public struct GeneratedTableDescriptor: Equatable, Sendable {
     public let tableName: String
     public let typeName: String
     public let isCore: Bool
     public let syncEnabled: Bool
+    public let changeListenersEnabled: Bool
 
-    public init(tableName: String, typeName: String, isCore: Bool, syncEnabled: Bool) {
+    public init(
+        tableName: String,
+        typeName: String,
+        isCore: Bool,
+        syncEnabled: Bool,
+        changeListenersEnabled: Bool = false
+    ) {
         self.tableName = tableName
         self.typeName = typeName
         self.isCore = isCore
         self.syncEnabled = syncEnabled
+        self.changeListenersEnabled = changeListenersEnabled
     }
 }
 
-public enum SQLiteBindValue: Sendable {
+public enum SQLiteBindValue: Sendable, ExpressibleByStringLiteral, ExpressibleByIntegerLiteral, ExpressibleByFloatLiteral, ExpressibleByBooleanLiteral {
     case null
     case string(String)
     case int64(Int64)
     case double(Double)
     case bool(Bool)
     case data(Data)
+
+    public init(stringLiteral value: String) {
+        self = .string(value)
+    }
+
+    public init(integerLiteral value: Int64) {
+        self = .int64(value)
+    }
+
+    public init(floatLiteral value: Double) {
+        self = .double(value)
+    }
+
+    public init(booleanLiteral value: Bool) {
+        self = .bool(value)
+    }
 
     fileprivate var sqliteValue: Any? {
         switch self {
@@ -211,8 +240,172 @@ public protocol DBTX: AnyObject {
     func withTransaction<T>(_ body: (any DBTX) throws -> T) throws -> T
 }
 
+private struct GeneratedTableChange: Sendable {
+    let tableName: String
+    let id: String
+    let atNs: Int64
+    let deleted: Bool
+    let message: (any Message)?
+}
+
+private struct TableChangeSubscriber: Sendable {
+    let yield: @Sendable (GeneratedTableChange) -> Void
+    let finish: @Sendable () -> Void
+}
+
+private final class TableChangeBroker: @unchecked Sendable {
+    private let lock = NSLock()
+    private var subscribers: [String: [UUID: TableChangeSubscriber]] = [:]
+    private var finished = false
+
+    func add(tableName: String, id: UUID, subscriber: TableChangeSubscriber) {
+        lock.lock()
+        if finished {
+            lock.unlock()
+            subscriber.finish()
+            return
+        }
+        subscribers[tableName, default: [:]][id] = subscriber
+        lock.unlock()
+    }
+
+    func remove(tableName: String, id: UUID) {
+        lock.lock()
+        subscribers[tableName]?[id] = nil
+        if subscribers[tableName]?.isEmpty == true {
+            subscribers[tableName] = nil
+        }
+        lock.unlock()
+    }
+
+    func hasSubscribers(tableName: String) -> Bool {
+        lock.lock()
+        let result = subscribers[tableName]?.isEmpty == false
+        lock.unlock()
+        return result
+    }
+
+    func publish(_ changes: [GeneratedTableChange]) {
+        for change in changes {
+            lock.lock()
+            let currentSubscribers = subscribers[change.tableName].map { Array($0.values) } ?? []
+            lock.unlock()
+            for subscriber in currentSubscribers {
+                subscriber.yield(change)
+            }
+        }
+    }
+
+    func finish() {
+        lock.lock()
+        guard !finished else {
+            lock.unlock()
+            return
+        }
+        finished = true
+        let currentSubscribers = subscribers.values.flatMap { Array($0.values) }
+        subscribers.removeAll()
+        lock.unlock()
+        for subscriber in currentSubscribers {
+            subscriber.finish()
+        }
+    }
+}
+
+private protocol TableChangeBrokerProvider: AnyObject {
+    var tableChangeBroker: TableChangeBroker { get }
+}
+
+private final class TableChangeCollector {
+    var changes: [GeneratedTableChange] = []
+}
+
+private final class ChangeTrackingDBTX: DBTX, TableChangeBrokerProvider {
+    let inner: any DBTX
+    let tableChangeBroker: TableChangeBroker
+    private let collector: TableChangeCollector?
+
+    var sqliteHandle: OpaquePointer? {
+        inner.sqliteHandle
+    }
+
+    init(_ inner: any DBTX, broker: TableChangeBroker, collector: TableChangeCollector? = nil) {
+        self.inner = inner
+        tableChangeBroker = broker
+        self.collector = collector
+    }
+
+    func withTransaction<T>(_ body: (any DBTX) throws -> T) throws -> T {
+        let childCollector = TableChangeCollector()
+        let result = try inner.withTransaction { transaction in
+            try body(ChangeTrackingDBTX(transaction, broker: tableChangeBroker, collector: childCollector))
+        }
+        if let collector {
+            collector.changes.append(contentsOf: childCollector.changes)
+        } else {
+            tableChangeBroker.publish(childCollector.changes)
+        }
+        return result
+    }
+
+    func queue(_ change: GeneratedTableChange) {
+        if let collector {
+            collector.changes.append(change)
+        } else {
+            tableChangeBroker.publish([change])
+        }
+    }
+}
+
+public func withChangeListeners(_ q: any DBTX) -> any DBTX {
+    if let tracked = q as? ChangeTrackingDBTX {
+        return tracked
+    }
+    if let provider = q as? any TableChangeBrokerProvider {
+        return ChangeTrackingDBTX(q, broker: provider.tableChangeBroker)
+    }
+    return ChangeTrackingDBTX(q, broker: TableChangeBroker())
+}
+
+public func tableChanges<Value: Message>(
+    _ q: any DBTX,
+    tableName: String,
+    as _: Value.Type
+) -> AsyncStream<TableChange<Value>> {
+    guard let tracked = withChangeListeners(q) as? ChangeTrackingDBTX else {
+        preconditionFailure("change listener wrapper has unexpected type")
+    }
+    let broker = tracked.tableChangeBroker
+    return AsyncStream(bufferingPolicy: .unbounded) { continuation in
+        let id = UUID()
+        continuation.onTermination = { @Sendable _ in
+            broker.remove(tableName: tableName, id: id)
+        }
+        broker.add(
+            tableName: tableName,
+            id: id,
+            subscriber: TableChangeSubscriber(
+                yield: { change in
+                    if change.deleted {
+                        continuation.yield(.delete(id: change.id, atNs: change.atNs))
+                        return
+                    }
+                    guard let data = change.message as? Value else {
+                        preconditionFailure("change listener type mismatch for table \(change.tableName)")
+                    }
+                    continuation.yield(.upsert(id: change.id, atNs: change.atNs, data: data))
+                },
+                finish: {
+                    continuation.finish()
+                }
+            )
+        )
+    }
+}
+
 public final class SQLiteDatabase: DBTX {
     public var sqliteHandle: OpaquePointer?
+    fileprivate let tableChangeBroker = TableChangeBroker()
 
     public init(path: String) throws {
         var handle: OpaquePointer?
@@ -256,6 +449,7 @@ public final class SQLiteDatabase: DBTX {
             throw ProprDBError("close sqlite database: \(sqliteErrorMessage(database: sqliteHandle))")
         }
         self.sqliteHandle = nil
+        tableChangeBroker.finish()
     }
 
     public func beginTransaction() throws -> SQLiteTransaction {
@@ -355,6 +549,14 @@ public final class SQLiteTransaction: DBTX {
                 logger.error("fallback sqlite rollback failed", metadata: ["error": .string(String(describing: error))])
             }
         }
+    }
+}
+
+extension SQLiteDatabase: TableChangeBrokerProvider {}
+
+extension SQLiteTransaction: TableChangeBrokerProvider {
+    fileprivate var tableChangeBroker: TableChangeBroker {
+        database.tableChangeBroker
     }
 }
 
@@ -535,6 +737,14 @@ public extension DBTX {
             }
             throw error
         }
+    }
+
+    func withRows<T>(
+        _ sql: String,
+        bindValues: [SQLiteBindValue],
+        _ body: (SQLiteRows) throws -> T
+    ) throws -> T {
+        try withRows(sql, arguments: bindValues.map(\.sqliteValue), body)
     }
 
     private func prepare(_ sql: String) throws -> OpaquePointer {
@@ -845,6 +1055,30 @@ private func bindingArguments(_ binding: GeneratedTableBinding, id: String, atNs
     return arguments
 }
 
+private func queueGeneratedTableChange(
+    _ q: any DBTX,
+    binding: GeneratedTableBinding,
+    id: String,
+    atNs: Int64,
+    deleted: Bool,
+    message: (any Message)?
+) {
+    guard
+        binding.descriptor.changeListenersEnabled,
+        let tracked = q as? ChangeTrackingDBTX,
+        tracked.tableChangeBroker.hasSubscribers(tableName: binding.descriptor.tableName)
+    else {
+        return
+    }
+    tracked.queue(GeneratedTableChange(
+        tableName: binding.descriptor.tableName,
+        id: id,
+        atNs: atNs,
+        deleted: deleted,
+        message: message
+    ))
+}
+
 public func writeLocalObject(
     _ q: any DBTX,
     binding: GeneratedTableBinding,
@@ -857,6 +1091,7 @@ public func writeLocalObject(
         let arguments = try bindingArguments(binding, id: id, atNs: atNs, message: message)
         try transaction.execute("DELETE FROM \(_deletedTableName) WHERE table_name = ? AND id = ?", arguments: [binding.descriptor.tableName, id])
         try transaction.execute(insert ? binding.insertSQL : binding.upsertSQL, arguments: arguments)
+        queueGeneratedTableChange(transaction, binding: binding, id: id, atNs: atNs, deleted: false, message: message)
         return atNs
     }
 }
@@ -865,6 +1100,14 @@ public func deleteLocalObject(_ q: any DBTX, tableName: String, id: String) thro
     try q.withTransaction { transaction in
         let atNs = try nextObjectAtNs(transaction, tableName: tableName, objectID: id)
         try applyTombstone(transaction, tableName: tableName, id: id, atNs: atNs)
+    }
+}
+
+public func deleteLocalObject(_ q: any DBTX, binding: GeneratedTableBinding, id: String) throws {
+    try q.withTransaction { transaction in
+        let atNs = try nextObjectAtNs(transaction, tableName: binding.descriptor.tableName, objectID: id)
+        try applyTombstone(transaction, tableName: binding.descriptor.tableName, id: id, atNs: atNs)
+        queueGeneratedTableChange(transaction, binding: binding, id: id, atNs: atNs, deleted: true, message: nil)
     }
 }
 
@@ -888,6 +1131,7 @@ public func applyIncomingObject(_ q: any DBTX, binding: GeneratedTableBinding, r
             throw ConflictError(typeName: binding.descriptor.typeName, id: record.id, atNs: record.atNs, localDeleted: false, remoteDeleted: true)
         }
         try applyTombstone(q, tableName: binding.descriptor.tableName, id: record.id, atNs: record.atNs)
+        queueGeneratedTableChange(q, binding: binding, id: record.id, atNs: record.atNs, deleted: true, message: nil)
         return
     }
     let message = try decodedBindingMessage(binding, data: record.data)
@@ -906,6 +1150,7 @@ public func applyIncomingObject(_ q: any DBTX, binding: GeneratedTableBinding, r
     }
     try q.execute("DELETE FROM \(_deletedTableName) WHERE table_name = ? AND id = ?", arguments: [binding.descriptor.tableName, record.id])
     try q.execute(binding.upsertSQL, arguments: try bindingArguments(binding, id: record.id, atNs: record.atNs, message: message))
+    queueGeneratedTableChange(q, binding: binding, id: record.id, atNs: record.atNs, deleted: false, message: message)
 }
 
 private func applyTombstone(_ q: any DBTX, tableName: String, id: String, atNs: Int64) throws {

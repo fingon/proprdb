@@ -75,6 +75,7 @@ func WriteLocalObjectContext(ctx context.Context, q DBTX, binding GeneratedTable
 			return fmt.Errorf("write %s/%s: %w", binding.Descriptor.TableName, id, writeErr)
 		}
 		atNs = allocatedAtNs
+		queueGeneratedTableChange(tx, binding, id, allocatedAtNs, false, message)
 		return nil
 	})
 }
@@ -92,6 +93,29 @@ func DeleteLocalObjectContext(ctx context.Context, q DBTX, tableName, id string)
 			return err
 		}
 		return applyTombstoneSQL(ctx, tx, tableName, id, atNs)
+	})
+}
+
+func DeleteLocalBoundObjectContext(ctx context.Context, q DBTX, binding GeneratedTableBinding, id string) error {
+	if q == nil {
+		return errors.New("nil DBTX")
+	}
+	if err := validateBinding(binding); err != nil {
+		return err
+	}
+	if id == "" {
+		return errors.New("empty id")
+	}
+	return q.WithTransaction(ctx, func(tx DBTX) error {
+		atNs, err := NextObjectAtNsContext(ctx, tx, binding.Descriptor.TableName, id)
+		if err != nil {
+			return err
+		}
+		if err := applyTombstoneSQL(ctx, tx, binding.Descriptor.TableName, id, atNs); err != nil {
+			return err
+		}
+		queueGeneratedTableChange(tx, binding, id, atNs, true, nil)
+		return nil
 	})
 }
 
@@ -148,6 +172,7 @@ func ApplyIncomingObjectContext(ctx context.Context, q DBTX, binding GeneratedTa
 	if _, err := q.ExecContext(ctx, binding.UpsertSQL, values...); err != nil {
 		return fmt.Errorf("upsert %s/%s: %w", binding.Descriptor.TableName, record.ID, err)
 	}
+	queueGeneratedTableChange(q, binding, record.ID, record.AtNs, false, message)
 	return nil
 }
 
@@ -170,7 +195,11 @@ func applyIncomingTombstoneContext(ctx context.Context, q DBTX, binding Generate
 		}
 		return &ConflictError{TypeName: binding.Descriptor.TypeName, ID: record.ID, AtNs: record.AtNs, RemoteDeleted: true}
 	}
-	return applyTombstoneSQL(ctx, q, binding.Descriptor.TableName, record.ID, record.AtNs)
+	if err := applyTombstoneSQL(ctx, q, binding.Descriptor.TableName, record.ID, record.AtNs); err != nil {
+		return err
+	}
+	queueGeneratedTableChange(q, binding, record.ID, record.AtNs, true, nil)
+	return nil
 }
 
 func applyTombstoneSQL(ctx context.Context, q DBTX, tableName, id string, atNs int64) error {

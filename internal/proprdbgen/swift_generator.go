@@ -10,15 +10,20 @@ import (
 	"google.golang.org/protobuf/compiler/protogen"
 )
 
-const swiftRuntimeModuleName = "ProprDBSwiftRuntime"
+const (
+	swiftRuntimeModuleName = "ProprDBSwiftRuntime"
+	swiftPublicVisibility  = "public"
+)
 
 type SwiftGeneratorOptions struct {
-	Visibility string
+	Visibility           string
+	PublicSynchronousAPI bool
 }
 
 type swiftEmitter struct {
-	g          *protogen.GeneratedFile
-	visibility string
+	g               *protogen.GeneratedFile
+	visibility      string
+	actorVisibility string
 }
 
 // GenerateSwiftFile generates proprdb CRUD code for Swift.
@@ -63,9 +68,14 @@ func GenerateSwiftFiles(plugin *protogen.Plugin, files []*protogen.File, options
 	g.P("import ", swiftRuntimeModuleName)
 	g.P()
 
+	synchronousVisibility := ""
+	if options.PublicSynchronousAPI {
+		synchronousVisibility = swiftPublicVisibility
+	}
 	emitter := swiftEmitter{
-		g:          g,
-		visibility: swiftVisibilityKeyword(options.Visibility),
+		g:               g,
+		visibility:      synchronousVisibility,
+		actorVisibility: swiftVisibilityKeyword(options.Visibility),
 	}
 	for _, model := range models {
 		emitter.emitModel(modelFiles[model.TypeName], model)
@@ -87,6 +97,7 @@ func (e swiftEmitter) emitModel(file *protogen.File, model messageModel) {
 	reprojectConst := model.GoName + "ReprojectSQL"
 	indexPrefixConst := model.GoName + "GeneratedIndexPrefix"
 	visibility := e.visibilityPrefix()
+	sharedVisibility := e.sharedVisibilityPrefix()
 
 	g.P(visibility, "let ", tableNameConst, " = ", strconv.Quote(model.TableName))
 	g.P("private let ", tableNameConst, "Quoted = quoteSQLiteIdentifier(", tableNameConst, ")")
@@ -104,7 +115,7 @@ func (e swiftEmitter) emitModel(file *protogen.File, model messageModel) {
 	}
 	g.P()
 	g.P("private let ", model.GoName, "GeneratedBinding = GeneratedTableBinding(")
-	g.P("\tdescriptor: GeneratedTableDescriptor(tableName: ", tableNameConst, ", typeName: ", typeNameConst, ", isCore: false, syncEnabled: ", strconv.FormatBool(!model.OmitSync), "),")
+	g.P("\tdescriptor: GeneratedTableDescriptor(tableName: ", tableNameConst, ", typeName: ", typeNameConst, ", isCore: false, syncEnabled: ", strconv.FormatBool(!model.OmitSync), ", changeListenersEnabled: ", strconv.FormatBool(model.ChangeListeners), "),")
 	g.P("\tmessageType: ", swiftTypeName, ".self,")
 	g.P("\tinsertSQL: ", insertConst, ",")
 	g.P("\tupsertSQL: ", upsertConst, ",")
@@ -135,17 +146,21 @@ func (e swiftEmitter) emitModel(file *protogen.File, model messageModel) {
 	g.P(")")
 	g.P()
 
-	g.P(visibility, "struct ", model.RowTypeName, ": Equatable, Sendable {")
-	g.P("\t", visibility, "var id: String")
-	g.P("\t", visibility, "var atNs: Int64")
-	g.P("\t", visibility, "var data: ", swiftTypeName)
-	g.P("\t", visibility, "init(id: String, atNs: Int64, data: ", swiftTypeName, ") {")
+	g.P(sharedVisibility, "struct ", model.RowTypeName, ": Equatable, Sendable {")
+	g.P("\t", sharedVisibility, "var id: String")
+	g.P("\t", sharedVisibility, "var atNs: Int64")
+	g.P("\t", sharedVisibility, "var data: ", swiftTypeName)
+	g.P("\t", sharedVisibility, "init(id: String, atNs: Int64, data: ", swiftTypeName, ") {")
 	g.P("\t\tself.id = id")
 	g.P("\t\tself.atNs = atNs")
 	g.P("\t\tself.data = data")
 	g.P("\t}")
 	g.P("}")
 	g.P()
+	if model.ChangeListeners {
+		g.P(sharedVisibility, "typealias ", model.GoName, "Change = TableChange<", swiftTypeName, ">")
+		g.P()
+	}
 
 	g.P(visibility, "struct ", model.TableTypeName, " {")
 	g.P("\tfileprivate let q: any DBTX")
@@ -158,12 +173,18 @@ func (e swiftEmitter) emitModel(file *protogen.File, model messageModel) {
 	e.emitSwiftSelectMethod(model, swiftTypeName, tableNameConst)
 	e.emitSwiftInsertMethod(model, swiftTypeName, tableNameConst, insertConst)
 	e.emitSwiftUpdateMethod(model, swiftTypeName, tableNameConst, upsertConst)
-	e.emitSwiftDeleteMethod(model, tableNameConst)
+	e.emitSwiftDeleteMethod(model)
 	e.emitSwiftApplyWithAtNsMethods(model, swiftTypeName, tableNameConst, upsertConst)
 	if len(model.ProjectedFields) > 0 {
 		e.emitSwiftReprojectMethod(file, model, swiftTypeName, tableNameConst, reprojectConst)
 	}
 	e.emitSwiftDrainUnknownMethod(file, model, swiftTypeName, typeNameConst)
+	if model.ChangeListeners {
+		g.P("\t", visibility, "func changes() -> AsyncStream<", model.GoName, "Change> {")
+		g.P("\t\ttableChanges(q, tableName: ", tableNameConst, ", as: ", swiftTypeName, ".self)")
+		g.P("\t}")
+		g.P()
+	}
 	g.P("}")
 	g.P()
 }
@@ -221,12 +242,12 @@ func (e swiftEmitter) emitSwiftInitMethod(file *protogen.File, model messageMode
 
 func (e swiftEmitter) emitSwiftSelectMethod(model messageModel, swiftTypeName, tableNameConst string) {
 	g := e.g
-	g.P("\t", e.visibilityPrefix(), "func select(where whereClause: String = \"\", arguments: [Any?] = []) throws -> [", model.RowTypeName, "] {")
+	g.P("\t", e.visibilityPrefix(), "func select(where whereClause: String = \"\", arguments: [SQLiteBindValue] = []) throws -> [", model.RowTypeName, "] {")
 	g.P("\t\tvar query = \"SELECT id, at_ns, data FROM \" + ", tableNameConst, "Quoted")
 	g.P("\t\tif !whereClause.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {")
 	g.P("\t\t\tquery += \" WHERE \" + whereClause")
 	g.P("\t\t}")
-	g.P("\t\treturn try q.withRows(query, arguments: arguments) { rows in")
+	g.P("\t\treturn try q.withRows(query, bindValues: arguments) { rows in")
 	g.P("\t\t\tvar result: [", model.RowTypeName, "] = []")
 	g.P("\t\t\twhile let row = try rows.next() {")
 	g.P("\t\t\t\tlet id = try row.string(at: 0)")
@@ -289,13 +310,13 @@ func (e swiftEmitter) emitSwiftUpdateMethod(model messageModel, swiftTypeName, _
 	g.P()
 }
 
-func (e swiftEmitter) emitSwiftDeleteMethod(model messageModel, tableNameConst string) {
+func (e swiftEmitter) emitSwiftDeleteMethod(model messageModel) {
 	g := e.g
 	g.P("\t", e.visibilityPrefix(), "func deleteByID(_ id: String) throws {")
 	g.P("\t\tif id.isEmpty {")
 	g.P("\t\t\tthrow ProprDBError(\"empty id\")")
 	g.P("\t\t}")
-	g.P("\t\ttry deleteLocalObject(q, tableName: ", tableNameConst, ", id: id)")
+	g.P("\t\ttry deleteLocalObject(q, binding: ", model.GoName, "GeneratedBinding, id: id)")
 	g.P("\t}")
 	g.P()
 	g.P("\t", e.visibilityPrefix(), "func deleteRow(_ row: ", model.RowTypeName, ") throws {")
@@ -380,6 +401,7 @@ func (e swiftEmitter) emitSwiftProjectedFieldAppend(argumentsName, dataName stri
 func (e swiftEmitter) emitWrapper(modelFiles map[string]*protogen.File, models []messageModel) {
 	g := e.g
 	visibility := e.visibilityPrefix()
+	actorVisibility := e.actorVisibilityPrefix()
 	g.P("private let crudGeneratedBindings = [")
 	for _, model := range models {
 		g.P("\t", model.GoName, "GeneratedBinding,")
@@ -391,8 +413,15 @@ func (e swiftEmitter) emitWrapper(modelFiles map[string]*protogen.File, models [
 		g.P("\t", visibility, "let ", swiftPropertyNameFromGoName(model.GoName), ": ", model.TableTypeName)
 	}
 	g.P("\t", visibility, "init(_ q: any DBTX) {")
+	if modelsHaveChangeListeners(models) {
+		g.P("\t\tlet tracked = withChangeListeners(q)")
+	}
 	for _, model := range models {
-		g.P("\t\tself.", swiftPropertyNameFromGoName(model.GoName), " = ", model.TableTypeName, "(q)")
+		constructorQ := "q"
+		if modelsHaveChangeListeners(models) {
+			constructorQ = "tracked"
+		}
+		g.P("\t\tself.", swiftPropertyNameFromGoName(model.GoName), " = ", model.TableTypeName, "(", constructorQ, ")")
 	}
 	g.P("\t}")
 	g.P("\tprivate func dbtx() -> any DBTX { ", swiftPropertyNameFromGoName(models[0].GoName), ".q }")
@@ -413,20 +442,58 @@ func (e swiftEmitter) emitWrapper(modelFiles map[string]*protogen.File, models [
 	g.P("\t", visibility, "func readJSONL(remote: String, text: String) throws { try readBoundJSONL(dbtx(), bindings: crudGeneratedBindings, remote: remote, text: text) }")
 	g.P("}")
 	g.P()
-	g.P(visibility, "extension ProprDBActor {")
-	g.P("\t", visibility, "func initialize() throws { try withDatabase { try CRUD($0).initialize() } }")
 	for _, model := range models {
+		propertyName := swiftPropertyNameFromGoName(model.GoName)
 		swiftTypeName := swiftMessageTypeName(modelFiles[model.TypeName], model.GoName)
-		g.P("\t", visibility, "func select", model.GoName, "() throws -> [", model.RowTypeName, "] { try withDatabase { try ", model.TableTypeName, "($0).select() } }")
-		g.P("\t", visibility, "func insert", model.GoName, "(_ data: ", swiftTypeName, ") throws -> ", model.RowTypeName, " { try withDatabase { try ", model.TableTypeName, "($0).insert(data) } }")
-		g.P("\t", visibility, "func update", model.GoName, "ByID(_ id: String, data: ", swiftTypeName, ") throws -> ", model.RowTypeName, " { try withDatabase { try ", model.TableTypeName, "($0).updateByID(id, data: data) } }")
-		g.P("\t", visibility, "func delete", model.GoName, "ByID(_ id: String) throws { try withDatabase { try ", model.TableTypeName, "($0).deleteByID(id) } }")
+		proxyName := model.GoName + "TableProxy"
+		g.P(actorVisibility, "struct ", proxyName, ": Sendable {")
+		g.P("\tfileprivate let actor: ProprDBActor")
+		g.P()
+		g.P("\t", actorVisibility, "func initialize() async throws { try await actor._", propertyName, "Initialize() }")
+		g.P("\t", actorVisibility, "func select(where whereClause: String = \"\", arguments: [SQLiteBindValue] = []) async throws -> [", model.RowTypeName, "] { try await actor._", propertyName, "Select(where: whereClause, arguments: arguments) }")
+		g.P("\t", actorVisibility, "func insert(_ data: ", swiftTypeName, ") async throws -> ", model.RowTypeName, " { try await actor._", propertyName, "Insert(data) }")
+		if model.AllowCustomIDInsert {
+			g.P("\t", actorVisibility, "func insertWithID(_ id: String, data: ", swiftTypeName, ") async throws -> ", model.RowTypeName, " { try await actor._", propertyName, "InsertWithID(id, data: data) }")
+		}
+		g.P("\t", actorVisibility, "func updateByID(_ id: String, data: ", swiftTypeName, ") async throws -> ", model.RowTypeName, " { try await actor._", propertyName, "UpdateByID(id, data: data) }")
+		g.P("\t", actorVisibility, "func updateRow(_ row: ", model.RowTypeName, ") async throws -> ", model.RowTypeName, " { try await actor._", propertyName, "UpdateRow(row) }")
+		g.P("\t", actorVisibility, "func deleteByID(_ id: String) async throws { try await actor._", propertyName, "DeleteByID(id) }")
+		g.P("\t", actorVisibility, "func deleteRow(_ row: ", model.RowTypeName, ") async throws { try await actor._", propertyName, "DeleteRow(row) }")
+		g.P("\t", actorVisibility, "func drainUnknownRows() async throws { try await actor._", propertyName, "DrainUnknownRows() }")
+		if model.ChangeListeners {
+			g.P("\t", actorVisibility, "func changes() async throws -> AsyncStream<", model.GoName, "Change> { try await actor._", propertyName, "Changes() }")
+		}
+		g.P("}")
+		g.P()
 	}
-	g.P("\t", visibility, "func prepareJSONL(remote: String) throws -> PreparedJSONLExport { try withDatabase { try CRUD($0).prepareJSONL(remote: remote) } }")
-	g.P("\t", visibility, "func acknowledgeJSONL(_ checkpoint: JSONLCheckpoint) throws { try withDatabase { try CRUD($0).acknowledgeJSONL(checkpoint) } }")
-	g.P("\t", visibility, "func discardJSONL(_ checkpoint: JSONLCheckpoint) throws { try withDatabase { try CRUD($0).discardJSONL(checkpoint) } }")
-	g.P("\t", visibility, "func writeJSONL(remote: String) throws -> String { try withDatabase { try CRUD($0).writeJSONL(remote: remote) } }")
-	g.P("\t", visibility, "func readJSONL(remote: String, text: String) throws { try withDatabase { try CRUD($0).readJSONL(remote: remote, text: text) } }")
+	g.P("extension ProprDBActor {")
+	g.P("\t", actorVisibility, "func initialize() throws { try withDatabase { try CRUD($0).initialize() } }")
+	g.P("\t", actorVisibility, "func tableDescriptors() throws -> [GeneratedTableDescriptor] { try withDatabase { CRUD($0).tableDescriptors() } }")
+	for _, model := range models {
+		propertyName := swiftPropertyNameFromGoName(model.GoName)
+		swiftTypeName := swiftMessageTypeName(modelFiles[model.TypeName], model.GoName)
+		proxyName := model.GoName + "TableProxy"
+		g.P("\t", actorVisibility, "nonisolated var ", propertyName, ": ", proxyName, " { ", proxyName, "(actor: self) }")
+		g.P("\tfileprivate func _", propertyName, "Initialize() throws { try withDatabase { try CRUD($0).", propertyName, ".initialize() } }")
+		g.P("\tfileprivate func _", propertyName, "Select(where whereClause: String, arguments: [SQLiteBindValue]) throws -> [", model.RowTypeName, "] { try withDatabase { try CRUD($0).", propertyName, ".select(where: whereClause, arguments: arguments) } }")
+		g.P("\tfileprivate func _", propertyName, "Insert(_ data: ", swiftTypeName, ") throws -> ", model.RowTypeName, " { try withDatabase { try CRUD($0).", propertyName, ".insert(data) } }")
+		if model.AllowCustomIDInsert {
+			g.P("\tfileprivate func _", propertyName, "InsertWithID(_ id: String, data: ", swiftTypeName, ") throws -> ", model.RowTypeName, " { try withDatabase { try CRUD($0).", propertyName, ".insertWithID(id, data: data) } }")
+		}
+		g.P("\tfileprivate func _", propertyName, "UpdateByID(_ id: String, data: ", swiftTypeName, ") throws -> ", model.RowTypeName, " { try withDatabase { try CRUD($0).", propertyName, ".updateByID(id, data: data) } }")
+		g.P("\tfileprivate func _", propertyName, "UpdateRow(_ row: ", model.RowTypeName, ") throws -> ", model.RowTypeName, " { try withDatabase { try CRUD($0).", propertyName, ".updateRow(row) } }")
+		g.P("\tfileprivate func _", propertyName, "DeleteByID(_ id: String) throws { try withDatabase { try CRUD($0).", propertyName, ".deleteByID(id) } }")
+		g.P("\tfileprivate func _", propertyName, "DeleteRow(_ row: ", model.RowTypeName, ") throws { try withDatabase { try CRUD($0).", propertyName, ".deleteRow(row) } }")
+		g.P("\tfileprivate func _", propertyName, "DrainUnknownRows() throws { try withDatabase { try CRUD($0).", propertyName, ".drainUnknownRows() } }")
+		if model.ChangeListeners {
+			g.P("\tfileprivate func _", propertyName, "Changes() throws -> AsyncStream<", model.GoName, "Change> { try withDatabase { CRUD($0).", propertyName, ".changes() } }")
+		}
+	}
+	g.P("\t", actorVisibility, "func prepareJSONL(remote: String) throws -> PreparedJSONLExport { try withDatabase { try CRUD($0).prepareJSONL(remote: remote) } }")
+	g.P("\t", actorVisibility, "func acknowledgeJSONL(_ checkpoint: JSONLCheckpoint) throws { try withDatabase { try CRUD($0).acknowledgeJSONL(checkpoint) } }")
+	g.P("\t", actorVisibility, "func discardJSONL(_ checkpoint: JSONLCheckpoint) throws { try withDatabase { try CRUD($0).discardJSONL(checkpoint) } }")
+	g.P("\t", actorVisibility, "func writeJSONL(remote: String) throws -> String { try withDatabase { try CRUD($0).writeJSONL(remote: remote) } }")
+	g.P("\t", actorVisibility, "func readJSONL(remote: String, text: String) throws { try withDatabase { try CRUD($0).readJSONL(remote: remote, text: text) } }")
 	g.P("}")
 }
 
@@ -653,8 +720,25 @@ func (e swiftEmitter) visibilityPrefix() string {
 	return e.visibility + " "
 }
 
+func (e swiftEmitter) actorVisibilityPrefix() string {
+	if e.actorVisibility == "" {
+		return ""
+	}
+	return e.actorVisibility + " "
+}
+
+func (e swiftEmitter) sharedVisibilityPrefix() string {
+	if e.visibility == swiftPublicVisibility || e.actorVisibility == swiftPublicVisibility {
+		return swiftPublicVisibility + " "
+	}
+	if e.visibility != "" {
+		return e.visibility + " "
+	}
+	return e.actorVisibilityPrefix()
+}
+
 func ParseSwiftGeneratorOptions(rawOptions map[string]string) (SwiftGeneratorOptions, error) {
-	options := SwiftGeneratorOptions{}
+	options := SwiftGeneratorOptions{Visibility: "Public"}
 	for name, value := range rawOptions {
 		switch name {
 		case "Visibility":
@@ -662,6 +746,12 @@ func ParseSwiftGeneratorOptions(rawOptions map[string]string) (SwiftGeneratorOpt
 				return SwiftGeneratorOptions{}, err
 			}
 			options.Visibility = value
+		case "PublicSynchronousAPI":
+			publicSynchronousAPI, err := strconv.ParseBool(value)
+			if err != nil {
+				return SwiftGeneratorOptions{}, fmt.Errorf("parse PublicSynchronousAPI: %w", err)
+			}
+			options.PublicSynchronousAPI = publicSynchronousAPI
 		default:
 			return SwiftGeneratorOptions{}, fmt.Errorf("unsupported option %q", name)
 		}
@@ -681,7 +771,7 @@ func validateSwiftVisibility(value string) error {
 func swiftVisibilityKeyword(value string) string {
 	switch value {
 	case "Public":
-		return "public"
+		return swiftPublicVisibility
 	case "Internal":
 		return "internal"
 	case "Package":

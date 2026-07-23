@@ -115,6 +115,21 @@ successful records remain committed. Older timestamps are ignored. Equal
 timestamps must describe semantically equal protobuf state (or the same
 tombstone); otherwise import returns a conflict.
 
+## Change listeners
+
+Tables with `proprdb.change_listeners = true` expose typed, future-only change
+streams. Go uses `table.Changes(ctx)` and Swift uses
+`await actor.person.changes()`. Streams are unbounded and lossless while the
+subscriber remains registered. Successful local writes, accepted JSONL
+imports, and accepted unknown-row drains publish upsert or delete state after
+the operation's transaction or savepoint succeeds.
+
+Swift generates the actor and its table proxies as the public API by default.
+The synchronous `CRUD` and table APIs remain internal. Pass
+`PublicSynchronousAPI=true` to `protoc-gen-proprdb-swift` to make the
+synchronous API public as well. `Visibility=Public|Internal|Package` controls
+the actor-facing API and defaults to `Public`.
+
 ## Protobuf extensions
 
 `proprdb` defines generator options in `proto/proprdb/options.proto`.
@@ -152,6 +167,9 @@ message Person {
   - Generated table keeps `Insert(data)` and additionally gets `InsertWithID(id, data)`.
   - `InsertWithID` requires `id` to be a valid UUID.
 
+- `proprdb.change_listeners` (`bool`, message-level):
+  - Generates a typed change stream for the table.
+
 - `proprdb.indexes` (`repeated proprdb.Index`, message-level):
   - Declares non-unique SQLite indexes for projected fields (`(proprdb.external)=true`).
   - Supports both single-field and multi-field indexes.
@@ -162,6 +180,7 @@ Example:
 message Person {
   option (proprdb.validate_write) = true;
   option (proprdb.allow_custom_id_insert) = true;
+  option (proprdb.change_listeners) = true;
   option (proprdb.indexes) = { fields: "name" };
   option (proprdb.indexes) = { fields: "name" fields: "age" };
   string name = 1 [(proprdb.external) = true];
