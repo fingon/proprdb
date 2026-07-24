@@ -54,6 +54,54 @@ func TestProtocPluginGolden(t *testing.T) {
 	golden.Assert(t, string(content), "system.proprdb.pb.go.golden", golden.FlagUpdate())
 }
 
+func TestProtocPluginGeneratesBindingWithoutProjectedFields(t *testing.T) {
+	t.Helper()
+
+	if _, err := exec.LookPath("protoc"); err != nil {
+		t.Skipf("protoc not available: %v", err)
+	}
+
+	_, currentFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("determine current file path")
+	}
+	repoRoot := filepath.Dir(filepath.Dir(currentFile))
+
+	tempDir := t.TempDir()
+	pluginPath := filepath.Join(tempDir, "protoc-gen-proprdb")
+	generatedDir := filepath.Join(tempDir, "gen")
+	err := os.MkdirAll(generatedDir, 0o755)
+	assert.NilError(t, err)
+
+	runCommand(t, repoRoot, nil, "go", "build", "-o", pluginPath, "./cmd/protoc-gen-proprdb")
+
+	protoPath := filepath.Join(tempDir, "unprojected.proto")
+	protoSource := `syntax = "proto3";
+package generatedtest.unprojected;
+option go_package = "generatedtest/unprojected;unprojected";
+message Record {
+  string value = 1;
+}`
+	err = os.WriteFile(protoPath, []byte(protoSource), 0o644)
+	assert.NilError(t, err)
+
+	runCommand(
+		t,
+		tempDir,
+		nil,
+		"protoc",
+		"-I", tempDir,
+		"--plugin=protoc-gen-proprdb="+pluginPath,
+		"--proprdb_out=paths=source_relative:"+generatedDir,
+		protoPath,
+	)
+
+	generatedPath := filepath.Join(generatedDir, "unprojected.proprdb.pb.go")
+	content, err := os.ReadFile(generatedPath)
+	assert.NilError(t, err)
+	assert.Check(t, strings.Contains(string(content), "_, ok := message.(*Record)"))
+}
+
 func TestProtocPluginRejectsNonExternalIndexField(t *testing.T) {
 	t.Helper()
 

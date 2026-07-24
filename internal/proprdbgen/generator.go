@@ -555,7 +555,11 @@ func (e generatorEmitter) emitModel(model messageModel) {
 	g.P("\tInsertSQL: ", insertConst, ",")
 	g.P("\tUpsertSQL: ", upsertConst, ",")
 	g.P("\tProjectedValues: func(message proto.Message) ([]any, error) {")
-	g.P("\t\tdata, ok := message.(*", model.GoName, ")")
+	dataName := "_"
+	if len(model.ProjectedFields) > 0 {
+		dataName = "data"
+	}
+	g.P("\t\t", dataName, ", ok := message.(*", model.GoName, ")")
 	g.P("\t\tif !ok { return nil, fmt.Errorf(\"expected *", model.GoName, ", got %T\", message) }")
 	g.P("\t\tvalues := []any{}")
 	for _, projectedField := range model.ProjectedFields {
