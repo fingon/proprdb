@@ -1,218 +1,25 @@
-# PROPRDB (PROtobuf PackRat DataBase) #
+# PROPRDB (PROtobuf PackRat DataBase)
 
 `proprdb` is the third iteration of a "personal stuff database" concept.
 
 - `prdb` (2014-2019, Python, still in personal use, not open source)
 - `sdb` (used in https://timeatlaslabs.com since 2024, not open source)
 
-## Goals
+## Caveat emptor
 
-- Preserve long-term readability of personal metadata through durable JSONL
-  exports.
-- Keep the interchange format simple and implementation-independent.
-- Use strongly typed schemas for object payloads.
+This software is primarily for my own use and due to that there is not much of a
+compatibility guarantee across versions. The SQLite database should be
+backwards (but not forwards) compatible, and JSONL format should be constant,
+but the generated code (and runtime it refers to) may change drastically even
+in minor versions. Patch versions should be backwards compatible, and I don't
+think this will ever have major version different than zero as I hobby projects
+of mine don't roll that way.
 
-## Non-goals
+## Documentation
 
-- Encryption (use external tools such as `gpg` if needed)
-- Compression (use external tools such as `zstd` if needed)
-- Transport protocol design
-
-## High-level design
-
-The shared format is JSON Lines (`.jsonl`) where each line is one object update.
-Object payloads are typed via `protobuf.Any` (`@type` determines the concrete Protobuf message).
-
-Updates can be received in any order. Conflict resolution is timestamp-based:
-
-- Newer `atNs` wins.
-- If timestamps are equal, the update should be treated as idempotent and payload-equal.
-
-SQLite stores only the latest state of each object. Change history exists only
-in JSONL exports retained by the application; ProprDB does not keep a local
-append-only history.
-
-## Object model
-
-Each object update has:
-
-- `id`: unique object identifier which is valid and unique within the type UUID (`string`)
-- `deleted`: whether the object is deleted (optional, `bool`)
-- `atNs`: last update time as Unix epoch nanoseconds (`int64`)
-- `data`: object payload as `protobuf.Any`
-
-Example JSONL line:
-
-```json
-{"id":"person:123","atNs":1761736535123456789,"data":{"@type":"type.googleapis.com/github.com.fingon.proprdb.v1.example.Person","name":"Ada"}}
-```
-
-Deletion marker example:
-
-```json
-{"id":"person:123","deleted":true,"atNs":1761736599000000000,"data":{"@type":"type.googleapis.com/github.com.fingon.proprdb.v1.example.Person"}}
-```
-
-## Local storage (SQLite backend)
-
-The wire format is JSONL; local storage is implementation-defined.
-This repository uses SQLite with one table per supported object type.
-
-Each object table stores:
-
-- `id` (`TEXT PRIMARY KEY`)
-- `at_ns` (`INTEGER NOT NULL`)
-- `data` (`BLOB NOT NULL`) as encoded `protobuf.Any`
-
-`_deleted` table stores tombstones for sync-enabled tables:
-
-- `id` (`TEXT NOT NULL`)
-- `table_name` (`TEXT NOT NULL`)
-- `at_ns` (`INTEGER NOT NULL`)
-- primary key: (`table_name`, `id`)
-
-`_sync` table tracks what has been exchanged with each remote:
-
-- `object_id` (`TEXT NOT NULL`)
-- `table_name` (`TEXT NOT NULL`)
-- `at_ns` (`INTEGER NOT NULL`)
-- `remote` (`TEXT NOT NULL`)
-- primary key: (`object_id`, `table_name`, `remote`)
-
-Implementations may also project selected typed fields from `data` into
-additional columns for queryability. Initialization owns only ProprDB core
-tables and generated tables for message types supported by the current
-application. Other SQLite tables are ignored.
-
-## JSONL sync API semantics
-
-Generated CRUD wrappers include:
-
-- `WriteJSONL(remote string, w io.Writer) error`
-- `PrepareJSONL`, `AcknowledgeJSONL`, and `DiscardJSONL`
-- `ReadJSONL(remote string, r io.Reader) error`
-
-Swift exposes the same workflow as `prepareJSONL`, `acknowledgeJSONL`,
-`discardJSONL`, `writeJSONL`, and `readJSONL`. A prepared export is a stable
-database snapshot. Acknowledging its checkpoint advances sync watermarks;
-discarding it leaves them unchanged. `WriteJSONL`/`writeJSONL` are convenience
-operations that prepare and then acknowledge. Acknowledging or discarding an
-already-consumed checkpoint from the same database succeeds.
-
-`remote` controls whether `_sync` bookkeeping is used:
-
-- `remote == ""` (exact empty string):
-  - `WriteJSONL` exports records without `_sync`-based deduplication.
-  - `ReadJSONL` imports records without creating/updating `_sync` rows.
-- `remote != ""`:
-  - Both methods use `_sync` rows scoped by that remote value.
-
-Whitespace-only strings are treated as non-empty remote names.
-
-Imports commit one JSONL record at a time. State changes and their sync
-watermark are atomic, so a failing record leaves no partial state while earlier
-successful records remain committed. Older timestamps are ignored. Equal
-timestamps must describe semantically equal protobuf state (or the same
-tombstone); otherwise import returns a conflict.
-
-## Change listeners
-
-Tables with `proprdb.change_listeners = true` expose typed, future-only change
-streams. Go uses `table.Changes(ctx)` and Swift uses
-`await actor.person.changes()`. Streams are unbounded and lossless while the
-subscriber remains registered. Successful local writes, accepted JSONL
-imports, and accepted unknown-row drains publish upsert or delete state after
-the operation's transaction or savepoint succeeds.
-
-Swift generates the actor and its table proxies as the public API by default.
-The synchronous `CRUD` and table APIs remain internal. Pass
-`PublicSynchronousAPI=true` to `protoc-gen-proprdb-swift` to make the
-synchronous API public as well. `Visibility=Public|Internal|Package` controls
-the actor-facing API and defaults to `Public`.
-
-## Query statistics
-
-Tables with `proprdb.query_statistics = true` accumulate statistics for
-successful generated `Select`/`select` calls. Statistics are stored in the
-`_querystat` core table by table name and exact parameterized SQL string.
-Bind values are not stored. Each row contains a call count and the sum of
-full select durations in nanoseconds, including row decoding but excluding
-the statistics update.
-
-Go exposes `rt.QueryStatistics` and `rt.ClearQueryStatistics`. Swift exposes
-`queryStatistics(_:)` and `clearQueryStatistics(_:)`; actor users can call
-them through `withDatabase`. Statistics persist until cleared.
-
-## Protobuf extensions
-
-`proprdb` defines generator options in `proto/proprdb/options.proto`.
-
-### Field option
-
-- `proprdb.external` (`bool`, field-level):
-  - Marks scalar message fields to be projected into SQLite columns in addition to `data`.
-  - If omitted or `false`, field stays only inside serialized protobuf payload.
-
-Example:
-
-```proto
-message Person {
-  string name = 1 [(proprdb.external) = true];
-  int64 age = 2 [(proprdb.external) = true];
-}
-```
-
-### Message options
-
-- `proprdb.omit_table` (`bool`, message-level):
-  - Do not generate table/CRUD code for this message.
-
-- `proprdb.omit_sync` (`bool`, message-level):
-  - Generate table/CRUD code, but exclude the message from JSONL syncing.
-  - `WriteJSONL` will not export it.
-  - `ReadJSONL` will ignore incoming records for the message and log an error.
-
-- `proprdb.validate_write` (`bool`, message-level):
-  - Generated `Insert`/`UpdateByID`/`UpdateRow` call `data.Valid() error`.
-  - Validation is not applied to data imported through JSONL.
-
-- `proprdb.allow_custom_id_insert` (`bool`, message-level):
-  - Generated table keeps `Insert(data)` and additionally gets `InsertWithID(id, data)`.
-  - `InsertWithID` requires `id` to be a valid UUID.
-
-- `proprdb.change_listeners` (`bool`, message-level):
-  - Generates a typed change stream for the table.
-
-- `proprdb.query_statistics` (`bool`, message-level):
-  - Accumulates generated select call counts and duration sums for the table.
-
-- `proprdb.indexes` (`repeated proprdb.Index`, message-level):
-  - Declares non-unique SQLite indexes for projected fields (`(proprdb.external)=true`).
-  - Supports both single-field and multi-field indexes.
-
-Example:
-
-```proto
-message Person {
-  option (proprdb.validate_write) = true;
-  option (proprdb.allow_custom_id_insert) = true;
-  option (proprdb.change_listeners) = true;
-  option (proprdb.indexes) = { fields: "name" };
-  option (proprdb.indexes) = { fields: "name" fields: "age" };
-  string name = 1 [(proprdb.external) = true];
-  int64 age = 2 [(proprdb.external) = true];
-}
-
-message Note {
-  option (proprdb.omit_sync) = true;
-  string text = 1 [(proprdb.external) = true];
-}
-
-message InternalOnly {
-  option (proprdb.omit_table) = true;
-  string data = 1;
-}
-```
+- [Design and data model](doc/design.md)
+- [Runtime behavior](doc/runtime.md)
+- [Protobuf options and code generation](doc/code-generation.md)
 
 ## Getting started
 
@@ -225,23 +32,4 @@ Commands:
 ```bash
 make test
 make lint
-```
-
-### Generate from proto (example)
-
-The example schema is in `test/fixtures/system.proto`. To generate both protobuf Go types and `proprdb` CRUD code:
-
-```bash
-# Build plugin
-go build -o /tmp/protoc-gen-proprdb ./cmd/protoc-gen-proprdb
-
-# Generate code
-protoc \
-  -I test/fixtures \
-  -I . \
-  --plugin=protoc-gen-proprdb=/tmp/protoc-gen-proprdb \
-  --go_out=test/system \
-  --go_opt=paths=source_relative \
-  --proprdb_out=paths=source_relative:test/system \
-  test/fixtures/system.proto
 ```
