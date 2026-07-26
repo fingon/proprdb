@@ -505,7 +505,7 @@ struct CRUD {
 		try acknowledgeJSONL(prepared.checkpoint)
 		return prepared.text
 	}
-	func readJSONL(remote: String, text: String) throws { try readBoundJSONL(dbtx(), bindings: crudGeneratedBindings, remote: remote, text: text) }
+	func readJSONL(remote: String, stream: InputStream) throws { try readBoundJSONL(dbtx(), bindings: crudGeneratedBindings, remote: remote, stream: stream) }
 }
 
 public struct PersonTableProxy: Sendable {
@@ -587,5 +587,5 @@ extension ProprDBActor {
 	public func acknowledgeJSONL(_ checkpoint: JSONLCheckpoint) throws { try withDatabase { try CRUD($0).acknowledgeJSONL(checkpoint) } }
 	public func discardJSONL(_ checkpoint: JSONLCheckpoint) throws { try withDatabase { try CRUD($0).discardJSONL(checkpoint) } }
 	public func writeJSONL(remote: String) throws -> String { try withDatabase { try CRUD($0).writeJSONL(remote: remote) } }
-	public func readJSONL(remote: String, text: String) throws { try withDatabase { try CRUD($0).readJSONL(remote: remote, text: text) } }
+	public func readJSONL(remote: String, stream: InputStream) throws { try withDatabase { try CRUD($0).readJSONL(remote: remote, stream: stream) } }
 }

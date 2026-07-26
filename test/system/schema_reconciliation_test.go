@@ -13,6 +13,32 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
+func TestEnsureCoreTablesMigratesLegacyUnknownRowsToLatestState(t *testing.T) {
+	db, err := sql.Open("sqlite3", "file:legacy-unknown-schema?mode=memory&cache=shared")
+	assert.NilError(t, err)
+	t.Cleanup(func() { assert.NilError(t, db.Close()) })
+	_, err = db.Exec(`CREATE TABLE _unknown_types (type_name TEXT NOT NULL, id TEXT NOT NULL, at_ns INTEGER NOT NULL, deleted INTEGER NOT NULL, data_json TEXT NOT NULL, PRIMARY KEY (type_name, id, at_ns))`)
+	assert.NilError(t, err)
+	_, err = db.Exec(insertUnknownRowSQL, unknownTypeName, validationUUIDv7, int64(10), 0, `{"value":"old"}`)
+	assert.NilError(t, err)
+	_, err = db.Exec(insertUnknownRowSQL, unknownTypeName, validationUUIDv7, int64(20), 0, `{"value":"latest"}`)
+	assert.NilError(t, err)
+
+	assert.NilError(t, rt.EnsureCoreTables(rt.WrapDB(db)))
+
+	var rowCount int
+	assert.NilError(t, db.QueryRow(selectUnknownCountByIDSQL, unknownTypeName, validationUUIDv7).Scan(&rowCount))
+	assert.Equal(t, rowCount, 1)
+	var atNs int64
+	var dataJSON string
+	assert.NilError(t, db.QueryRow(`SELECT at_ns, data_json FROM _unknown_types WHERE type_name = ? AND id = ?`, unknownTypeName, validationUUIDv7).Scan(&atNs, &dataJSON))
+	assert.Equal(t, atNs, int64(20))
+	assert.Equal(t, dataJSON, `{"value":"latest"}`)
+
+	_, err = db.Exec(insertUnknownRowSQL, unknownTypeName, validationUUIDv7, int64(30), 0, `{"value":"duplicate"}`)
+	assert.Check(t, err != nil)
+}
+
 func TestProjectionReconciliationRemovesObsoleteColumns(t *testing.T) {
 	db, err := sql.Open("sqlite3", "file:projection-remove?mode=memory&cache=shared")
 	assert.NilError(t, err)

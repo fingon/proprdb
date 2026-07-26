@@ -18,6 +18,10 @@ discarding it leaves them unchanged. `WriteJSONL`/`writeJSONL` are convenience
 operations that prepare and then acknowledge. Acknowledging or discarding an
 already-consumed checkpoint from the same database succeeds.
 
+Swift `readJSONL` accepts an unopened `InputStream`. The runtime opens and
+closes the stream and reads it incrementally, retaining at most its read buffer
+and the current JSONL line.
+
 `remote` controls whether `_sync` bookkeeping is used:
 
 - `remote == ""` (exact empty string):

@@ -449,28 +449,43 @@ func WriteBoundJSONLContext(ctx context.Context, q DBTX, bindings []GeneratedTab
 	return AcknowledgeJSONLContext(ctx, q, checkpoint)
 }
 
+func unknownBindingRecordsContext(ctx context.Context, q DBTX, binding GeneratedTableBinding) ([]JSONLRecord, error) {
+	const operation = "unknown"
+	rows, err := q.QueryContext(ctx, `SELECT id, at_ns, deleted, data_json FROM `+CoreTableUnknownName+` WHERE type_name = ? ORDER BY id`, binding.Descriptor.TypeName)
+	if err != nil {
+		return nil, fmt.Errorf("select unknown rows for %s: %w", binding.Descriptor.TypeName, err)
+	}
+	records := make([]JSONLRecord, 0)
+	for rows.Next() {
+		var record JSONLRecord
+		var deleted int
+		var dataJSON string
+		if err := rows.Scan(&record.ID, &record.AtNs, &deleted, &dataJSON); err != nil {
+			mainErr := fmt.Errorf("scan unknown row for %s: %w", binding.Descriptor.TypeName, err)
+			return nil, closeRowsWithError(rows, operation, mainErr)
+		}
+		record.Deleted = deleted != 0
+		record.Data = json.RawMessage(dataJSON)
+		records = append(records, record)
+	}
+	if err := rows.Err(); err != nil {
+		mainErr := fmt.Errorf("iterate unknown rows for %s: %w", binding.Descriptor.TypeName, err)
+		return nil, closeRowsWithError(rows, operation, mainErr)
+	}
+	if err := CloseRows(rows, operation); err != nil {
+		return nil, err
+	}
+	return records, nil
+}
+
 func DrainUnknownBindingsContext(ctx context.Context, q DBTX, bindings []GeneratedTableBinding) error {
 	for _, binding := range bindings {
 		if !binding.Descriptor.SyncEnabled {
 			continue
 		}
-		rows, err := q.QueryContext(ctx, `SELECT id, at_ns, deleted, data_json FROM `+CoreTableUnknownName+` WHERE type_name = ? ORDER BY id`, binding.Descriptor.TypeName)
+		records, err := unknownBindingRecordsContext(ctx, q, binding)
 		if err != nil {
-			return fmt.Errorf("select unknown rows for %s: %w", binding.Descriptor.TypeName, err)
-		}
-		defer closeRowsLog(rows, "unknown rows")
-		records := make([]JSONLRecord, 0)
-		for rows.Next() {
-			var record JSONLRecord
-			var deleted int
-			var dataJSON string
-			if err := rows.Scan(&record.ID, &record.AtNs, &deleted, &dataJSON); err != nil {
-				closeRowsLog(rows, "unknown rows")
-				return err
-			}
-			record.Deleted = deleted != 0
-			record.Data = json.RawMessage(dataJSON)
-			records = append(records, record)
+			return err
 		}
 		for _, record := range records {
 			if err := q.WithTransaction(ctx, func(tx DBTX) error {

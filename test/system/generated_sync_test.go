@@ -247,7 +247,7 @@ func TestGeneratedJSONLEmptyRemoteNoSyncEntries(t *testing.T) {
 	}
 }
 
-func TestGeneratedJSONLUnknownTypesAreCompacted(t *testing.T) {
+func TestGeneratedJSONLUnknownTypesKeepLatestState(t *testing.T) {
 	ctx := context.Background()
 	db, err := sql.Open("sqlite3", "file:unknown-sync-compact?mode=memory&cache=shared")
 	assert.NilError(t, err)

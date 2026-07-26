@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"regexp"
 	"strconv"
 	"strings"
@@ -566,6 +567,7 @@ WHERE old.rowid = (
 }
 
 func EnsureManagedIndexes(q DBTX, tableName, generatedIndexPrefix string, createIndexSQL, desiredIndexNames []string) error {
+	const operation = "index metadata"
 	if q == nil {
 		return errors.New("nil DBTX")
 	}
@@ -587,10 +589,7 @@ func EnsureManagedIndexes(q DBTX, tableName, generatedIndexPrefix string, create
 	for indexRows.Next() {
 		var indexName string
 		if err := indexRows.Scan(&indexName); err != nil {
-			if closeErr := CloseRows(indexRows, "index metadata"); closeErr != nil {
-				return fmt.Errorf("scan index row: %w (additionally, %v)", err, closeErr)
-			}
-			return fmt.Errorf("scan index row: %w", err)
+			return closeRowsWithError(indexRows, operation, fmt.Errorf("scan index row: %w", err))
 		}
 		if !strings.HasPrefix(indexName, generatedIndexPrefix) {
 			continue
@@ -601,12 +600,9 @@ func EnsureManagedIndexes(q DBTX, tableName, generatedIndexPrefix string, create
 		staleGeneratedIndexes = append(staleGeneratedIndexes, indexName)
 	}
 	if err := indexRows.Err(); err != nil {
-		if closeErr := CloseRows(indexRows, "index metadata"); closeErr != nil {
-			return fmt.Errorf("iterate index rows for %s: %w (additionally, %v)", tableName, err, closeErr)
-		}
-		return fmt.Errorf("iterate index rows for %s: %w", tableName, err)
+		return closeRowsWithError(indexRows, operation, fmt.Errorf("iterate index rows for %s: %w", tableName, err))
 	}
-	if err := CloseRows(indexRows, "index metadata"); err != nil {
+	if err := CloseRows(indexRows, operation); err != nil {
 		return err
 	}
 	for _, indexName := range staleGeneratedIndexes {
@@ -913,6 +909,17 @@ func CloseRows(rows *sql.Rows, operation string) error {
 	return nil
 }
 
+func closeRowsWithError(rows *sql.Rows, operation string, mainErr error) error {
+	closeErr := CloseRows(rows, operation)
+	if mainErr == nil {
+		return closeErr
+	}
+	if closeErr != nil {
+		return fmt.Errorf("%w (additionally, %v)", mainErr, closeErr)
+	}
+	return mainErr
+}
+
 func NowNs() int64 {
 	return time.Now().UnixNano()
 }
@@ -1093,13 +1100,6 @@ WHERE excluded.at_ns > at_ns`
 	return nil
 }
 
-func CompactUnknownLatest(q DBTX) error {
-	if q == nil {
-		return errors.New("nil DBTX")
-	}
-	return nil
-}
-
 func canonicalJSON(data json.RawMessage) ([]byte, error) {
 	var value any
 	decoder := json.NewDecoder(strings.NewReader(string(data)))
@@ -1115,6 +1115,7 @@ func canonicalJSON(data json.RawMessage) ([]byte, error) {
 }
 
 func ReplayUnknownByType(q DBTX, typeName string, apply func(JSONLRecord) error) error {
+	const operation = "unknown"
 	if q == nil {
 		return errors.New("nil DBTX")
 	}
@@ -1124,11 +1125,8 @@ func ReplayUnknownByType(q DBTX, typeName string, apply func(JSONLRecord) error)
 	if strings.TrimSpace(typeName) == "" {
 		return errors.New("empty type name")
 	}
-	if err := CompactUnknownLatest(q); err != nil {
-		return err
-	}
 	ctx := context.Background()
-	selectUnknownSQL := `SELECT id, at_ns, deleted, data_json FROM ` + CoreTableUnknownName + ` WHERE type_name = ? ORDER BY at_ns ASC, id ASC, rowid ASC`
+	selectUnknownSQL := `SELECT id, at_ns, deleted, data_json FROM ` + CoreTableUnknownName + ` WHERE type_name = ? ORDER BY at_ns ASC, id ASC`
 	rows, err := q.QueryContext(ctx, selectUnknownSQL, typeName)
 	if err != nil {
 		return fmt.Errorf("select unknown rows for %s: %w", typeName, err)
@@ -1143,20 +1141,14 @@ func ReplayUnknownByType(q DBTX, typeName string, apply func(JSONLRecord) error)
 	for rows.Next() {
 		row := unknownReplayRow{}
 		if err := rows.Scan(&row.id, &row.atNs, &row.deletedInt, &row.dataJSONStr); err != nil {
-			if closeErr := CloseRows(rows, "unknown rows"); closeErr != nil {
-				return fmt.Errorf("scan unknown row for %s: %w (additionally, %v)", typeName, err, closeErr)
-			}
-			return fmt.Errorf("scan unknown row for %s: %w", typeName, err)
+			return closeRowsWithError(rows, operation, fmt.Errorf("scan unknown row for %s: %w", typeName, err))
 		}
 		replayRows = append(replayRows, row)
 	}
 	if err := rows.Err(); err != nil {
-		if closeErr := CloseRows(rows, "unknown rows"); closeErr != nil {
-			return fmt.Errorf("iterate unknown rows for %s: %w (additionally, %v)", typeName, err, closeErr)
-		}
-		return fmt.Errorf("iterate unknown rows for %s: %w", typeName, err)
+		return closeRowsWithError(rows, operation, fmt.Errorf("iterate unknown rows for %s: %w", typeName, err))
 	}
-	if err := CloseRows(rows, "unknown rows"); err != nil {
+	if err := CloseRows(rows, operation); err != nil {
 		return err
 	}
 	for _, row := range replayRows {
@@ -1258,7 +1250,7 @@ func NextObjectAtNsContext(ctx context.Context, q DBTX, tableName, objectID stri
 	}
 	wallAtNs := NowNs()
 	if currentAtNs >= wallAtNs {
-		if currentAtNs == int64(^uint64(0)>>1) {
+		if currentAtNs == math.MaxInt64 {
 			return 0, errors.New("object timestamp exhausted int64")
 		}
 		return currentAtNs + 1, nil
@@ -1349,35 +1341,13 @@ func tablePayloadBytes(q DBTX, tableName string) (int64, error) {
 
 func tableColumnNames(q DBTX, tableName string) ([]string, error) {
 	ctx := context.Background()
-	query := `PRAGMA table_info(` + quoteSQLiteIdentifier(tableName) + `)`
-	rows, err := q.QueryContext(ctx, query)
+	columns, err := generatedTableColumnsContext(ctx, q, tableName)
 	if err != nil {
-		return nil, fmt.Errorf("read columns for table %s: %w", tableName, err)
-	}
-	columnNames := make([]string, 0)
-	for rows.Next() {
-		var cid int
-		var name string
-		var colType string
-		var notNull int
-		var defaultValue any
-		var pk int
-		if err := rows.Scan(&cid, &name, &colType, &notNull, &defaultValue, &pk); err != nil {
-			if closeErr := CloseRows(rows, "table columns"); closeErr != nil {
-				return nil, fmt.Errorf("scan table column for %s: %w (additionally, %v)", tableName, err, closeErr)
-			}
-			return nil, fmt.Errorf("scan table column for %s: %w", tableName, err)
-		}
-		columnNames = append(columnNames, name)
-	}
-	if err := rows.Err(); err != nil {
-		if closeErr := CloseRows(rows, "table columns"); closeErr != nil {
-			return nil, fmt.Errorf("iterate table columns for %s: %w (additionally, %v)", tableName, err, closeErr)
-		}
-		return nil, fmt.Errorf("iterate table columns for %s: %w", tableName, err)
-	}
-	if err := CloseRows(rows, "table columns"); err != nil {
 		return nil, err
+	}
+	columnNames := make([]string, 0, len(columns))
+	for _, column := range columns {
+		columnNames = append(columnNames, column.name)
 	}
 	return columnNames, nil
 }

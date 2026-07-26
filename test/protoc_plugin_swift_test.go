@@ -248,5 +248,5 @@ func TestProtocSwiftPluginSupportsPublicSynchronousAPI(t *testing.T) {
 	assert.Check(t, strings.Contains(generatedText, `public func initialize() throws {`))
 	assert.Check(t, strings.Contains(generatedText, `public struct CRUD {`))
 	assert.Check(t, strings.Contains(generatedText, `public struct PersonTableProxy: Sendable {`))
-	assert.Check(t, strings.Contains(generatedText, `public func readJSONL(remote: String, text: String) throws {`))
+	assert.Check(t, strings.Contains(generatedText, `public func readJSONL(remote: String, stream: InputStream) throws {`))
 }

@@ -21,12 +21,50 @@ type failAfterWriter struct {
 	buffer           bytes.Buffer
 }
 
+type cancelAfterQueryDBTX struct {
+	rt.DBTX
+	cancel context.CancelFunc
+}
+
+func (q cancelAfterQueryDBTX) QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
+	rows, err := q.DBTX.QueryContext(ctx, query, args...)
+	if err == nil {
+		q.cancel()
+	}
+	return rows, err
+}
+
 func (w *failAfterWriter) Write(data []byte) (int, error) {
 	w.writes++
 	if w.writes > w.successfulWrites {
 		return 0, errors.New("injected writer failure")
 	}
 	return w.buffer.Write(data)
+}
+
+func TestDrainUnknownBindingsReturnsIterationErrorBeforeApplyingRows(t *testing.T) {
+	db, err := sql.Open("sqlite3", "file:audit-drain-iteration?mode=memory&cache=shared")
+	assert.NilError(t, err)
+	t.Cleanup(func() { assert.NilError(t, db.Close()) })
+	q := rt.WrapDB(db)
+	assert.NilError(t, rt.EnsureCoreTables(q))
+	dataJSON, err := rt.MarshalAnyJSON(&Person{Name: "parked"})
+	assert.NilError(t, err)
+	assert.NilError(t, rt.UnknownInsert(q, PersonTypeName, rt.JSONLRecord{
+		ID:   validationUUIDv7,
+		AtNs: 1,
+		Data: dataJSON,
+	}))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	err = rt.DrainUnknownBindingsContext(ctx, cancelAfterQueryDBTX{DBTX: q, cancel: cancel}, []rt.GeneratedTableBinding{PersonGeneratedBinding})
+	assert.ErrorContains(t, err, context.Canceled.Error())
+	assert.Assert(t, errors.Is(err, context.Canceled))
+
+	var parkedCount int
+	assert.NilError(t, db.QueryRowContext(context.Background(), selectUnknownCountByIDSQL, PersonTypeName, validationUUIDv7).Scan(&parkedCount))
+	assert.Equal(t, parkedCount, 1)
 }
 
 func TestPrepareAcknowledgeAndWriterRetry(t *testing.T) {

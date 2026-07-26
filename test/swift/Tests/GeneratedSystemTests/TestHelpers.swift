@@ -20,6 +20,10 @@ func jsonString(_ value: String) -> String {
     return String(decoding: data, as: UTF8.self)
 }
 
+func jsonlInputStream(_ text: String) -> InputStream {
+    InputStream(data: Data(text.utf8))
+}
+
 func tableIndexNamesByName(db: SQLiteDatabase, tableName: String) throws -> Set<String> {
     try db.withRows("SELECT name FROM pragma_index_list(\(quoteSQLiteString(tableName)))") { rows in
         var indexes = Set<String>()

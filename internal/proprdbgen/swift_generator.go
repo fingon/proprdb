@@ -82,7 +82,6 @@ func GenerateSwiftFiles(plugin *protogen.Plugin, files []*protogen.File, options
 		emitter.emitModel(modelFiles[model.TypeName], model)
 	}
 	emitter.emitWrapper(modelFiles, models)
-	_ = emitter.emitLegacyWrapper
 	return nil
 }
 
@@ -386,7 +385,7 @@ func (e swiftEmitter) emitWrapper(_ map[string]*protogen.File, models []messageM
 	g.P("\t\ttry acknowledgeJSONL(prepared.checkpoint)")
 	g.P("\t\treturn prepared.text")
 	g.P("\t}")
-	g.P("\t", visibility, "func readJSONL(remote: String, text: String) throws { try readBoundJSONL(dbtx(), bindings: crudGeneratedBindings, remote: remote, text: text) }")
+	g.P("\t", visibility, "func readJSONL(remote: String, stream: InputStream) throws { try readBoundJSONL(dbtx(), bindings: crudGeneratedBindings, remote: remote, stream: stream) }")
 	g.P("}")
 	g.P()
 	for _, model := range models {
@@ -440,186 +439,7 @@ func (e swiftEmitter) emitWrapper(_ map[string]*protogen.File, models []messageM
 	g.P("\t", actorVisibility, "func acknowledgeJSONL(_ checkpoint: JSONLCheckpoint) throws { try withDatabase { try CRUD($0).acknowledgeJSONL(checkpoint) } }")
 	g.P("\t", actorVisibility, "func discardJSONL(_ checkpoint: JSONLCheckpoint) throws { try withDatabase { try CRUD($0).discardJSONL(checkpoint) } }")
 	g.P("\t", actorVisibility, "func writeJSONL(remote: String) throws -> String { try withDatabase { try CRUD($0).writeJSONL(remote: remote) } }")
-	g.P("\t", actorVisibility, "func readJSONL(remote: String, text: String) throws { try withDatabase { try CRUD($0).readJSONL(remote: remote, text: text) } }")
-	g.P("}")
-}
-
-func (e swiftEmitter) emitLegacyWrapper(_ map[string]*protogen.File, models []messageModel) {
-	g := e.g
-	syncModels := make([]messageModel, 0, len(models))
-	for _, model := range models {
-		if !model.OmitSync {
-			syncModels = append(syncModels, model)
-		}
-	}
-
-	visibility := e.visibilityPrefix()
-	g.P(visibility, "struct CRUD {")
-	for _, model := range models {
-		g.P("\t", visibility, "let ", model.SwiftPropertyName, ": ", model.TableTypeName)
-	}
-	g.P("\t", visibility, "init(_ q: any DBTX) {")
-	for _, model := range models {
-		g.P("\t\tself.", model.SwiftPropertyName, " = ", model.TableTypeName, "(q)")
-	}
-	g.P("\t}")
-	g.P()
-	g.P("\t", visibility, "func tableDescriptors() -> [GeneratedTableDescriptor] {")
-	g.P("\t\treturn [")
-	for _, model := range models {
-		g.P("\t\t\tGeneratedTableDescriptor(tableName: ", model.GoName, "TableName, typeName: ", model.GoName, "TypeName, isCore: false, syncEnabled: ", strconv.FormatBool(!model.OmitSync), "),")
-	}
-	g.P("\t\t\tGeneratedTableDescriptor(tableName: coreTableDeletedName, typeName: \"\", isCore: true, syncEnabled: false),")
-	g.P("\t\t\tGeneratedTableDescriptor(tableName: coreTableSyncName, typeName: \"\", isCore: true, syncEnabled: false),")
-	g.P("\t\t\tGeneratedTableDescriptor(tableName: coreTableSchemaStateName, typeName: \"\", isCore: true, syncEnabled: false),")
-	g.P("\t\t\tGeneratedTableDescriptor(tableName: coreTableUnknownName, typeName: \"\", isCore: true, syncEnabled: false),")
-	g.P("\t\t]")
-	g.P("\t}")
-	g.P()
-	g.P("\tprivate func dbtx() -> any DBTX {")
-	g.P("\t\treturn ", models[0].SwiftPropertyName, ".q")
-	g.P("\t}")
-	g.P()
-	g.P("\t", visibility, "func initialize() throws {")
-	for _, model := range models {
-		g.P("\t\ttry ", model.SwiftPropertyName, ".initialize()")
-	}
-	g.P("\t}")
-	g.P()
-	g.P("\t", visibility, "func writeJSONL(remote: String) throws -> String {")
-	g.P("\t\tlet q = dbtx()")
-	g.P("\t\tvar output = \"\"")
-	for _, model := range syncModels {
-		propertyName := model.SwiftPropertyName
-		g.P("\t\tfor row in try ", propertyName, ".select() {")
-		g.P("\t\t\tif !(try syncNeedsSend(q, objectID: row.id, tableName: ", model.GoName, "TableName, remote: remote, atNs: row.atNs)) {")
-		g.P("\t\t\t\tcontinue")
-		g.P("\t\t\t}")
-		g.P("\t\t\tlet dataJSON = try marshalAnyJSON(row.data, typeName: ", model.GoName, "TypeName)")
-		g.P("\t\t\toutput += try encodeJSONLRecord(JSONLRecord(id: row.id, deleted: false, atNs: row.atNs, data: dataJSON))")
-		g.P("\t\t\ttry syncUpsert(q, objectID: row.id, tableName: ", model.GoName, "TableName, remote: remote, atNs: row.atNs)")
-		g.P("\t\t}")
-	}
-	if len(syncModels) > 0 {
-		args := make([]string, 0, len(syncModels))
-		for _, model := range syncModels {
-			args = append(args, model.GoName+"TableName")
-		}
-		placeholders := strings.TrimRight(strings.Repeat("?,", len(syncModels)), ",")
-		g.P("\t\ttry q.withRows(\"SELECT table_name, id, at_ns FROM \\(_deletedTableName) WHERE table_name IN ("+placeholders+")\", arguments: [", strings.Join(args, ", "), "]) { rows in")
-		g.P("\t\t\twhile let row = try rows.next() {")
-		g.P("\t\t\t\tlet tableName = try row.string(at: 0)")
-		g.P("\t\t\t\tlet id = try row.string(at: 1)")
-		g.P("\t\t\t\tlet atNs = try row.int64(at: 2)")
-		g.P("\t\t\t\tif !(try syncNeedsSend(q, objectID: id, tableName: tableName, remote: remote, atNs: atNs)) {")
-		g.P("\t\t\t\t\tcontinue")
-		g.P("\t\t\t\t}")
-		g.P("\t\t\t\tlet typeName: String")
-		g.P("\t\t\t\tswitch tableName {")
-		for _, model := range syncModels {
-			g.P("\t\t\t\tcase ", model.GoName, "TableName:")
-			g.P("\t\t\t\t\ttypeName = ", model.GoName, "TypeName")
-		}
-		g.P("\t\t\t\tdefault:")
-		g.P("\t\t\t\t\tthrow ProprDBError(\"unsupported tombstone table \\(tableName)\")")
-		g.P("\t\t\t\t}")
-		g.P("\t\t\t\tlet dataJSON = try marshalTypeOnlyAnyJSON(typeName: typeName)")
-		g.P("\t\t\t\toutput += try encodeJSONLRecord(JSONLRecord(id: id, deleted: true, atNs: atNs, data: dataJSON))")
-		g.P("\t\t\t\ttry syncUpsert(q, objectID: id, tableName: tableName, remote: remote, atNs: atNs)")
-		g.P("\t\t\t}")
-		g.P("\t\t}")
-	}
-	g.P("\t\treturn output")
-	g.P("\t}")
-	g.P()
-	g.P("\t", visibility, "func readJSONL(remote: String, text: String) throws {")
-	g.P("\t\tlet q = dbtx()")
-	g.P("\t\tvar readError: Error?")
-	g.P("\t\tdo {")
-	g.P("\t\t\ttry ", swiftRuntimeModuleName, ".readJSONL(text: text) { record, lineNumber in")
-	g.P("\t\t\t\tif record.id.isEmpty {")
-	g.P("\t\t\t\t\tthrow ProprDBError(\"jsonl line \\(lineNumber) has empty id\")")
-	g.P("\t\t\t\t}")
-	g.P("\t\t\t\tif record.data.isEmpty {")
-	g.P("\t\t\t\t\tthrow ProprDBError(\"jsonl line \\(lineNumber) has empty data\")")
-	g.P("\t\t\t\t}")
-	g.P("\t\t\t\tlet typeName = try typeNameFromAnyJSON(record.data)")
-	g.P("\t\t\t\tswitch typeName {")
-	for _, model := range models {
-		propertyName := model.SwiftPropertyName
-		g.P("\t\t\t\tcase ", model.GoName, "TypeName:")
-		if model.OmitSync {
-			g.P("\t\t\t\t\tlogIgnoredUnsyncedJSONLRecord(typeName: typeName, id: record.id, remote: remote, lineNumber: lineNumber)")
-			g.P("\t\t\t\t\treturn")
-			continue
-		}
-		g.P("\t\t\t\t\tlet localMax = try localMaxAtNs(q, tableName: ", model.GoName, "TableName, objectID: record.id)")
-		g.P("\t\t\t\t\ttry syncUpsert(q, objectID: record.id, tableName: ", model.GoName, "TableName, remote: remote, atNs: record.atNs)")
-		g.P("\t\t\t\t\tif record.atNs < localMax {")
-		g.P("\t\t\t\t\t\treturn")
-		g.P("\t\t\t\t\t}")
-		g.P("\t\t\t\t\tif record.deleted {")
-		g.P("\t\t\t\t\t\ttry ", propertyName, ".tombstoneWithAtNs(id: record.id, atNs: record.atNs)")
-		g.P("\t\t\t\t\t\treturn")
-		g.P("\t\t\t\t\t}")
-		g.P("\t\t\t\t\tlet data = try decodeAnyJSON(record.data, as: ", model.SwiftTypeName, ".self)")
-		g.P("\t\t\t\t\ttry ", propertyName, ".upsertWithAtNs(id: record.id, atNs: record.atNs, data: data)")
-		g.P("\t\t\t\t\treturn")
-	}
-	g.P("\t\t\t\tdefault:")
-	g.P("\t\t\t\t\ttry unknownInsert(q, typeName: typeName, record: record)")
-	g.P("\t\t\t\t}")
-	g.P("\t\t\t}")
-	g.P("\t\t} catch {")
-	g.P("\t\t\treadError = error")
-	g.P("\t\t}")
-	g.P("\t\tdo {")
-	g.P("\t\t\ttry compactUnknownLatest(q)")
-	g.P("\t\t} catch {")
-	g.P("\t\t\tif let readError {")
-	g.P("\t\t\t\tthrow ProprDBError(\"read jsonl: \\(readError) (additionally, compact unknown rows: \\(error))\")")
-	g.P("\t\t\t}")
-	g.P("\t\t\tthrow error")
-	g.P("\t\t}")
-	g.P("\t\tif let readError {")
-	g.P("\t\t\tthrow readError")
-	g.P("\t\t}")
-	g.P("\t}")
-	g.P("}")
-	g.P()
-	g.P(visibility, "extension ProprDBActor {")
-	g.P("\t", visibility, "func initialize() throws {")
-	g.P("\t\ttry withDatabase { database in try CRUD(database).initialize() }")
-	g.P("\t}")
-	for _, model := range models {
-		propertyName := model.SwiftPropertyName
-		swiftTypeName := model.SwiftTypeName
-		g.P()
-		g.P("\t", visibility, "func select", model.GoName, "() throws -> [", model.RowTypeName, "] {")
-		g.P("\t\ttry withDatabase { database in try ", model.TableTypeName, "(database).select() }")
-		g.P("\t}")
-		g.P()
-		g.P("\t", visibility, "func insert", model.GoName, "(_ data: ", swiftTypeName, ") throws -> ", model.RowTypeName, " {")
-		g.P("\t\ttry withDatabase { database in try ", model.TableTypeName, "(database).insert(data) }")
-		g.P("\t}")
-		g.P()
-		g.P("\t", visibility, "func update", model.GoName, "ByID(_ id: String, data: ", swiftTypeName, ") throws -> ", model.RowTypeName, " {")
-		g.P("\t\ttry withDatabase { database in try ", model.TableTypeName, "(database).updateByID(id, data: data) }")
-		g.P("\t}")
-		g.P()
-		g.P("\t", visibility, "func delete", model.GoName, "ByID(_ id: String) throws {")
-		g.P("\t\ttry withDatabase { database in try ", model.TableTypeName, "(database).deleteByID(id) }")
-		g.P("\t}")
-		_ = propertyName
-	}
-	g.P()
-	g.P("\t", visibility, "func writeJSONL(remote: String) throws -> String {")
-	g.P("\t\ttry withDatabase { database in try CRUD(database).writeJSONL(remote: remote) }")
-	g.P("\t}")
-	g.P()
-	g.P("\t", visibility, "func readJSONL(remote: String, text: String) throws {")
-	g.P("\t\ttry withDatabase { database in try CRUD(database).readJSONL(remote: remote, text: text) }")
-	g.P("\t}")
+	g.P("\t", actorVisibility, "func readJSONL(remote: String, stream: InputStream) throws { try withDatabase { try CRUD($0).readJSONL(remote: remote, stream: stream) } }")
 	g.P("}")
 }
 

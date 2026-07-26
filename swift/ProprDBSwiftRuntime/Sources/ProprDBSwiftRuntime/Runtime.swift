@@ -1216,12 +1216,9 @@ public func typeNameFromURL(_ typeURLValue: String) -> String {
 }
 
 public func marshalAnyJSON<M: Message>(_ message: M, typeName: String) throws -> Data {
-    let object = try jsonObject(from: message.jsonUTF8Data())
-    guard var dictionary = object as? [String: Any] else {
-        throw ProprDBError("marshal any as json: expected object payload")
-    }
-    dictionary["@type"] = typeURL(typeName)
-    return try JSONSerialization.data(withJSONObject: dictionary, options: [.sortedKeys])
+    var anyMessage = try Google_Protobuf_Any(message: message)
+    anyMessage.typeURL = typeURL(typeName)
+    return try anyMessage.jsonUTF8Data()
 }
 
 public func marshalTypeOnlyAnyJSON(typeName: String) throws -> Data {
@@ -1255,18 +1252,82 @@ public func encodeJSONLRecord(_ record: JSONLRecord) throws -> String {
     return line
 }
 
-public func readJSONL(text: String, visit: (JSONLRecord, Int) throws -> Void) throws {
-    let lines = text.split(separator: "\n", omittingEmptySubsequences: false)
-    for (lineIndex, rawLine) in lines.enumerated() {
-        let lineNumber = lineIndex + 1
-        let line = String(rawLine)
+private let jsonlReadBufferBytes = 64 * 1_024
+
+private struct JSONLStreamLineReader {
+    let stream: InputStream
+    private var readBuffer = [UInt8](repeating: 0, count: jsonlReadBufferBytes)
+    private var readBufferIndex = 0
+    private var readBufferCount = 0
+    private var lineData = Data()
+    private var reachedEnd = false
+
+    init(stream: InputStream) {
+        self.stream = stream
+    }
+
+    mutating func nextLine() throws -> Data? {
+        while true {
+            if readBufferIndex < readBufferCount {
+                let remaining = readBufferIndex..<readBufferCount
+                if let newlineIndex = readBuffer[remaining].firstIndex(of: UInt8(ascii: "\n")) {
+                    lineData.append(contentsOf: readBuffer[readBufferIndex..<newlineIndex])
+                    readBufferIndex = newlineIndex + 1
+                    let result = lineData
+                    lineData.removeAll(keepingCapacity: true)
+                    return result
+                }
+                lineData.append(contentsOf: readBuffer[remaining])
+                readBufferIndex = readBufferCount
+            }
+            if reachedEnd {
+                guard !lineData.isEmpty else {
+                    return nil
+                }
+                let result = lineData
+                lineData.removeAll(keepingCapacity: true)
+                return result
+            }
+            let readBytes = stream.read(&readBuffer, maxLength: readBuffer.count)
+            switch readBytes {
+            case let count where count > 0:
+                readBufferIndex = 0
+                readBufferCount = count
+            case 0:
+                reachedEnd = true
+            default:
+                throw stream.streamError ?? ProprDBError("read jsonl stream")
+            }
+        }
+    }
+}
+
+public func readJSONL(stream: InputStream, visit: (JSONLRecord, Int) throws -> Void) throws {
+    guard stream.streamStatus == .notOpen else {
+        throw ProprDBError("jsonl input stream must be unopened")
+    }
+    stream.open()
+    defer { stream.close() }
+    var reader = JSONLStreamLineReader(stream: stream)
+    var lineNumber = 0
+    while true {
+        let rawLine: Data
+        do {
+            guard let nextLine = try reader.nextLine() else {
+                return
+            }
+            rawLine = nextLine
+        } catch {
+            throw ProprDBError("read jsonl line \(lineNumber + 1): \(error)")
+        }
+        lineNumber += 1
+        guard let line = String(data: rawLine, encoding: .utf8) else {
+            throw ProprDBError("decode jsonl line \(lineNumber): invalid utf8")
+        }
         if line.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             continue
         }
-        guard let lineData = line.data(using: .utf8) else {
-            throw ProprDBError("decode jsonl line \(lineNumber): invalid utf8")
-        }
-        guard let object = try JSONSerialization.jsonObject(with: lineData) as? [String: Any] else {
+        guard let object = try JSONSerialization.jsonObject(with: rawLine) as? [String: Any] else {
             throw ProprDBError("decode jsonl line \(lineNumber): expected object")
         }
         guard let id = object["id"] as? String else {
@@ -1325,16 +1386,11 @@ public func unknownInsert(_ q: any DBTX, typeName: String, record: JSONLRecord) 
     try q.execute("INSERT INTO \(_unknownTypesTableName) (type_name, id, at_ns, deleted, data_json) VALUES (?, ?, ?, ?, ?) ON CONFLICT(type_name, id) DO UPDATE SET at_ns = excluded.at_ns, deleted = excluded.deleted, data_json = excluded.data_json WHERE excluded.at_ns > at_ns", arguments: [typeName, record.id, record.atNs, record.deleted ? 1 : 0, dataJSON])
 }
 
-public func compactUnknownLatest(_ q: any DBTX) throws {
-    _ = q
-}
-
 public func replayUnknownByType(_ q: any DBTX, typeName: String, apply: (JSONLRecord) throws -> Void) throws {
     guard !typeName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
         throw ProprDBError("empty type name")
     }
-    try compactUnknownLatest(q)
-    let replayRows = try q.withRows("SELECT id, at_ns, deleted, data_json FROM \(_unknownTypesTableName) WHERE type_name = ? ORDER BY at_ns ASC, id ASC, rowid ASC", arguments: [typeName]) { rows in
+    let replayRows = try q.withRows("SELECT id, at_ns, deleted, data_json FROM \(_unknownTypesTableName) WHERE type_name = ? ORDER BY at_ns ASC, id ASC", arguments: [typeName]) { rows in
         var buffered: [JSONLRecord] = []
         while let row = try rows.next() {
             let id = try row.string(at: 0)
@@ -1507,9 +1563,9 @@ private func applyBoundDeletion(_ q: any DBTX, binding: GeneratedTableBinding, i
     try q.execute("DELETE FROM \(quoteSQLiteIdentifier(binding.descriptor.tableName)) WHERE id = ?", arguments: [id])
 }
 
-public func readBoundJSONL(_ q: any DBTX, bindings: [GeneratedTableBinding], remote: String, text: String) throws {
+public func readBoundJSONL(_ q: any DBTX, bindings: [GeneratedTableBinding], remote: String, stream: InputStream) throws {
     let bindingsByType = Dictionary(uniqueKeysWithValues: bindings.map { ($0.descriptor.typeName, $0) })
-    try readJSONL(text: text) { record, lineNumber in
+    try readJSONL(stream: stream) { record, lineNumber in
         guard !record.id.isEmpty, !record.data.isEmpty else {
             throw ProprDBError("jsonl line \(lineNumber) has empty id or data")
         }
