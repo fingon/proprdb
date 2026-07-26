@@ -34,6 +34,16 @@ successful records remain committed. Older timestamps are ignored. Equal
 timestamps must describe semantically equal protobuf state (or the same
 tombstone); otherwise import returns a conflict.
 
+Every nonblank physical JSONL line contains exactly one object. Object IDs are
+canonical lowercase UUIDv7 values. `deleted` is absent or a JSON boolean,
+`atNs` is a signed decimal `int64` number or decimal string, and `data` is an
+object with a nonempty string `@type`. Invalid scalar coercions are rejected
+with the physical line number.
+
+Bindings with `omit_sync` never export records, including records parked in the
+unknown-type table before the binding became available. Parked records remain
+stored so a future sync-enabled binding can drain them.
+
 ## Change listeners
 
 Tables with `proprdb.change_listeners = true` expose typed, future-only change

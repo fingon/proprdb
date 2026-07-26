@@ -4,13 +4,13 @@ package genexample
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"io"
 	"strings"
 
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/reflect/protoreflect"
 	rt "github.com/fingon/proprdb/rt"
 )
 
@@ -26,7 +26,6 @@ const PersonUpsertSQL = "INSERT INTO \"generatedtest_example_person\" (\"id\", \
 const PersonGeneratedIndexPrefix = "idx_generatedtest_example_person__"
 const PersonCreateIndexSQL1 = "CREATE INDEX IF NOT EXISTS \"idx_generatedtest_example_person__name\" ON \"generatedtest_example_person\" (\"name\")"
 const PersonCreateIndexSQL2 = "CREATE INDEX IF NOT EXISTS \"idx_generatedtest_example_person__name_age\" ON \"generatedtest_example_person\" (\"name\", \"age\")"
-const PersonReprojectSQL = "UPDATE \"generatedtest_example_person\" SET \"name\" = ?, \"age\" = ? WHERE id = ?"
 
 type PersonRow struct {
 	ID   string
@@ -41,10 +40,21 @@ type PersonTable struct {
 }
 
 var PersonGeneratedBinding = rt.GeneratedTableBinding{
-	Descriptor: rt.GeneratedTableDescriptor{TableName: PersonTableName, TypeName: PersonTypeName, SyncEnabled: true, ChangeListenersEnabled: true, QueryStatisticsEnabled: true},
-	NewMessage: func() proto.Message { return &Person{} },
-	InsertSQL:  PersonInsertSQL,
-	UpsertSQL:  PersonUpsertSQL,
+	Descriptor:        rt.GeneratedTableDescriptor{TableName: PersonTableName, TypeName: PersonTypeName, SyncEnabled: true, ChangeListenersEnabled: true, QueryStatisticsEnabled: true},
+	NewMessage:        func() proto.Message { return &Person{} },
+	InsertSQL:         PersonInsertSQL,
+	UpsertSQL:         PersonUpsertSQL,
+	CreateTableSQL:    PersonCreateTableSQL,
+	ProjectionSchema:  PersonProjectionSchema,
+	GeneratedIndexKey: PersonGeneratedIndexPrefix,
+	ProjectedColumns: []rt.ProjectedColumnDescriptor{
+		{Name: "name", ProtoKind: "string", SQLiteType: "TEXT", DefaultSQL: "''", Nullable: false, LegacyOneofPresenceRepair: false},
+		{Name: "age", ProtoKind: "int64", SQLiteType: "INTEGER", DefaultSQL: "0", Nullable: false, LegacyOneofPresenceRepair: false},
+	},
+	GeneratedIndexes: []rt.GeneratedIndexDescriptor{
+		{Name: "idx_generatedtest_example_person__name", CreateSQL: PersonCreateIndexSQL1},
+		{Name: "idx_generatedtest_example_person__name_age", CreateSQL: PersonCreateIndexSQL2},
+	},
 	ProjectedValues: func(message proto.Message) ([]any, error) {
 		data, ok := message.(*Person)
 		if !ok {
@@ -75,73 +85,11 @@ func (t *PersonTable) init(ensureCore bool) error {
 			return err
 		}
 	}
-	ctx := context.Background()
-	if _, err := t.q.ExecContext(ctx, PersonCreateTableSQL); err != nil {
-		return fmt.Errorf("create table %s: %w", PersonTableName, err)
-	}
-	columnRows, err := t.q.QueryContext(ctx, `PRAGMA table_info("`+PersonTableName+`")`)
-	if err != nil {
-		return fmt.Errorf("read columns for %s: %w", PersonTableName, err)
-	}
-	existingColumns := make(map[string]bool)
-	for columnRows.Next() {
-		var cid int
-		var name string
-		var colType string
-		var notNull int
-		var defaultValue any
-		var pk int
-		if err := columnRows.Scan(&cid, &name, &colType, &notNull, &defaultValue, &pk); err != nil {
-			if closeErr := rt.CloseRows(columnRows, "projection metadata"); closeErr != nil {
-				return fmt.Errorf("scan pragma row: %w (additionally, %v)", err, closeErr)
-			}
-			return fmt.Errorf("scan pragma row: %w", err)
-		}
-		existingColumns[name] = true
-	}
-	if err := columnRows.Err(); err != nil {
-		if closeErr := rt.CloseRows(columnRows, "projection metadata"); closeErr != nil {
-			return fmt.Errorf("iterate pragma rows: %w (additionally, %v)", err, closeErr)
-		}
-		return fmt.Errorf("iterate pragma rows: %w", err)
-	}
-	if err := rt.CloseRows(columnRows, "projection metadata"); err != nil {
+	if err := rt.AuditObjectIDsContext(context.Background(), t.q, []rt.GeneratedTableBinding{PersonGeneratedBinding}); err != nil {
 		return err
 	}
-	if !existingColumns["name"] {
-		if _, err := t.q.ExecContext(ctx, `ALTER TABLE "`+PersonTableName+`" ADD COLUMN "name" TEXT NOT NULL DEFAULT ''`); err != nil {
-			return fmt.Errorf("add projection column name to %s: %w", PersonTableName, err)
-		}
-	}
-	if !existingColumns["age"] {
-		if _, err := t.q.ExecContext(ctx, `ALTER TABLE "`+PersonTableName+`" ADD COLUMN "age" INTEGER NOT NULL DEFAULT 0`); err != nil {
-			return fmt.Errorf("add projection column age to %s: %w", PersonTableName, err)
-		}
-	}
-	if err := rt.EnsureManagedIndexes(t.q, PersonTableName, PersonGeneratedIndexPrefix, []string{
-		PersonCreateIndexSQL1,
-		PersonCreateIndexSQL2,
-	}, []string{
-		"idx_generatedtest_example_person__name",
-		"idx_generatedtest_example_person__name_age",
-	}); err != nil {
+	if err := rt.ReconcileGeneratedTableContext(context.Background(), t.q, PersonGeneratedBinding); err != nil {
 		return err
-	}
-	var currentSchema string
-	schemaErr := t.q.QueryRowContext(ctx, `SELECT schema_hash FROM _proprdb_schema WHERE table_name = ?`, PersonTableName).Scan(&currentSchema)
-	if errors.Is(schemaErr, sql.ErrNoRows) {
-		if _, insertErr := t.q.ExecContext(ctx, `INSERT INTO _proprdb_schema (table_name, schema_hash) VALUES (?, ?)`, PersonTableName, PersonProjectionSchema); insertErr != nil {
-			return fmt.Errorf("insert schema hash for %s: %w", PersonTableName, insertErr)
-		}
-	} else if schemaErr != nil {
-		return fmt.Errorf("select schema hash for %s: %w", PersonTableName, schemaErr)
-	} else if currentSchema != PersonProjectionSchema {
-		if err := t.reproject(); err != nil {
-			return fmt.Errorf("reproject table %s: %w", PersonTableName, err)
-		}
-		if _, err := t.q.ExecContext(ctx, `UPDATE _proprdb_schema SET schema_hash = ? WHERE table_name = ?`, PersonProjectionSchema, PersonTableName); err != nil {
-			return fmt.Errorf("update schema hash for %s: %w", PersonTableName, err)
-		}
 	}
 	if err := t.drainUnknownRows(PersonTypeName); err != nil {
 		return fmt.Errorf("drain unknown rows for %s: %w", PersonTableName, err)
@@ -207,7 +155,7 @@ func (t *PersonTable) Insert(data *Person) (PersonRow, error) {
 	if err != nil {
 		return PersonRow{}, fmt.Errorf("generate uuidv7: %w", err)
 	}
-	if err := rt.ValidateUUID(id); err != nil {
+	if err := rt.ValidateUUIDv7(id); err != nil {
 		return PersonRow{}, fmt.Errorf("validate generated id %s: %w", id, err)
 	}
 	return t.insertWithID(id, data)
@@ -233,7 +181,7 @@ func (t *PersonTable) insertWithID(id string, data *Person) (PersonRow, error) {
 	if id == "" {
 		return PersonRow{}, errors.New("empty id")
 	}
-	if err := rt.ValidateUUID(id); err != nil {
+	if err := rt.ValidateUUIDv7(id); err != nil {
 		return PersonRow{}, fmt.Errorf("validate id %s: %w", id, err)
 	}
 	if err := data.Valid(); err != nil {
@@ -253,7 +201,7 @@ func (t *PersonTable) UpdateByID(id string, data *Person) (PersonRow, error) {
 	if id == "" {
 		return PersonRow{}, errors.New("empty id")
 	}
-	if err := rt.ValidateUUID(id); err != nil {
+	if err := rt.ValidateUUIDv7(id); err != nil {
 		return PersonRow{}, fmt.Errorf("validate id %s: %w", id, err)
 	}
 	if data == nil {
@@ -344,49 +292,6 @@ func (t *PersonTable) tombstoneWithAtNs(id string, atNs int64) error {
 	})
 }
 
-func (t *PersonTable) reproject() error {
-	ctx := context.Background()
-	rows, err := t.q.QueryContext(ctx, `SELECT id, data FROM "`+PersonTableName+`"`)
-	if err != nil {
-		return fmt.Errorf("query rows for reprojection: %w", err)
-	}
-	type reprojectRow struct {
-		id        string
-		dataBytes []byte
-	}
-	rowBuffer := make([]reprojectRow, 0)
-	for rows.Next() {
-		var id string
-		var dataBytes []byte
-		if err := rows.Scan(&id, &dataBytes); err != nil {
-			return fmt.Errorf("scan reprojection row: %w", err)
-		}
-		copiedData := make([]byte, len(dataBytes))
-		copy(copiedData, dataBytes)
-		rowBuffer = append(rowBuffer, reprojectRow{id: id, dataBytes: copiedData})
-	}
-	if err := rows.Err(); err != nil {
-		return fmt.Errorf("iterate reprojection rows: %w", err)
-	}
-	if err := rows.Close(); err != nil {
-		return fmt.Errorf("close reprojection rows: %w", err)
-	}
-	for _, row := range rowBuffer {
-		data := &Person{}
-		if err := proto.Unmarshal(row.dataBytes, data); err != nil {
-			return fmt.Errorf("unmarshal reprojection row: %w", err)
-		}
-		reprojectArgs := []any{}
-		reprojectArgs = append(reprojectArgs, data.GetName())
-		reprojectArgs = append(reprojectArgs, data.GetAge())
-		reprojectArgs = append(reprojectArgs, row.id)
-		if _, err := t.q.ExecContext(ctx, PersonReprojectSQL, reprojectArgs...); err != nil {
-			return fmt.Errorf("reproject row %s: %w", row.id, err)
-		}
-	}
-	return nil
-}
-
 func (t *PersonTable) drainUnknownRows(typeName string) error {
 	if t.q == nil {
 		return errors.New("nil DBTX")
@@ -408,7 +313,6 @@ const NoteCreateTableSQL = "CREATE TABLE IF NOT EXISTS \"generatedtest_example_n
 const NoteInsertSQL = "INSERT INTO \"generatedtest_example_note\" (\"id\", \"at_ns\", \"data\", \"text\") VALUES (?, ?, ?, ?)"
 const NoteUpsertSQL = "INSERT INTO \"generatedtest_example_note\" (\"id\", \"at_ns\", \"data\", \"text\") VALUES (?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET \"at_ns\" = excluded.\"at_ns\", \"data\" = excluded.\"data\", \"text\" = excluded.\"text\""
 const NoteGeneratedIndexPrefix = "idx_generatedtest_example_note__"
-const NoteReprojectSQL = "UPDATE \"generatedtest_example_note\" SET \"text\" = ? WHERE id = ?"
 
 type NoteRow struct {
 	ID   string
@@ -423,10 +327,17 @@ type NoteTable struct {
 }
 
 var NoteGeneratedBinding = rt.GeneratedTableBinding{
-	Descriptor: rt.GeneratedTableDescriptor{TableName: NoteTableName, TypeName: NoteTypeName, SyncEnabled: false, ChangeListenersEnabled: true, QueryStatisticsEnabled: false},
-	NewMessage: func() proto.Message { return &Note{} },
-	InsertSQL:  NoteInsertSQL,
-	UpsertSQL:  NoteUpsertSQL,
+	Descriptor:        rt.GeneratedTableDescriptor{TableName: NoteTableName, TypeName: NoteTypeName, SyncEnabled: false, ChangeListenersEnabled: true, QueryStatisticsEnabled: false},
+	NewMessage:        func() proto.Message { return &Note{} },
+	InsertSQL:         NoteInsertSQL,
+	UpsertSQL:         NoteUpsertSQL,
+	CreateTableSQL:    NoteCreateTableSQL,
+	ProjectionSchema:  NoteProjectionSchema,
+	GeneratedIndexKey: NoteGeneratedIndexPrefix,
+	ProjectedColumns: []rt.ProjectedColumnDescriptor{
+		{Name: "text", ProtoKind: "string", SQLiteType: "TEXT", DefaultSQL: "''", Nullable: false, LegacyOneofPresenceRepair: false},
+	},
+	GeneratedIndexes: []rt.GeneratedIndexDescriptor{},
 	ProjectedValues: func(message proto.Message) ([]any, error) {
 		data, ok := message.(*Note)
 		if !ok {
@@ -456,62 +367,11 @@ func (t *NoteTable) init(ensureCore bool) error {
 			return err
 		}
 	}
-	ctx := context.Background()
-	if _, err := t.q.ExecContext(ctx, NoteCreateTableSQL); err != nil {
-		return fmt.Errorf("create table %s: %w", NoteTableName, err)
-	}
-	columnRows, err := t.q.QueryContext(ctx, `PRAGMA table_info("`+NoteTableName+`")`)
-	if err != nil {
-		return fmt.Errorf("read columns for %s: %w", NoteTableName, err)
-	}
-	existingColumns := make(map[string]bool)
-	for columnRows.Next() {
-		var cid int
-		var name string
-		var colType string
-		var notNull int
-		var defaultValue any
-		var pk int
-		if err := columnRows.Scan(&cid, &name, &colType, &notNull, &defaultValue, &pk); err != nil {
-			if closeErr := rt.CloseRows(columnRows, "projection metadata"); closeErr != nil {
-				return fmt.Errorf("scan pragma row: %w (additionally, %v)", err, closeErr)
-			}
-			return fmt.Errorf("scan pragma row: %w", err)
-		}
-		existingColumns[name] = true
-	}
-	if err := columnRows.Err(); err != nil {
-		if closeErr := rt.CloseRows(columnRows, "projection metadata"); closeErr != nil {
-			return fmt.Errorf("iterate pragma rows: %w (additionally, %v)", err, closeErr)
-		}
-		return fmt.Errorf("iterate pragma rows: %w", err)
-	}
-	if err := rt.CloseRows(columnRows, "projection metadata"); err != nil {
+	if err := rt.AuditObjectIDsContext(context.Background(), t.q, []rt.GeneratedTableBinding{NoteGeneratedBinding}); err != nil {
 		return err
 	}
-	if !existingColumns["text"] {
-		if _, err := t.q.ExecContext(ctx, `ALTER TABLE "`+NoteTableName+`" ADD COLUMN "text" TEXT NOT NULL DEFAULT ''`); err != nil {
-			return fmt.Errorf("add projection column text to %s: %w", NoteTableName, err)
-		}
-	}
-	if err := rt.EnsureManagedIndexes(t.q, NoteTableName, NoteGeneratedIndexPrefix, []string{}, []string{}); err != nil {
+	if err := rt.ReconcileGeneratedTableContext(context.Background(), t.q, NoteGeneratedBinding); err != nil {
 		return err
-	}
-	var currentSchema string
-	schemaErr := t.q.QueryRowContext(ctx, `SELECT schema_hash FROM _proprdb_schema WHERE table_name = ?`, NoteTableName).Scan(&currentSchema)
-	if errors.Is(schemaErr, sql.ErrNoRows) {
-		if _, insertErr := t.q.ExecContext(ctx, `INSERT INTO _proprdb_schema (table_name, schema_hash) VALUES (?, ?)`, NoteTableName, NoteProjectionSchema); insertErr != nil {
-			return fmt.Errorf("insert schema hash for %s: %w", NoteTableName, insertErr)
-		}
-	} else if schemaErr != nil {
-		return fmt.Errorf("select schema hash for %s: %w", NoteTableName, schemaErr)
-	} else if currentSchema != NoteProjectionSchema {
-		if err := t.reproject(); err != nil {
-			return fmt.Errorf("reproject table %s: %w", NoteTableName, err)
-		}
-		if _, err := t.q.ExecContext(ctx, `UPDATE _proprdb_schema SET schema_hash = ? WHERE table_name = ?`, NoteProjectionSchema, NoteTableName); err != nil {
-			return fmt.Errorf("update schema hash for %s: %w", NoteTableName, err)
-		}
 	}
 	if err := t.drainUnknownRows(NoteTypeName); err != nil {
 		return fmt.Errorf("drain unknown rows for %s: %w", NoteTableName, err)
@@ -575,7 +435,7 @@ func (t *NoteTable) Insert(data *Note) (NoteRow, error) {
 	if err != nil {
 		return NoteRow{}, fmt.Errorf("generate uuidv7: %w", err)
 	}
-	if err := rt.ValidateUUID(id); err != nil {
+	if err := rt.ValidateUUIDv7(id); err != nil {
 		return NoteRow{}, fmt.Errorf("validate generated id %s: %w", id, err)
 	}
 	return t.insertWithID(id, data)
@@ -591,7 +451,7 @@ func (t *NoteTable) insertWithID(id string, data *Note) (NoteRow, error) {
 	if id == "" {
 		return NoteRow{}, errors.New("empty id")
 	}
-	if err := rt.ValidateUUID(id); err != nil {
+	if err := rt.ValidateUUIDv7(id); err != nil {
 		return NoteRow{}, fmt.Errorf("validate id %s: %w", id, err)
 	}
 	atNs, err := rt.WriteLocalObjectContext(context.Background(), t.q, NoteGeneratedBinding, id, data, true)
@@ -608,7 +468,7 @@ func (t *NoteTable) UpdateByID(id string, data *Note) (NoteRow, error) {
 	if id == "" {
 		return NoteRow{}, errors.New("empty id")
 	}
-	if err := rt.ValidateUUID(id); err != nil {
+	if err := rt.ValidateUUIDv7(id); err != nil {
 		return NoteRow{}, fmt.Errorf("validate id %s: %w", id, err)
 	}
 	if data == nil {
@@ -696,48 +556,6 @@ func (t *NoteTable) tombstoneWithAtNs(id string, atNs int64) error {
 	})
 }
 
-func (t *NoteTable) reproject() error {
-	ctx := context.Background()
-	rows, err := t.q.QueryContext(ctx, `SELECT id, data FROM "`+NoteTableName+`"`)
-	if err != nil {
-		return fmt.Errorf("query rows for reprojection: %w", err)
-	}
-	type reprojectRow struct {
-		id        string
-		dataBytes []byte
-	}
-	rowBuffer := make([]reprojectRow, 0)
-	for rows.Next() {
-		var id string
-		var dataBytes []byte
-		if err := rows.Scan(&id, &dataBytes); err != nil {
-			return fmt.Errorf("scan reprojection row: %w", err)
-		}
-		copiedData := make([]byte, len(dataBytes))
-		copy(copiedData, dataBytes)
-		rowBuffer = append(rowBuffer, reprojectRow{id: id, dataBytes: copiedData})
-	}
-	if err := rows.Err(); err != nil {
-		return fmt.Errorf("iterate reprojection rows: %w", err)
-	}
-	if err := rows.Close(); err != nil {
-		return fmt.Errorf("close reprojection rows: %w", err)
-	}
-	for _, row := range rowBuffer {
-		data := &Note{}
-		if err := proto.Unmarshal(row.dataBytes, data); err != nil {
-			return fmt.Errorf("unmarshal reprojection row: %w", err)
-		}
-		reprojectArgs := []any{}
-		reprojectArgs = append(reprojectArgs, data.GetText())
-		reprojectArgs = append(reprojectArgs, row.id)
-		if _, err := t.q.ExecContext(ctx, NoteReprojectSQL, reprojectArgs...); err != nil {
-			return fmt.Errorf("reproject row %s: %w", row.id, err)
-		}
-	}
-	return nil
-}
-
 func (t *NoteTable) drainUnknownRows(typeName string) error {
 	if t.q == nil {
 		return errors.New("nil DBTX")
@@ -752,14 +570,275 @@ func (t *NoteTable) DrainUnknownRows() error {
 	return t.drainUnknownRows(NoteTypeName)
 }
 
+const ChoiceTableName = "generatedtest_example_choice"
+const ChoiceTypeName = "generatedtest.example.Choice"
+const ChoiceProjectionSchema = "label:string:optional"
+const ChoiceCreateTableSQL = "CREATE TABLE IF NOT EXISTS \"generatedtest_example_choice\" (\"id\" TEXT PRIMARY KEY, \"at_ns\" INTEGER NOT NULL, \"data\" BLOB NOT NULL, \"label\" TEXT)"
+const ChoiceInsertSQL = "INSERT INTO \"generatedtest_example_choice\" (\"id\", \"at_ns\", \"data\", \"label\") VALUES (?, ?, ?, ?)"
+const ChoiceUpsertSQL = "INSERT INTO \"generatedtest_example_choice\" (\"id\", \"at_ns\", \"data\", \"label\") VALUES (?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET \"at_ns\" = excluded.\"at_ns\", \"data\" = excluded.\"data\", \"label\" = excluded.\"label\""
+const ChoiceGeneratedIndexPrefix = "idx_generatedtest_example_choice__"
+
+type ChoiceRow struct {
+	ID   string
+	AtNs int64
+	Data *Choice
+}
+
+type ChoiceTable struct {
+	q DBTX
+}
+
+var ChoiceGeneratedBinding = rt.GeneratedTableBinding{
+	Descriptor:        rt.GeneratedTableDescriptor{TableName: ChoiceTableName, TypeName: ChoiceTypeName, SyncEnabled: true, ChangeListenersEnabled: false, QueryStatisticsEnabled: false},
+	NewMessage:        func() proto.Message { return &Choice{} },
+	InsertSQL:         ChoiceInsertSQL,
+	UpsertSQL:         ChoiceUpsertSQL,
+	CreateTableSQL:    ChoiceCreateTableSQL,
+	ProjectionSchema:  ChoiceProjectionSchema,
+	GeneratedIndexKey: ChoiceGeneratedIndexPrefix,
+	ProjectedColumns: []rt.ProjectedColumnDescriptor{
+		{Name: "label", ProtoKind: "string", SQLiteType: "TEXT", DefaultSQL: "''", Nullable: true, LegacyOneofPresenceRepair: true},
+	},
+	GeneratedIndexes: []rt.GeneratedIndexDescriptor{},
+	ProjectedValues: func(message proto.Message) ([]any, error) {
+		data, ok := message.(*Choice)
+		if !ok {
+			return nil, fmt.Errorf("expected *Choice, got %T", message)
+		}
+		values := []any{}
+		fieldDescriptorGetLabel := data.ProtoReflect().Descriptor().Fields().ByName(protoreflect.Name("label"))
+		if fieldDescriptorGetLabel != nil && data.ProtoReflect().Has(fieldDescriptorGetLabel) {
+			values = append(values, data.GetLabel())
+		} else {
+			values = append(values, nil)
+		}
+		return values, nil
+	},
+}
+
+func NewChoiceTable(q DBTX) *ChoiceTable {
+	return &ChoiceTable{q: q}
+}
+
+func (t *ChoiceTable) Init() error {
+	return t.init(true)
+}
+
+func (t *ChoiceTable) init(ensureCore bool) error {
+	if t.q == nil {
+		return errors.New("nil DBTX")
+	}
+	if ensureCore {
+		if err := rt.EnsureCoreTables(t.q); err != nil {
+			return err
+		}
+	}
+	if err := rt.AuditObjectIDsContext(context.Background(), t.q, []rt.GeneratedTableBinding{ChoiceGeneratedBinding}); err != nil {
+		return err
+	}
+	if err := rt.ReconcileGeneratedTableContext(context.Background(), t.q, ChoiceGeneratedBinding); err != nil {
+		return err
+	}
+	if err := t.drainUnknownRows(ChoiceTypeName); err != nil {
+		return fmt.Errorf("drain unknown rows for %s: %w", ChoiceTableName, err)
+	}
+	return nil
+}
+
+func (t *ChoiceTable) Select(where string, args ...any) ([]ChoiceRow, error) {
+	if t.q == nil {
+		return nil, errors.New("nil DBTX")
+	}
+	ctx := context.Background()
+	query := `SELECT id, at_ns, data FROM "` + ChoiceTableName + `"`
+	if strings.TrimSpace(where) != "" {
+		query += " WHERE " + where
+	}
+	rows, err := t.q.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("select from %s: %w", ChoiceTableName, err)
+	}
+	result := make([]ChoiceRow, 0)
+	for rows.Next() {
+		var id string
+		var atNs int64
+		var dataBytes []byte
+		if err := rows.Scan(&id, &atNs, &dataBytes); err != nil {
+			if closeErr := rt.CloseRows(rows, "select"); closeErr != nil {
+				return nil, fmt.Errorf("scan row from %s: %w (additionally, %v)", ChoiceTableName, err, closeErr)
+			}
+			return nil, fmt.Errorf("scan row from %s: %w", ChoiceTableName, err)
+		}
+		data := &Choice{}
+		if err := proto.Unmarshal(dataBytes, data); err != nil {
+			if closeErr := rt.CloseRows(rows, "select"); closeErr != nil {
+				return nil, fmt.Errorf("unmarshal Choice row: %w (additionally, %v)", err, closeErr)
+			}
+			return nil, fmt.Errorf("unmarshal Choice row: %w", err)
+		}
+		result = append(result, ChoiceRow{ID: id, AtNs: atNs, Data: data})
+	}
+	if err := rows.Err(); err != nil {
+		if closeErr := rt.CloseRows(rows, "select"); closeErr != nil {
+			return nil, fmt.Errorf("iterate rows from %s: %w (additionally, %v)", ChoiceTableName, err, closeErr)
+		}
+		return nil, fmt.Errorf("iterate rows from %s: %w", ChoiceTableName, err)
+	}
+	if err := rt.CloseRows(rows, "select"); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+func (t *ChoiceTable) Insert(data *Choice) (ChoiceRow, error) {
+	if t.q == nil {
+		return ChoiceRow{}, errors.New("nil DBTX")
+	}
+	if data == nil {
+		return ChoiceRow{}, errors.New("nil data")
+	}
+	id, err := rt.UUIDv7()
+	if err != nil {
+		return ChoiceRow{}, fmt.Errorf("generate uuidv7: %w", err)
+	}
+	if err := rt.ValidateUUIDv7(id); err != nil {
+		return ChoiceRow{}, fmt.Errorf("validate generated id %s: %w", id, err)
+	}
+	return t.insertWithID(id, data)
+}
+
+func (t *ChoiceTable) insertWithID(id string, data *Choice) (ChoiceRow, error) {
+	if t.q == nil {
+		return ChoiceRow{}, errors.New("nil DBTX")
+	}
+	if data == nil {
+		return ChoiceRow{}, errors.New("nil data")
+	}
+	if id == "" {
+		return ChoiceRow{}, errors.New("empty id")
+	}
+	if err := rt.ValidateUUIDv7(id); err != nil {
+		return ChoiceRow{}, fmt.Errorf("validate id %s: %w", id, err)
+	}
+	atNs, err := rt.WriteLocalObjectContext(context.Background(), t.q, ChoiceGeneratedBinding, id, data, true)
+	if err != nil {
+		return ChoiceRow{}, err
+	}
+	return ChoiceRow{ID: id, AtNs: atNs, Data: data}, nil
+}
+
+func (t *ChoiceTable) UpdateByID(id string, data *Choice) (ChoiceRow, error) {
+	if t.q == nil {
+		return ChoiceRow{}, errors.New("nil DBTX")
+	}
+	if id == "" {
+		return ChoiceRow{}, errors.New("empty id")
+	}
+	if err := rt.ValidateUUIDv7(id); err != nil {
+		return ChoiceRow{}, fmt.Errorf("validate id %s: %w", id, err)
+	}
+	if data == nil {
+		return ChoiceRow{}, errors.New("nil data")
+	}
+	atNs, err := rt.WriteLocalObjectContext(context.Background(), t.q, ChoiceGeneratedBinding, id, data, false)
+	if err != nil {
+		return ChoiceRow{}, err
+	}
+	return ChoiceRow{ID: id, AtNs: atNs, Data: data}, nil
+}
+
+func (t *ChoiceTable) UpdateRow(row ChoiceRow) (ChoiceRow, error) {
+	if t.q == nil {
+		return ChoiceRow{}, errors.New("nil DBTX")
+	}
+	if row.ID == "" {
+		return ChoiceRow{}, errors.New("empty id")
+	}
+	if row.Data == nil {
+		return ChoiceRow{}, errors.New("nil data")
+	}
+	return t.UpdateByID(row.ID, row.Data)
+}
+
+func (t *ChoiceTable) DeleteByID(id string) error {
+	if t.q == nil {
+		return errors.New("nil DBTX")
+	}
+	if id == "" {
+		return errors.New("empty id")
+	}
+	return rt.DeleteLocalBoundObjectContext(context.Background(), t.q, ChoiceGeneratedBinding, id)
+}
+
+func (t *ChoiceTable) DeleteRow(row ChoiceRow) error {
+	if t.q == nil {
+		return errors.New("nil DBTX")
+	}
+	if row.ID == "" {
+		return errors.New("empty id")
+	}
+	return t.DeleteByID(row.ID)
+}
+
+func (t *ChoiceTable) upsertWithAtNs(id string, atNs int64, data *Choice) error {
+	if t.q == nil {
+		return errors.New("nil DBTX")
+	}
+	if id == "" {
+		return errors.New("empty id")
+	}
+	if data == nil {
+		return errors.New("nil data")
+	}
+	dataJSON, err := rt.MarshalAnyJSON(data)
+	if err != nil {
+		return err
+	}
+	return t.q.WithTransaction(context.Background(), func(tx rt.DBTX) error {
+		return rt.ApplyIncomingObjectContext(context.Background(), tx, ChoiceGeneratedBinding, rt.JSONLRecord{ID: id, AtNs: atNs, Data: dataJSON})
+	})
+}
+
+func (t *ChoiceTable) tombstoneWithAtNs(id string, atNs int64) error {
+	if t.q == nil {
+		return errors.New("nil DBTX")
+	}
+	if id == "" {
+		return errors.New("empty id")
+	}
+	dataJSON, err := rt.MarshalTypeOnlyAnyJSON(ChoiceTypeName)
+	if err != nil {
+		return err
+	}
+	return t.q.WithTransaction(context.Background(), func(tx rt.DBTX) error {
+		return rt.ApplyIncomingObjectContext(context.Background(), tx, ChoiceGeneratedBinding, rt.JSONLRecord{ID: id, Deleted: true, AtNs: atNs, Data: dataJSON})
+	})
+}
+
+func (t *ChoiceTable) drainUnknownRows(typeName string) error {
+	if t.q == nil {
+		return errors.New("nil DBTX")
+	}
+	if typeName == "" {
+		return errors.New("empty type name")
+	}
+	return rt.DrainUnknownBindingsContext(context.Background(), t.q, []rt.GeneratedTableBinding{ChoiceGeneratedBinding})
+}
+
+func (t *ChoiceTable) DrainUnknownRows() error {
+	return t.drainUnknownRows(ChoiceTypeName)
+}
+
 type CRUD struct {
 	Person *PersonTable
 	Note   *NoteTable
+	Choice *ChoiceTable
 }
 
 var crudGeneratedBindings = []rt.GeneratedTableBinding{
 	PersonGeneratedBinding,
 	NoteGeneratedBinding,
+	ChoiceGeneratedBinding,
 }
 
 func NewCRUD(q DBTX) *CRUD {
@@ -767,6 +846,7 @@ func NewCRUD(q DBTX) *CRUD {
 	return &CRUD{
 		Person: NewPersonTable(q),
 		Note:   NewNoteTable(q),
+		Choice: NewChoiceTable(q),
 	}
 }
 
@@ -788,6 +868,9 @@ func (c *CRUD) dbtx() (DBTX, error) {
 	if c.Note != nil && c.Note.q != nil {
 		return c.Note.q, nil
 	}
+	if c.Choice != nil && c.Choice.q != nil {
+		return c.Choice.q, nil
+	}
 	return nil, errors.New("nil DBTX")
 }
 
@@ -804,6 +887,9 @@ func (c *CRUD) Init() error {
 	}
 	if err := c.Note.init(false); err != nil {
 		return fmt.Errorf("init Note table: %w", err)
+	}
+	if err := c.Choice.init(false); err != nil {
+		return fmt.Errorf("init Choice table: %w", err)
 	}
 	return rt.DrainUnknownBindingsContext(context.Background(), q, crudGeneratedBindings)
 }

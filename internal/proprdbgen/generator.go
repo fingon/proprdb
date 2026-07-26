@@ -15,13 +15,17 @@ import (
 )
 
 type projectedField struct {
-	ColumnName      string
-	ProtoFieldName  string
-	GetterName      string
-	SQLiteType      string
-	SQLiteDefault   string
-	SchemaSignature string
-	IsOptional      bool
+	ColumnName                string
+	ProtoFieldName            string
+	GetterName                string
+	SQLiteType                string
+	SQLiteDefault             string
+	SchemaSignature           string
+	IsOptional                bool
+	LegacyOneofPresenceRepair bool
+	SwiftPropertyName         string
+	SwiftPresenceName         string
+	SwiftOneofPropertyName    string
 }
 
 type messageIndex struct {
@@ -32,6 +36,8 @@ type messageIndex struct {
 
 type messageModel struct {
 	GoName              string
+	SwiftTypeName       string
+	SwiftPropertyName   string
 	TableName           string
 	TypeName            string
 	TableTypeName       string
@@ -103,7 +109,6 @@ func GenerateFiles(plugin *protogen.Plugin, files []*protogen.File) error {
 	g.P()
 	g.P("import (")
 	g.P(`"context"`)
-	g.P(`"database/sql"`)
 	g.P(`"errors"`)
 	g.P(`"fmt"`)
 	g.P(`"io"`)
@@ -130,6 +135,7 @@ func GenerateFiles(plugin *protogen.Plugin, files []*protogen.File) error {
 
 func validateModels(models []messageModel) error {
 	symbolOwners := make(map[string]string)
+	swiftSymbolOwners := make(map[string]string)
 	tableOwners := make(map[string]string)
 	for _, model := range models {
 		if owner, exists := tableOwners[model.TableName]; exists {
@@ -148,6 +154,12 @@ func validateModels(models []messageModel) error {
 				return fmt.Errorf("generated symbol %s collides between %s and %s", symbol, owner, model.TypeName)
 			}
 			symbolOwners[symbol] = model.TypeName
+		}
+		for _, symbol := range []string{model.SwiftTypeName, model.SwiftPropertyName} {
+			if owner, exists := swiftSymbolOwners[symbol]; exists {
+				return fmt.Errorf("generated Swift symbol %s collides between %s and %s", symbol, owner, model.TypeName)
+			}
+			swiftSymbolOwners[symbol] = model.TypeName
 		}
 	}
 	return nil
@@ -226,6 +238,7 @@ func (c modelCollector) buildModel(message *protogen.Message) (messageModel, err
 	signatures := make([]string, 0)
 	fieldsByName := make(map[string]*protogen.Field)
 	projectedByName := make(map[string]bool)
+	swiftProjectedByName := make(map[string]bool)
 
 	for _, field := range message.Fields {
 		fieldsByName[string(field.Desc.Name())] = field
@@ -246,12 +259,20 @@ func (c modelCollector) buildModel(message *protogen.Message) (messageModel, err
 			return messageModel{}, fmt.Errorf("field %s: %w", field.Desc.FullName(), err)
 		}
 
-		projected = append(projected, projection)
-		switch projection.ColumnName {
+		switch strings.ToLower(projection.ColumnName) {
 		case "id", "at_ns", "data":
 			return messageModel{}, fmt.Errorf("field %s projects to reserved column %s", field.Desc.FullName(), projection.ColumnName)
 		}
-		projectedByName[projection.ColumnName] = true
+		normalizedColumnName := strings.ToLower(projection.ColumnName)
+		if projectedByName[normalizedColumnName] {
+			return messageModel{}, fmt.Errorf("field %s projects to duplicate column %s", field.Desc.FullName(), projection.ColumnName)
+		}
+		if swiftProjectedByName[projection.SwiftPropertyName] {
+			return messageModel{}, fmt.Errorf("field %s projects to duplicate Swift property %s", field.Desc.FullName(), projection.SwiftPropertyName)
+		}
+		projected = append(projected, projection)
+		projectedByName[normalizedColumnName] = true
+		swiftProjectedByName[projection.SwiftPropertyName] = true
 		signatures = append(signatures, projection.SchemaSignature)
 	}
 
@@ -261,6 +282,8 @@ func (c modelCollector) buildModel(message *protogen.Message) (messageModel, err
 	}
 	return messageModel{
 		GoName:              message.GoIdent.GoName,
+		SwiftTypeName:       swiftMessageTypeNameForMessage(message),
+		SwiftPropertyName:   swiftFieldName(string(message.Desc.Name())),
 		TableName:           c.tableNameForMessage(message),
 		TypeName:            string(message.Desc.FullName()),
 		TableTypeName:       message.GoIdent.GoName + "Table",
@@ -315,7 +338,7 @@ func (c modelCollector) messageOptionIndexes(message *protogen.Message, fieldsBy
 			if _, ok := fieldsByName[fieldName]; !ok {
 				return nil, fmt.Errorf("index %d references unknown field %q", indexPosition+1, fieldName)
 			}
-			if !projectedByName[fieldName] {
+			if !projectedByName[strings.ToLower(fieldName)] {
 				return nil, fmt.Errorf("index %d field %q must be marked (com.github.fingon.proprdb.external)=true", indexPosition+1, fieldName)
 			}
 			columnSeen[fieldName] = true
@@ -400,14 +423,19 @@ func (c modelCollector) projectedFieldFromProto(field *protogen.Field) (projecte
 	protoFieldName := string(field.Desc.Name())
 	getterName := "Get" + field.GoName
 	signature := fmt.Sprintf("%s:%s", columnName, field.Desc.Kind())
-	isOptional := field.Desc.HasOptionalKeyword()
+	isOptional := field.Desc.HasPresence()
+	legacyOneofPresenceRepair := field.Desc.ContainingOneof() != nil && !field.Desc.HasOptionalKeyword()
+	swiftOneofPropertyName := ""
+	if legacyOneofPresenceRepair {
+		swiftOneofPropertyName = swiftFieldName(string(field.Desc.ContainingOneof().Name()))
+	}
 	if isOptional {
 		signature += projectionOptionalFlag
 	}
 
 	switch field.Desc.Kind() {
 	case protoreflect.BoolKind:
-		return projectedField{columnName, protoFieldName, getterName, "INTEGER", "0", signature, isOptional}, nil
+		return projectedField{columnName, protoFieldName, getterName, "INTEGER", "0", signature, isOptional, legacyOneofPresenceRepair, swiftFieldName(protoFieldName), swiftPresenceName(protoFieldName), swiftOneofPropertyName}, nil
 	case protoreflect.Int32Kind,
 		protoreflect.Sint32Kind,
 		protoreflect.Sfixed32Kind,
@@ -417,15 +445,15 @@ func (c modelCollector) projectedFieldFromProto(field *protogen.Field) (projecte
 		protoreflect.Uint32Kind,
 		protoreflect.Fixed32Kind,
 		protoreflect.EnumKind:
-		return projectedField{columnName, protoFieldName, getterName, "INTEGER", "0", signature, isOptional}, nil
+		return projectedField{columnName, protoFieldName, getterName, "INTEGER", "0", signature, isOptional, legacyOneofPresenceRepair, swiftFieldName(protoFieldName), swiftPresenceName(protoFieldName), swiftOneofPropertyName}, nil
 	case protoreflect.Uint64Kind, protoreflect.Fixed64Kind:
 		return projectedField{}, errors.New("uint64 and fixed64 fields cannot be projected")
 	case protoreflect.FloatKind, protoreflect.DoubleKind:
-		return projectedField{columnName, protoFieldName, getterName, "REAL", "0", signature, isOptional}, nil
+		return projectedField{columnName, protoFieldName, getterName, "REAL", "0", signature, isOptional, legacyOneofPresenceRepair, swiftFieldName(protoFieldName), swiftPresenceName(protoFieldName), swiftOneofPropertyName}, nil
 	case protoreflect.StringKind:
-		return projectedField{columnName, protoFieldName, getterName, "TEXT", "''", signature, isOptional}, nil
+		return projectedField{columnName, protoFieldName, getterName, "TEXT", "''", signature, isOptional, legacyOneofPresenceRepair, swiftFieldName(protoFieldName), swiftPresenceName(protoFieldName), swiftOneofPropertyName}, nil
 	case protoreflect.BytesKind:
-		return projectedField{columnName, protoFieldName, getterName, "BLOB", "X''", signature, isOptional}, nil
+		return projectedField{columnName, protoFieldName, getterName, "BLOB", "X''", signature, isOptional, legacyOneofPresenceRepair, swiftFieldName(protoFieldName), swiftPresenceName(protoFieldName), swiftOneofPropertyName}, nil
 	default:
 		return projectedField{}, fmt.Errorf("unsupported external field kind %s", field.Desc.Kind())
 	}
@@ -515,7 +543,6 @@ func (e generatorEmitter) emitModel(model messageModel) {
 	createTableConst := model.GoName + "CreateTableSQL"
 	insertConst := model.GoName + "InsertSQL"
 	upsertConst := model.GoName + "UpsertSQL"
-	reprojectConst := model.GoName + "ReprojectSQL"
 	indexPrefixConst := model.GoName + "GeneratedIndexPrefix"
 	indexCreateConstPrefix := model.GoName + "CreateIndexSQL"
 
@@ -528,9 +555,6 @@ func (e generatorEmitter) emitModel(model messageModel) {
 	g.P("const ", indexPrefixConst, " = ", strconv.Quote(model.generatedIndexPrefix()))
 	for indexPosition, indexModel := range model.Indexes {
 		g.P("const ", indexCreateConstPrefix, strconv.Itoa(indexPosition+1), " = ", strconv.Quote(model.createIndexSQL(indexModel)))
-	}
-	if len(model.ProjectedFields) > 0 {
-		g.P("const ", reprojectConst, " = ", strconv.Quote(model.reprojectSQL()))
 	}
 	g.P()
 
@@ -554,6 +578,20 @@ func (e generatorEmitter) emitModel(model messageModel) {
 	g.P("\tNewMessage: func() proto.Message { return &", model.GoName, "{} },")
 	g.P("\tInsertSQL: ", insertConst, ",")
 	g.P("\tUpsertSQL: ", upsertConst, ",")
+	g.P("\tCreateTableSQL: ", createTableConst, ",")
+	g.P("\tProjectionSchema: ", schemaConst, ",")
+	g.P("\tGeneratedIndexKey: ", indexPrefixConst, ",")
+	g.P("\tProjectedColumns: []rt.ProjectedColumnDescriptor{")
+	for _, projectedField := range model.ProjectedFields {
+		protoKind := strings.TrimPrefix(strings.TrimSuffix(projectedField.SchemaSignature, projectionOptionalFlag), projectedField.ColumnName+":")
+		g.P("\t\t{Name: ", strconv.Quote(projectedField.ColumnName), ", ProtoKind: ", strconv.Quote(protoKind), ", SQLiteType: ", strconv.Quote(projectedField.SQLiteType), ", DefaultSQL: ", strconv.Quote(projectedField.SQLiteDefault), ", Nullable: ", strconv.FormatBool(projectedField.IsOptional), ", LegacyOneofPresenceRepair: ", strconv.FormatBool(projectedField.LegacyOneofPresenceRepair), "},")
+	}
+	g.P("\t},")
+	g.P("\tGeneratedIndexes: []rt.GeneratedIndexDescriptor{")
+	for indexPosition, indexModel := range model.Indexes {
+		g.P("\t\t{Name: ", strconv.Quote(indexModel.IndexName), ", CreateSQL: ", indexCreateConstPrefix, strconv.Itoa(indexPosition+1), "},")
+	}
+	g.P("\t},")
 	g.P("\tProjectedValues: func(message proto.Message) ([]any, error) {")
 	dataName := "_"
 	if len(model.ProjectedFields) > 0 {
@@ -587,9 +625,6 @@ func (e generatorEmitter) emitModel(model messageModel) {
 		e.emitChangesMethod(model, tableNameConst)
 	}
 	e.emitApplyWithAtNsMethods(model, tableNameConst, typeNameConst, upsertConst)
-	if len(model.ProjectedFields) > 0 {
-		e.emitReprojectMethod(model, tableNameConst, reprojectConst)
-	}
 	e.emitDrainUnknownMethod(model, tableNameConst, typeNameConst)
 }
 
@@ -606,86 +641,19 @@ func (e generatorEmitter) emitInitMethod(model messageModel, tableNameConst, typ
 	g.P("\tif ensureCore {")
 	g.P("\t\tif err := rt.EnsureCoreTables(t.q); err != nil { return err }")
 	g.P("\t}")
-	g.P("\tctx := context.Background()")
-	g.P("\tif _, err := t.q.ExecContext(ctx, ", createTableConst, "); err != nil {")
-	g.P("\t\treturn fmt.Errorf(\"create table %s: %w\", ", tableNameConst, ", err)")
-	g.P("\t}")
-
-	if len(model.ProjectedFields) > 0 {
-		g.P("\tcolumnRows, err := t.q.QueryContext(ctx, `PRAGMA table_info(\"`+", tableNameConst, "+`\")`)")
-		g.P("\tif err != nil {")
-		g.P("\t\treturn fmt.Errorf(\"read columns for %s: %w\", ", tableNameConst, ", err)")
-		g.P("\t}")
-		g.P("\texistingColumns := make(map[string]bool)")
-		g.P("\tfor columnRows.Next() {")
-		g.P("\t\tvar cid int")
-		g.P("\t\tvar name string")
-		g.P("\t\tvar colType string")
-		g.P("\t\tvar notNull int")
-		g.P("\t\tvar defaultValue any")
-		g.P("\t\tvar pk int")
-		g.P("\t\tif err := columnRows.Scan(&cid, &name, &colType, &notNull, &defaultValue, &pk); err != nil {")
-		g.P("\t\t\tif closeErr := rt.CloseRows(columnRows, \"projection metadata\"); closeErr != nil {")
-		g.P("\t\t\t\treturn fmt.Errorf(\"scan pragma row: %w (additionally, %v)\", err, closeErr)")
-		g.P("\t\t\t}")
-		g.P("\t\t\treturn fmt.Errorf(\"scan pragma row: %w\", err)")
-		g.P("\t\t}")
-		g.P("\t\texistingColumns[name] = true")
-		g.P("\t}")
-		g.P("\tif err := columnRows.Err(); err != nil {")
-		g.P("\t\tif closeErr := rt.CloseRows(columnRows, \"projection metadata\"); closeErr != nil {")
-		g.P("\t\t\treturn fmt.Errorf(\"iterate pragma rows: %w (additionally, %v)\", err, closeErr)")
-		g.P("\t\t}")
-		g.P("\t\treturn fmt.Errorf(\"iterate pragma rows: %w\", err)")
-		g.P("\t}")
-		g.P("\tif err := rt.CloseRows(columnRows, \"projection metadata\"); err != nil {")
-		g.P("\t\treturn err")
-		g.P("\t}")
-		for _, projectedField := range model.ProjectedFields {
-			g.P("\tif !existingColumns[", strconv.Quote(projectedField.ColumnName), "] {")
-			g.P("\t\tif _, err := t.q.ExecContext(ctx, `ALTER TABLE \"`+", tableNameConst, "+`\" ADD COLUMN ", projectedField.createColumnSQL(), "`); err != nil {")
-			g.P("\t\t\treturn fmt.Errorf(\"add projection column ", projectedField.ColumnName, " to %s: %w\", ", tableNameConst, ", err)")
-			g.P("\t\t}")
-			g.P("\t}")
-		}
-	}
-
-	g.P("\tif err := rt.EnsureManagedIndexes(t.q, ", tableNameConst, ", ", indexPrefixConst, ", []string{")
-	for indexPosition := range model.Indexes {
-		g.P("\t\t", indexCreateConstPrefix, strconv.Itoa(indexPosition+1), ",")
-	}
-	g.P("\t}, []string{")
-	for _, indexModel := range model.Indexes {
-		g.P("\t\t", strconv.Quote(indexModel.IndexName), ",")
-	}
-	g.P("\t}); err != nil {")
-	g.P("\t\treturn err")
-	g.P("\t}")
-
-	g.P("\tvar currentSchema string")
-	g.P("\tschemaErr := t.q.QueryRowContext(ctx, `SELECT schema_hash FROM _proprdb_schema WHERE table_name = ?`, ", tableNameConst, ").Scan(&currentSchema)")
-	g.P("\tif errors.Is(schemaErr, sql.ErrNoRows) {")
-	g.P("\t\tif _, insertErr := t.q.ExecContext(ctx, `INSERT INTO _proprdb_schema (table_name, schema_hash) VALUES (?, ?)`, ", tableNameConst, ", ", schemaConst, "); insertErr != nil {")
-	g.P("\t\t\treturn fmt.Errorf(\"insert schema hash for %s: %w\", ", tableNameConst, ", insertErr)")
-	g.P("\t\t}")
-	g.P("\t} else if schemaErr != nil {")
-	g.P("\t\treturn fmt.Errorf(\"select schema hash for %s: %w\", ", tableNameConst, ", schemaErr)")
-	g.P("\t} else if currentSchema != ", schemaConst, " {")
-	if len(model.ProjectedFields) > 0 {
-		g.P("\t\tif err := t.reproject(); err != nil {")
-		g.P("\t\t\treturn fmt.Errorf(\"reproject table %s: %w\", ", tableNameConst, ", err)")
-		g.P("\t\t}")
-	}
-	g.P("\t\tif _, err := t.q.ExecContext(ctx, `UPDATE _proprdb_schema SET schema_hash = ? WHERE table_name = ?`, ", schemaConst, ", ", tableNameConst, "); err != nil {")
-	g.P("\t\t\treturn fmt.Errorf(\"update schema hash for %s: %w\", ", tableNameConst, ", err)")
-	g.P("\t\t}")
-	g.P("\t}")
+	g.P("\tif err := rt.AuditObjectIDsContext(context.Background(), t.q, []rt.GeneratedTableBinding{", model.GoName, "GeneratedBinding}); err != nil { return err }")
+	g.P("\tif err := rt.ReconcileGeneratedTableContext(context.Background(), t.q, ", model.GoName, "GeneratedBinding); err != nil { return err }")
 	g.P("\tif err := t.drainUnknownRows(", typeNameConst, "); err != nil {")
 	g.P("\t\treturn fmt.Errorf(\"drain unknown rows for %s: %w\", ", tableNameConst, ", err)")
 	g.P("\t}")
 	g.P("\treturn nil")
 	g.P("}")
 	g.P()
+	_ = tableNameConst
+	_ = schemaConst
+	_ = createTableConst
+	_ = indexPrefixConst
+	_ = indexCreateConstPrefix
 }
 
 func (e generatorEmitter) emitDrainUnknownMethod(model messageModel, _, typeNameConst string) {
@@ -774,7 +742,7 @@ func (e generatorEmitter) emitInsertMethod(model messageModel, _, _ string) {
 	g.P("\tif err != nil {")
 	g.P("\t\treturn ", model.RowTypeName, "{}, fmt.Errorf(\"generate uuidv7: %w\", err)")
 	g.P("\t}")
-	g.P("\tif err := rt.ValidateUUID(id); err != nil {")
+	g.P("\tif err := rt.ValidateUUIDv7(id); err != nil {")
 	g.P("\t\treturn ", model.RowTypeName, "{}, fmt.Errorf(\"validate generated id %s: %w\", id, err)")
 	g.P("\t}")
 	g.P("\treturn t.insertWithID(id, data)")
@@ -804,7 +772,7 @@ func (e generatorEmitter) emitInsertMethod(model messageModel, _, _ string) {
 	g.P("\tif id == \"\" {")
 	g.P("\t\treturn ", model.RowTypeName, "{}, errors.New(\""+errEmptyID+"\")")
 	g.P("\t}")
-	g.P("\tif err := rt.ValidateUUID(id); err != nil {")
+	g.P("\tif err := rt.ValidateUUIDv7(id); err != nil {")
 	g.P("\t\treturn ", model.RowTypeName, "{}, fmt.Errorf(\"validate id %s: %w\", id, err)")
 	g.P("\t}")
 	if model.ValidateWrite {
@@ -828,7 +796,7 @@ func (e generatorEmitter) emitUpdateMethod(model messageModel, _, _ string) {
 	g.P("\tif id == \"\" {")
 	g.P("\t\treturn ", model.RowTypeName, "{}, errors.New(\""+errEmptyID+"\")")
 	g.P("\t}")
-	g.P("\tif err := rt.ValidateUUID(id); err != nil {")
+	g.P("\tif err := rt.ValidateUUIDv7(id); err != nil {")
 	g.P("\t\treturn ", model.RowTypeName, "{}, fmt.Errorf(\"validate id %s: %w\", id, err)")
 	g.P("\t}")
 	g.P("\tif data == nil {")
@@ -927,54 +895,6 @@ func (e generatorEmitter) emitApplyWithAtNsMethods(model messageModel, _, typeNa
 	g.P("\treturn t.q.WithTransaction(context.Background(), func(tx rt.DBTX) error {")
 	g.P("\t\treturn rt.ApplyIncomingObjectContext(context.Background(), tx, ", model.GoName, "GeneratedBinding, rt.JSONLRecord{ID: id, Deleted: true, AtNs: atNs, Data: dataJSON})")
 	g.P("\t})")
-	g.P("}")
-	g.P()
-}
-
-func (e generatorEmitter) emitReprojectMethod(model messageModel, tableNameConst, reprojectConst string) {
-	g := e.g
-	g.P("func (t *", model.TableTypeName, ") reproject() error {")
-	g.P("\tctx := context.Background()")
-	g.P("\trows, err := t.q.QueryContext(ctx, `SELECT id, data FROM \"`+", tableNameConst, "+`\"`)")
-	g.P("\tif err != nil {")
-	g.P("\t\treturn fmt.Errorf(\"query rows for reprojection: %w\", err)")
-	g.P("\t}")
-	g.P("\ttype reprojectRow struct {")
-	g.P("\t\tid string")
-	g.P("\t\tdataBytes []byte")
-	g.P("\t}")
-	g.P("\trowBuffer := make([]reprojectRow, 0)")
-	g.P("\tfor rows.Next() {")
-	g.P("\t\tvar id string")
-	g.P("\t\tvar dataBytes []byte")
-	g.P("\t\tif err := rows.Scan(&id, &dataBytes); err != nil {")
-	g.P("\t\t\treturn fmt.Errorf(\"scan reprojection row: %w\", err)")
-	g.P("\t\t}")
-	g.P("\t\tcopiedData := make([]byte, len(dataBytes))")
-	g.P("\t\tcopy(copiedData, dataBytes)")
-	g.P("\t\trowBuffer = append(rowBuffer, reprojectRow{id: id, dataBytes: copiedData})")
-	g.P("\t}")
-	g.P("\tif err := rows.Err(); err != nil {")
-	g.P("\t\treturn fmt.Errorf(\"iterate reprojection rows: %w\", err)")
-	g.P("\t}")
-	g.P("\tif err := rows.Close(); err != nil {")
-	g.P("\t\treturn fmt.Errorf(\"close reprojection rows: %w\", err)")
-	g.P("\t}")
-	g.P("\tfor _, row := range rowBuffer {")
-	g.P("\t\tdata := &", model.GoName, "{}")
-	g.P("\t\tif err := proto.Unmarshal(row.dataBytes, data); err != nil {")
-	g.P("\t\t\treturn fmt.Errorf(\"unmarshal reprojection row: %w\", err)")
-	g.P("\t\t}")
-	g.P("\t\treprojectArgs := []any{}")
-	for _, projectedField := range model.ProjectedFields {
-		e.emitProjectedFieldAppend("reprojectArgs", "data", projectedField, "\t\t")
-	}
-	g.P("\t\treprojectArgs = append(reprojectArgs, row.id)")
-	g.P("\t\tif _, err := t.q.ExecContext(ctx, ", reprojectConst, ", reprojectArgs...); err != nil {")
-	g.P("\t\t\treturn fmt.Errorf(\"reproject row %s: %w\", row.id, err)")
-	g.P("\t\t}")
-	g.P("\t}")
-	g.P("\treturn nil")
 	g.P("}")
 	g.P()
 }
@@ -1389,19 +1309,6 @@ func (m messageModel) insertSQL(upsert bool) string {
 	}
 
 	return statement + " ON CONFLICT(id) DO UPDATE SET " + strings.Join(updates, ", ")
-}
-
-func (m messageModel) reprojectSQL() string {
-	updates := make([]string, 0, len(m.ProjectedFields))
-	for _, projectedField := range m.ProjectedFields {
-		updates = append(updates, fmt.Sprintf(`"%s" = ?`, projectedField.ColumnName))
-	}
-
-	return fmt.Sprintf(
-		`UPDATE "%s" SET %s WHERE id = ?`,
-		m.TableName,
-		strings.Join(updates, ", "),
-	)
 }
 
 func (m messageModel) generatedIndexPrefix() string {

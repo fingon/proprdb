@@ -26,6 +26,7 @@ of mine don't roll that way.
 Prerequisites:
 
 - Go `1.25+`
+- SQLite `3.35+` for projection removal
 
 Commands:
 

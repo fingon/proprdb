@@ -1,5 +1,6 @@
 @testable import GeneratedSystem
 import ProprDBSwiftRuntime
+import SwiftProtobuf
 import XCTest
 
 private let countTombstoneByIDSQL = "SELECT COUNT(*) FROM _deleted WHERE table_name = ? AND id = ?"
@@ -8,6 +9,31 @@ private let personNameAgeIndex = "idx_generatedtest_example_person__name_age"
 private let personStaleIndex = "idx_generatedtest_example_person__stale"
 
 final class GeneratedCRUDTests: XCTestCase {
+    func testRepairsLegacyOneofProjectionPresence() throws {
+        let db = try SQLiteDatabase(path: ":memory:")
+        try ensureCoreTables(db)
+        try db.execute("CREATE TABLE \(quoteSQLiteIdentifier(ChoiceTableName)) (id TEXT PRIMARY KEY, at_ns INTEGER NOT NULL, data BLOB NOT NULL, label TEXT NOT NULL DEFAULT '')")
+        try db.execute("INSERT INTO _proprdb_schema (table_name, schema_hash) VALUES (?, ?)", arguments: [ChoiceTableName, "label:string"])
+        var choice = Generatedtest_Example_Choice()
+        choice.count = 7
+        let id = "018f4f3f-6f9f-7a1b-8f55-1234567890ad"
+        try db.execute(
+            "INSERT INTO \(quoteSQLiteIdentifier(ChoiceTableName)) (id, at_ns, data, label) VALUES (?, ?, ?, ?)",
+            arguments: [id, Int64(1), try choice.serializedData(), ""]
+        )
+
+        try ChoiceTable(db).initialize()
+
+        XCTAssertEqual(
+            try scalarInt(db, sql: "SELECT \"notnull\" FROM pragma_table_info(?) WHERE name = ?", arguments: [ChoiceTableName, "label"]),
+            0
+        )
+        let label = try db.withRows("SELECT label FROM \(quoteSQLiteIdentifier(ChoiceTableName)) WHERE id = ?", arguments: [id]) { rows in
+            try rows.next()?.optionalString(at: 0)
+        }
+        XCTAssertNil(label)
+    }
+
     func testGeneratedCRUD() throws {
         let db = try SQLiteDatabase(path: ":memory:")
         let crud = CRUD(db)
@@ -27,6 +53,15 @@ final class GeneratedCRUDTests: XCTestCase {
 
         try crud.person.initialize()
         XCTAssertFalse(try tableIndexNamesByName(db: db, tableName: PersonTableName).contains(personStaleIndex))
+
+        try db.execute("ALTER TABLE \(quoteSQLiteIdentifier(PersonTableName)) ADD COLUMN obsolete TEXT")
+        try crud.person.initialize()
+        let obsoleteColumnCount = try scalarInt(
+            db,
+            sql: "SELECT COUNT(*) FROM pragma_table_info(?) WHERE name = ?",
+            arguments: [PersonTableName, "obsolete"]
+        )
+        XCTAssertEqual(obsoleteColumnCount, 0)
 
         let hiddenTableCount = try scalarInt(db, sql: "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?", arguments: ["generatedtest_example_hidden"])
         XCTAssertEqual(hiddenTableCount, 0)
@@ -88,6 +123,7 @@ final class GeneratedCRUDTests: XCTestCase {
             [
                 GeneratedTableDescriptor(tableName: PersonTableName, typeName: PersonTypeName, isCore: false, syncEnabled: true, changeListenersEnabled: true, queryStatisticsEnabled: true),
                 GeneratedTableDescriptor(tableName: NoteTableName, typeName: NoteTypeName, isCore: false, syncEnabled: false, changeListenersEnabled: true),
+                GeneratedTableDescriptor(tableName: ChoiceTableName, typeName: ChoiceTypeName, isCore: false, syncEnabled: true),
                 GeneratedTableDescriptor(tableName: coreTableDeletedName, typeName: "", isCore: true, syncEnabled: false),
                 GeneratedTableDescriptor(tableName: coreTableSyncName, typeName: "", isCore: true, syncEnabled: false),
                 GeneratedTableDescriptor(tableName: coreTableSchemaStateName, typeName: "", isCore: true, syncEnabled: false),

@@ -36,7 +36,7 @@ append-only history.
 
 Each object update has:
 
-- `id`: unique object identifier which is valid and unique within the type UUID
+- `id`: canonical lowercase RFC 9562 UUIDv7, unique within the protobuf type
   (`string`)
 - `deleted`: whether the object is deleted (optional, `bool`)
 - `atNs`: last update time as Unix epoch nanoseconds (`int64`)
@@ -45,13 +45,13 @@ Each object update has:
 Example JSONL line:
 
 ```json
-{"id":"person:123","atNs":1761736535123456789,"data":{"@type":"type.googleapis.com/github.com.fingon.proprdb.v1.example.Person","name":"Ada"}}
+{"id":"018f4f3f-6f9f-7a1b-8f55-1234567890ab","atNs":1761736535123456789,"data":{"@type":"type.googleapis.com/github.com.fingon.proprdb.v1.example.Person","name":"Ada"}}
 ```
 
 Deletion marker example:
 
 ```json
-{"id":"person:123","deleted":true,"atNs":1761736599000000000,"data":{"@type":"type.googleapis.com/github.com.fingon.proprdb.v1.example.Person"}}
+{"id":"018f4f3f-6f9f-7a1b-8f55-1234567890ab","deleted":true,"atNs":1761736599000000000,"data":{"@type":"type.googleapis.com/github.com.fingon.proprdb.v1.example.Person"}}
 ```
 
 ## Local storage (SQLite backend)

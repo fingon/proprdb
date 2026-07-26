@@ -118,6 +118,88 @@ func (x *Note) GetText() string {
 	return ""
 }
 
+type Choice struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Types that are valid to be assigned to Selection:
+	//
+	//	*Choice_Label
+	//	*Choice_Count
+	Selection     isChoice_Selection `protobuf_oneof:"selection"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *Choice) Reset() {
+	*x = Choice{}
+	mi := &file_system_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Choice) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Choice) ProtoMessage() {}
+
+func (x *Choice) ProtoReflect() protoreflect.Message {
+	mi := &file_system_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Choice.ProtoReflect.Descriptor instead.
+func (*Choice) Descriptor() ([]byte, []int) {
+	return file_system_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *Choice) GetSelection() isChoice_Selection {
+	if x != nil {
+		return x.Selection
+	}
+	return nil
+}
+
+func (x *Choice) GetLabel() string {
+	if x != nil {
+		if x, ok := x.Selection.(*Choice_Label); ok {
+			return x.Label
+		}
+	}
+	return ""
+}
+
+func (x *Choice) GetCount() int64 {
+	if x != nil {
+		if x, ok := x.Selection.(*Choice_Count); ok {
+			return x.Count
+		}
+	}
+	return 0
+}
+
+type isChoice_Selection interface {
+	isChoice_Selection()
+}
+
+type Choice_Label struct {
+	Label string `protobuf:"bytes,1,opt,name=label,proto3,oneof"`
+}
+
+type Choice_Count struct {
+	Count int64 `protobuf:"varint,2,opt,name=count,proto3,oneof"`
+}
+
+func (*Choice_Label) isChoice_Selection() {}
+
+func (*Choice_Count) isChoice_Selection() {}
+
 type Hidden struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Text          string                 `protobuf:"bytes,1,opt,name=text,proto3" json:"text,omitempty"`
@@ -127,7 +209,7 @@ type Hidden struct {
 
 func (x *Hidden) Reset() {
 	*x = Hidden{}
-	mi := &file_system_proto_msgTypes[2]
+	mi := &file_system_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -139,7 +221,7 @@ func (x *Hidden) String() string {
 func (*Hidden) ProtoMessage() {}
 
 func (x *Hidden) ProtoReflect() protoreflect.Message {
-	mi := &file_system_proto_msgTypes[2]
+	mi := &file_system_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -152,7 +234,7 @@ func (x *Hidden) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Hidden.ProtoReflect.Descriptor instead.
 func (*Hidden) Descriptor() ([]byte, []int) {
-	return file_system_proto_rawDescGZIP(), []int{2}
+	return file_system_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *Hidden) GetText() string {
@@ -174,7 +256,11 @@ const file_system_proto_rawDesc = "" +
 	"\x04name\n" +
 	"\x03age\xb8\xb5\x18\x01\xc0\xb5\x18\x01\"*\n" +
 	"\x04Note\x12\x18\n" +
-	"\x04text\x18\x01 \x01(\tB\x04\x88\xb5\x18\x01R\x04text:\b\x98\xb5\x18\x01\xb8\xb5\x18\x01\"(\n" +
+	"\x04text\x18\x01 \x01(\tB\x04\x88\xb5\x18\x01R\x04text:\b\x98\xb5\x18\x01\xb8\xb5\x18\x01\"K\n" +
+	"\x06Choice\x12\x1c\n" +
+	"\x05label\x18\x01 \x01(\tB\x04\x88\xb5\x18\x01H\x00R\x05label\x12\x16\n" +
+	"\x05count\x18\x02 \x01(\x03H\x00R\x05countB\v\n" +
+	"\tselection\"(\n" +
 	"\x06Hidden\x12\x18\n" +
 	"\x04text\x18\x01 \x01(\tB\x04\x88\xb5\x18\x01R\x04text:\x04\x90\xb5\x18\x01B\x1eZ\x1cgeneratedtest/gen;genexampleb\x06proto3"
 
@@ -190,11 +276,12 @@ func file_system_proto_rawDescGZIP() []byte {
 	return file_system_proto_rawDescData
 }
 
-var file_system_proto_msgTypes = make([]protoimpl.MessageInfo, 3)
+var file_system_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
 var file_system_proto_goTypes = []any{
 	(*Person)(nil), // 0: generatedtest.example.Person
 	(*Note)(nil),   // 1: generatedtest.example.Note
-	(*Hidden)(nil), // 2: generatedtest.example.Hidden
+	(*Choice)(nil), // 2: generatedtest.example.Choice
+	(*Hidden)(nil), // 3: generatedtest.example.Hidden
 }
 var file_system_proto_depIdxs = []int32{
 	0, // [0:0] is the sub-list for method output_type
@@ -209,13 +296,17 @@ func file_system_proto_init() {
 	if File_system_proto != nil {
 		return
 	}
+	file_system_proto_msgTypes[2].OneofWrappers = []any{
+		(*Choice_Label)(nil),
+		(*Choice_Count)(nil),
+	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_system_proto_rawDesc), len(file_system_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   3,
+			NumMessages:   4,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

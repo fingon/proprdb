@@ -154,6 +154,54 @@ message Person {
 	assert.Check(t, strings.Contains(generatedText, `values.append(.null)`))
 }
 
+func TestProtocSwiftPluginUsesSwiftProtobufNames(t *testing.T) {
+	t.Helper()
+
+	if _, err := exec.LookPath("protoc"); err != nil {
+		t.Skipf("protoc not available: %v", err)
+	}
+	_, currentFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("determine current file path")
+	}
+	repoRoot := filepath.Dir(filepath.Dir(currentFile))
+	tempDir := t.TempDir()
+	pluginPath := filepath.Join(tempDir, "protoc-gen-proprdb-swift")
+	generatedDir := filepath.Join(tempDir, "gen")
+	assert.NilError(t, os.MkdirAll(generatedDir, 0o755))
+	runCommand(t, repoRoot, nil, "go", "build", "-o", pluginPath, "./cmd/protoc-gen-proprdb-swift")
+
+	protoPath := filepath.Join(tempDir, "names.proto")
+	protoContent := `syntax = "proto3";
+package generated_test.names;
+import "proto/proprdb/options.proto";
+option go_package = "generatedtest/names;names";
+option swift_prefix = "ACME";
+message Outer {
+  message Inner {
+    string description = 1 [(com.github.fingon.proprdb.external) = true];
+  }
+}`
+	assert.NilError(t, os.WriteFile(protoPath, []byte(protoContent), 0o644))
+	runCommand(
+		t,
+		tempDir,
+		nil,
+		"protoc",
+		"-I", tempDir,
+		"-I", repoRoot,
+		"--plugin=protoc-gen-proprdb-swift="+pluginPath,
+		"--proprdb-swift_out=paths=source_relative:"+generatedDir,
+		protoPath,
+	)
+
+	generatedContent, err := os.ReadFile(filepath.Join(generatedDir, "names.proprdb.pb.swift"))
+	assert.NilError(t, err)
+	generatedText := string(generatedContent)
+	assert.Check(t, strings.Contains(generatedText, `messageType: ACMEOuter.Inner.self`))
+	assert.Check(t, strings.Contains(generatedText, `sqliteBindValue(data.description_p)`))
+}
+
 func TestProtocSwiftPluginSupportsPublicSynchronousAPI(t *testing.T) {
 	t.Helper()
 

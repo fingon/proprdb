@@ -201,6 +201,11 @@ public struct GeneratedTableBinding: @unchecked Sendable {
     public let messageType: any Message.Type
     public let insertSQL: String
     public let upsertSQL: String
+    public let createTableSQL: String
+    public let projectionSchema: String
+    public let projectedColumns: [ProjectedColumnDescriptor]
+    public let generatedIndexes: [GeneratedIndexDescriptor]
+    public let generatedIndexPrefix: String
     public let decodeAnyJSON: @Sendable (Data) throws -> any Message
     public let decodeBinary: @Sendable (Data) throws -> any Message
     public let encodeAnyJSON: @Sendable (any Message) throws -> Data
@@ -212,6 +217,11 @@ public struct GeneratedTableBinding: @unchecked Sendable {
         messageType: any Message.Type,
         insertSQL: String,
         upsertSQL: String,
+        createTableSQL: String,
+        projectionSchema: String,
+        projectedColumns: [ProjectedColumnDescriptor],
+        generatedIndexes: [GeneratedIndexDescriptor],
+        generatedIndexPrefix: String,
         decodeAnyJSON: @escaping @Sendable (Data) throws -> any Message,
         decodeBinary: @escaping @Sendable (Data) throws -> any Message,
         encodeAnyJSON: @escaping @Sendable (any Message) throws -> Data,
@@ -222,11 +232,44 @@ public struct GeneratedTableBinding: @unchecked Sendable {
         self.messageType = messageType
         self.insertSQL = insertSQL
         self.upsertSQL = upsertSQL
+        self.createTableSQL = createTableSQL
+        self.projectionSchema = projectionSchema
+        self.projectedColumns = projectedColumns
+        self.generatedIndexes = generatedIndexes
+        self.generatedIndexPrefix = generatedIndexPrefix
         self.decodeAnyJSON = decodeAnyJSON
         self.decodeBinary = decodeBinary
         self.encodeAnyJSON = encodeAnyJSON
         self.messagesEqual = messagesEqual
         self.projectedValues = projectedValues
+    }
+}
+
+public struct ProjectedColumnDescriptor: Sendable {
+    public let name: String
+    public let protoKind: String
+    public let sqliteType: String
+    public let defaultSQL: String
+    public let nullable: Bool
+    public let legacyOneofPresenceRepair: Bool
+
+    public init(name: String, protoKind: String, sqliteType: String, defaultSQL: String, nullable: Bool, legacyOneofPresenceRepair: Bool) {
+        self.name = name
+        self.protoKind = protoKind
+        self.sqliteType = sqliteType
+        self.defaultSQL = defaultSQL
+        self.nullable = nullable
+        self.legacyOneofPresenceRepair = legacyOneofPresenceRepair
+    }
+}
+
+public struct GeneratedIndexDescriptor: Sendable {
+    public let name: String
+    public let createSQL: String
+
+    public init(name: String, createSQL: String) {
+        self.name = name
+        self.createSQL = createSQL
     }
 }
 
@@ -652,6 +695,17 @@ public struct SQLiteRow {
         return value
     }
 
+    public func optionalString(at column: Int32) throws -> String? {
+        switch try value(at: column) {
+        case .null:
+            return nil
+        case let .text(value):
+            return value
+        default:
+            throw ProprDBError("expected nullable text at column \(column)")
+        }
+    }
+
     public func int64(at column: Int32) throws -> Int64 {
         guard case let .integer(value) = try value(at: column) else {
             throw ProprDBError("expected integer at column \(column)")
@@ -911,6 +965,190 @@ public func ensureManagedIndexes(_ q: any DBTX, tableName: String, generatedInde
     }
 }
 
+private struct GeneratedTableColumn {
+    let name: String
+    let sqliteType: String
+    let notNull: Bool
+    let defaultSQL: String?
+}
+
+public func reconcileGeneratedTable(_ q: any DBTX, binding: GeneratedTableBinding) throws {
+    try q.withTransaction { transaction in
+        try transaction.execute(binding.createTableSQL)
+        let columns = try transaction.withRows("PRAGMA table_info(\(quoteSQLiteIdentifier(binding.descriptor.tableName)))") { rows in
+            var result: [GeneratedTableColumn] = []
+            while let row = try rows.next() {
+                result.append(GeneratedTableColumn(
+                    name: try row.string(at: 1),
+                    sqliteType: try row.string(at: 2),
+                    notNull: try row.int64(at: 3) != 0,
+                    defaultSQL: try row.optionalString(at: 4)
+                ))
+            }
+            return result
+        }
+        let columnsByName = Dictionary(uniqueKeysWithValues: columns.map { ($0.name, $0) })
+        var expectedNames: Set<String> = ["id", "at_ns", "data"]
+        var repairNames: Set<String> = []
+        for projected in binding.projectedColumns {
+            expectedNames.insert(projected.name)
+            guard let column = columnsByName[projected.name] else {
+                continue
+            }
+            guard column.sqliteType.caseInsensitiveCompare(projected.sqliteType) == .orderedSame else {
+                throw ProprDBError("projection column \(binding.descriptor.tableName).\(projected.name) has SQLite type \(column.sqliteType), expected \(projected.sqliteType)")
+            }
+            let actualNullable = !column.notNull
+            if actualNullable != projected.nullable {
+                if projected.nullable, projected.legacyOneofPresenceRepair, !actualNullable {
+                    repairNames.insert(projected.name)
+                } else {
+                    throw ProprDBError("projection column \(binding.descriptor.tableName).\(projected.name) nullable=\(actualNullable), expected \(projected.nullable)")
+                }
+            }
+            if !projected.nullable, normalizeSQLiteDefault(column.defaultSQL) != normalizeSQLiteDefault(projected.defaultSQL) {
+                throw ProprDBError("projection column \(binding.descriptor.tableName).\(projected.name) has default \(column.defaultSQL ?? "NULL"), expected \(projected.defaultSQL)")
+            }
+        }
+        let currentSchema = try transaction.withRows("SELECT schema_hash FROM \(_proprdbSchemaTableName) WHERE table_name = ?", arguments: [binding.descriptor.tableName]) { rows in
+            try rows.next()?.string(at: 0)
+        }
+        if let currentSchema {
+            try validateProjectionEvolution(tableName: binding.descriptor.tableName, previousSchema: currentSchema, columns: binding.projectedColumns)
+        }
+        try ensureManagedIndexes(transaction, tableName: binding.descriptor.tableName, generatedIndexPrefix: binding.generatedIndexPrefix, createIndexSQL: [], desiredIndexNames: [])
+        let columnsToDrop = columns.filter { !expectedNames.contains($0.name) || repairNames.contains($0.name) }
+        if !columnsToDrop.isEmpty {
+            try requireDropColumnSQLite(transaction)
+        }
+        var changed = false
+        for column in columnsToDrop {
+            do {
+                try transaction.execute("ALTER TABLE \(quoteSQLiteIdentifier(binding.descriptor.tableName)) DROP COLUMN \(quoteSQLiteIdentifier(column.name))")
+            } catch {
+                throw ProprDBError("drop projection column \(binding.descriptor.tableName).\(column.name): \(error)")
+            }
+            changed = true
+        }
+        for projected in binding.projectedColumns where columnsByName[projected.name] == nil || repairNames.contains(projected.name) {
+            try transaction.execute("ALTER TABLE \(quoteSQLiteIdentifier(binding.descriptor.tableName)) ADD COLUMN \(projectedColumnSQL(projected))")
+            changed = true
+        }
+        if changed || currentSchema != binding.projectionSchema {
+            try reprojectGeneratedTable(transaction, binding: binding)
+        }
+        try ensureManagedIndexes(
+            transaction,
+            tableName: binding.descriptor.tableName,
+            generatedIndexPrefix: binding.generatedIndexPrefix,
+            createIndexSQL: binding.generatedIndexes.map(\.createSQL),
+            desiredIndexNames: binding.generatedIndexes.map(\.name)
+        )
+        try transaction.execute(
+            "INSERT INTO \(_proprdbSchemaTableName) (table_name, schema_hash) VALUES (?, ?) ON CONFLICT(table_name) DO UPDATE SET schema_hash = excluded.schema_hash",
+            arguments: [binding.descriptor.tableName, binding.projectionSchema]
+        )
+    }
+}
+
+public func auditObjectIDs(_ q: any DBTX, bindings: [GeneratedTableBinding]) throws {
+    var targets = [
+        _deletedTableName: "id",
+        _syncTableName: "object_id",
+        _unknownTypesTableName: "id",
+        _unknownSyncTableName: "id",
+        _exportBatchEntriesTableName: "object_id",
+    ]
+    for binding in bindings {
+        targets[binding.descriptor.tableName] = "id"
+    }
+    for (tableName, columnName) in targets {
+        let exists = try q.withRows("SELECT COUNT(*) FROM sqlite_schema WHERE type = 'table' AND name = ?", arguments: [tableName]) { rows in
+            try rows.next()?.int64(at: 0) ?? 0
+        }
+        guard exists > 0 else {
+            continue
+        }
+        try q.withRows("SELECT \(quoteSQLiteIdentifier(columnName)) FROM \(quoteSQLiteIdentifier(tableName))") { rows in
+            while let row = try rows.next() {
+                let id = try row.string(at: 0)
+                do {
+                    try validateUUIDV7(id)
+                } catch {
+                    throw ProprDBError("invalid stored object ID table=\(tableName) id=\(id): \(error)")
+                }
+            }
+        }
+    }
+}
+
+private func projectedColumnSQL(_ column: ProjectedColumnDescriptor) -> String {
+    let statement = "\(quoteSQLiteIdentifier(column.name)) \(column.sqliteType)"
+    return column.nullable ? statement : "\(statement) NOT NULL DEFAULT \(column.defaultSQL)"
+}
+
+private func normalizeSQLiteDefault(_ value: String?) -> String {
+    value?.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() ?? ""
+}
+
+private func validateProjectionEvolution(tableName: String, previousSchema: String, columns: [ProjectedColumnDescriptor]) throws {
+    var previous: [String: (kind: String, nullable: Bool)] = [:]
+    for entry in previousSchema.split(separator: ";") {
+        let parts = entry.split(separator: ":", omittingEmptySubsequences: false).map(String.init)
+        guard parts.count >= 2 else {
+            continue
+        }
+        previous[parts[0]] = (parts[1], parts.count == 3 && parts[2] == "optional")
+    }
+    for column in columns {
+        guard let old = previous[column.name] else {
+            continue
+        }
+        guard old.kind == column.protoKind else {
+            throw ProprDBError("projection column \(tableName).\(column.name) changed protobuf kind from \(old.kind) to \(column.protoKind)")
+        }
+        if old.nullable != column.nullable,
+           !(column.legacyOneofPresenceRepair && !old.nullable && column.nullable)
+        {
+            throw ProprDBError("projection column \(tableName).\(column.name) changed presence semantics")
+        }
+    }
+}
+
+private func requireDropColumnSQLite(_ q: any DBTX) throws {
+    let version = try q.withRows("SELECT sqlite_version()") { rows in
+        guard let row = try rows.next() else {
+            throw ProprDBError("read SQLite version")
+        }
+        return try row.string(at: 0)
+    }
+    let components = version.split(separator: ".").compactMap { Int($0) }
+    guard components.count >= 2, components[0] > 3 || (components[0] == 3 && components[1] >= 35) else {
+        throw ProprDBError("projection removal requires SQLite 3.35 or newer, found \(version)")
+    }
+}
+
+private func reprojectGeneratedTable(_ q: any DBTX, binding: GeneratedTableBinding) throws {
+    guard !binding.projectedColumns.isEmpty else {
+        return
+    }
+    let bufferedRows = try q.withRows("SELECT id, data FROM \(quoteSQLiteIdentifier(binding.descriptor.tableName))") { rows in
+        var result: [(String, Data)] = []
+        while let row = try rows.next() {
+            result.append((try row.string(at: 0), try row.data(at: 1)))
+        }
+        return result
+    }
+    let assignments = binding.projectedColumns.map { "\(quoteSQLiteIdentifier($0.name)) = ?" }.joined(separator: ", ")
+    let updateSQL = "UPDATE \(quoteSQLiteIdentifier(binding.descriptor.tableName)) SET \(assignments) WHERE id = ?"
+    for (id, bytes) in bufferedRows {
+        let message = try binding.decodeBinary(bytes)
+        var arguments = try binding.projectedValues(message).map(\.sqliteValue)
+        arguments.append(id)
+        try q.execute(updateSQL, arguments: arguments)
+    }
+}
+
 public func nowNs() -> Int64 {
     Int64(Date().timeIntervalSince1970 * 1_000_000_000)
 }
@@ -936,20 +1174,34 @@ public func uuidV7() throws -> String {
                   bytes[8], bytes[9], bytes[10], bytes[11], bytes[12], bytes[13], bytes[14], bytes[15])
 }
 
+public func validateUUIDV7(_ id: String) throws {
+    let characters = Array(id)
+    guard characters.count == 36 else {
+        throw ProprDBError("invalid uuidv7 \(id): expected 36 characters")
+    }
+    let hyphenIndexes = Set([8, 13, 18, 23])
+    let hexadecimal = CharacterSet(charactersIn: "0123456789abcdef")
+    for (index, character) in characters.enumerated() {
+        if hyphenIndexes.contains(index) {
+            guard character == "-" else {
+                throw ProprDBError("invalid uuidv7 \(id): expected hyphen at character \(index + 1)")
+            }
+        } else {
+            guard character.unicodeScalars.allSatisfy(hexadecimal.contains) else {
+                throw ProprDBError("invalid uuidv7 \(id): expected canonical lowercase hexadecimal")
+            }
+        }
+    }
+    guard characters[14] == "7" else {
+        throw ProprDBError("invalid uuidv7 \(id): version is not 7")
+    }
+    guard "89ab".contains(characters[19]) else {
+        throw ProprDBError("invalid uuidv7 \(id): invalid RFC variant")
+    }
+}
+
 public func validateUUID(_ id: String) throws {
-    let parts = id.split(separator: "-", omittingEmptySubsequences: false)
-    let expectedLengths = [8, 4, 4, 4, 12]
-    guard parts.count == expectedLengths.count else {
-        throw ProprDBError("invalid uuid \(id): expected 5 parts")
-    }
-    for (index, part) in parts.enumerated() {
-        guard part.count == expectedLengths[index] else {
-            throw ProprDBError("invalid uuid \(id): unexpected length for part \(index + 1)")
-        }
-        guard part.unicodeScalars.allSatisfy({ CharacterSet(charactersIn: "0123456789abcdefABCDEF").contains($0) }) else {
-            throw ProprDBError("invalid uuid \(id): invalid hexadecimal content")
-        }
-    }
+    try validateUUIDV7(id)
 }
 
 public func typeURL(_ typeName: String) -> String {
@@ -1020,13 +1272,23 @@ public func readJSONL(text: String, visit: (JSONLRecord, Int) throws -> Void) th
         guard let id = object["id"] as? String else {
             throw ProprDBError("decode jsonl line \(lineNumber): missing id")
         }
-        let deleted = object["deleted"] as? Bool ?? false
+        let deleted: Bool
+        if let deletedValue = object["deleted"] {
+            guard CFGetTypeID(deletedValue as CFTypeRef) == CFBooleanGetTypeID() else {
+                throw ProprDBError("decode jsonl line \(lineNumber): deleted must be a boolean")
+            }
+            deleted = (deletedValue as! NSNumber).boolValue
+        } else {
+            deleted = false
+        }
         let atNsValue = object["atNs"]
         let atNs = try decodeInt64(atNsValue, fieldName: "atNs", lineNumber: lineNumber)
-        guard let dataObject = object["data"] else {
-            throw ProprDBError("decode jsonl line \(lineNumber): missing data")
+        guard let dataObject = object["data"] as? [String: Any] else {
+            throw ProprDBError("decode jsonl line \(lineNumber): data must be an object")
         }
         let dataJSON = try JSONSerialization.data(withJSONObject: dataObject, options: [.sortedKeys])
+        _ = try typeNameFromAnyJSON(dataJSON)
+        try validateUUIDV7(id)
         try visit(JSONLRecord(id: id, deleted: deleted, atNs: atNs, data: dataJSON), lineNumber)
     }
 }
@@ -1047,6 +1309,7 @@ public func unknownInsert(_ q: any DBTX, typeName: String, record: JSONLRecord) 
     guard !typeName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
         throw ProprDBError("empty type name")
     }
+    try validateUUIDV7(record.id)
     let canonicalData = try JSONSerialization.data(withJSONObject: jsonObject(from: record.data), options: [.sortedKeys])
     let dataJSON = String(decoding: canonicalData, as: UTF8.self)
     let existing = try q.withRows("SELECT at_ns, deleted, data_json FROM \(_unknownTypesTableName) WHERE type_name = ? AND id = ?", arguments: [typeName, record.id]) { rows -> (Int64, Bool, String)? in
@@ -1168,7 +1431,8 @@ public func writeLocalObject(
     message: any Message,
     insert: Bool
 ) throws -> Int64 {
-    try q.withTransaction { transaction in
+    try validateUUIDV7(id)
+    return try q.withTransaction { transaction in
         let atNs = try nextObjectAtNs(transaction, tableName: binding.descriptor.tableName, objectID: id)
         let arguments = try bindingArguments(binding, id: id, atNs: atNs, message: message)
         try transaction.execute("DELETE FROM \(_deletedTableName) WHERE table_name = ? AND id = ?", arguments: [binding.descriptor.tableName, id])
@@ -1179,6 +1443,7 @@ public func writeLocalObject(
 }
 
 public func deleteLocalObject(_ q: any DBTX, binding: GeneratedTableBinding, id: String) throws {
+    try validateUUIDV7(id)
     try q.withTransaction { transaction in
         let atNs = try nextObjectAtNs(transaction, tableName: binding.descriptor.tableName, objectID: id)
         try applyBoundDeletion(transaction, binding: binding, id: id, atNs: atNs)
@@ -1191,6 +1456,7 @@ private func decodedBindingMessage(_ binding: GeneratedTableBinding, data: Data)
 }
 
 public func applyIncomingObject(_ q: any DBTX, binding: GeneratedTableBinding, record: JSONLRecord) throws {
+    try validateUUIDV7(record.id)
     let localAtNs = try localMaxAtNs(q, tableName: binding.descriptor.tableName, objectID: record.id)
     if record.atNs < localAtNs {
         return
@@ -1302,6 +1568,7 @@ private func databaseID(_ q: any DBTX) throws -> String {
 
 public func prepareBoundJSONL(_ q: any DBTX, bindings: [GeneratedTableBinding], remote: String) throws -> PreparedJSONLExport {
     try ensureCoreTables(q)
+    let knownTypeNames = Set(bindings.map(\.descriptor.typeName))
     let checkpoint = try q.withTransaction { transaction in
         let checkpoint = JSONLCheckpoint(version: 1, databaseId: try databaseID(transaction), batchId: try uuidV7())
         try transaction.execute("INSERT INTO \(_exportBatchesTableName) (batch_id, database_id, remote, complete) VALUES (?, ?, ?, 0)", arguments: [checkpoint.batchId, checkpoint.databaseId, remote])
@@ -1353,6 +1620,9 @@ public func prepareBoundJSONL(_ q: any DBTX, bindings: [GeneratedTableBinding], 
             return result
         }
         for (typeName, record) in unknownRows {
+            if knownTypeNames.contains(typeName) {
+                continue
+            }
             if try remote.isEmpty || unknownSyncNeedsSend(transaction, typeName: typeName, record: record, remote: remote) {
                 try stageJSONLRecord(transaction, checkpoint: checkpoint, sequence: sequence, tableName: "@unknown:\(typeName)", record: record)
                 sequence += 1
@@ -1517,8 +1787,11 @@ private func jsonObject(from data: Data) throws -> Any {
 private func decodeInt64(_ value: Any?, fieldName: String, lineNumber: Int) throws -> Int64 {
     switch value {
     case let number as NSNumber:
+        guard CFGetTypeID(number) != CFBooleanGetTypeID() else {
+            throw ProprDBError("decode jsonl line \(lineNumber): invalid \(fieldName)")
+        }
         let type = String(cString: number.objCType)
-        guard ["c", "s", "i", "l", "q"].contains(type),
+        guard ["s", "i", "l", "q"].contains(type),
               let parsed = Int64(number.stringValue),
               String(parsed) == number.stringValue
         else {

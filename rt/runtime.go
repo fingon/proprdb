@@ -1,11 +1,11 @@
 package proprdbrt
 
 import (
+	"bufio"
 	"context"
 	"crypto/rand"
 	"database/sql"
 	"encoding/binary"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -373,7 +373,7 @@ var decimalInt64Pattern = regexp.MustCompile(`^-?(0|[1-9][0-9]*)$`)
 func (r *JSONLRecord) UnmarshalJSON(data []byte) error {
 	var wire struct {
 		ID      string          `json:"id"`
-		Deleted bool            `json:"deleted,omitempty"`
+		Deleted json.RawMessage `json:"deleted,omitempty"`
 		AtNs    json.RawMessage `json:"atNs"`
 		Data    json.RawMessage `json:"data"`
 	}
@@ -395,8 +395,24 @@ func (r *JSONLRecord) UnmarshalJSON(data []byte) error {
 	if err != nil {
 		return fmt.Errorf("decode atNs: %w", err)
 	}
+	deleted := false
+	if len(wire.Deleted) > 0 {
+		if string(wire.Deleted) != "true" && string(wire.Deleted) != "false" {
+			return errors.New("deleted must be a boolean")
+		}
+		deleted = string(wire.Deleted) == "true"
+	}
+	if err := ValidateUUIDv7(wire.ID); err != nil {
+		return fmt.Errorf("decode id: %w", err)
+	}
+	if len(wire.Data) == 0 || wire.Data[0] != '{' {
+		return errors.New("data must be an object")
+	}
+	if _, err := TypeNameFromAnyJSON(wire.Data); err != nil {
+		return fmt.Errorf("decode data: %w", err)
+	}
 	r.ID = wire.ID
-	r.Deleted = wire.Deleted
+	r.Deleted = deleted
 	r.AtNs = atNs
 	r.Data = wire.Data
 	return nil
@@ -412,11 +428,30 @@ type GeneratedTableDescriptor struct {
 }
 
 type GeneratedTableBinding struct {
-	Descriptor      GeneratedTableDescriptor
-	NewMessage      func() proto.Message
-	InsertSQL       string
-	UpsertSQL       string
-	ProjectedValues func(proto.Message) ([]any, error)
+	Descriptor        GeneratedTableDescriptor
+	NewMessage        func() proto.Message
+	InsertSQL         string
+	UpsertSQL         string
+	CreateTableSQL    string
+	ProjectionSchema  string
+	ProjectedColumns  []ProjectedColumnDescriptor
+	GeneratedIndexes  []GeneratedIndexDescriptor
+	GeneratedIndexKey string
+	ProjectedValues   func(proto.Message) ([]any, error)
+}
+
+type ProjectedColumnDescriptor struct {
+	Name                      string
+	ProtoKind                 string
+	SQLiteType                string
+	DefaultSQL                string
+	Nullable                  bool
+	LegacyOneofPresenceRepair bool
+}
+
+type GeneratedIndexDescriptor struct {
+	Name      string
+	CreateSQL string
 }
 
 func CoreTableDescriptors() []GeneratedTableDescriptor {
@@ -583,6 +618,291 @@ func EnsureManagedIndexes(q DBTX, tableName, generatedIndexPrefix string, create
 	return nil
 }
 
+func ReconcileGeneratedTableContext(ctx context.Context, q DBTX, binding GeneratedTableBinding) error {
+	if q == nil {
+		return errors.New("nil DBTX")
+	}
+	if binding.Descriptor.TableName == "" || binding.CreateTableSQL == "" {
+		return errors.New("invalid generated table schema binding")
+	}
+	return q.WithTransaction(ctx, func(tx DBTX) error {
+		if _, err := tx.ExecContext(ctx, binding.CreateTableSQL); err != nil {
+			return fmt.Errorf("create table %s: %w", binding.Descriptor.TableName, err)
+		}
+		columns, err := generatedTableColumnsContext(ctx, tx, binding.Descriptor.TableName)
+		if err != nil {
+			return err
+		}
+		expectedNames := map[string]bool{"id": true, "at_ns": true, "data": true}
+		columnsByName := make(map[string]generatedTableColumn, len(columns))
+		for _, column := range columns {
+			columnsByName[column.name] = column
+		}
+		repairNames := make(map[string]bool)
+		for _, projected := range binding.ProjectedColumns {
+			expectedNames[projected.Name] = true
+			column, ok := columnsByName[projected.Name]
+			if !ok {
+				continue
+			}
+			if !strings.EqualFold(column.sqliteType, projected.SQLiteType) {
+				return fmt.Errorf("projection column %s.%s has SQLite type %s, expected %s", binding.Descriptor.TableName, projected.Name, column.sqliteType, projected.SQLiteType)
+			}
+			actualNullable := column.notNull == 0
+			if actualNullable != projected.Nullable {
+				if projected.Nullable && projected.LegacyOneofPresenceRepair && !actualNullable {
+					repairNames[projected.Name] = true
+					continue
+				}
+				return fmt.Errorf("projection column %s.%s nullable=%t, expected %t", binding.Descriptor.TableName, projected.Name, actualNullable, projected.Nullable)
+			}
+			if !projected.Nullable && normalizeSQLiteDefault(column.defaultValue) != normalizeSQLiteDefault(projected.DefaultSQL) {
+				return fmt.Errorf("projection column %s.%s has default %v, expected %s", binding.Descriptor.TableName, projected.Name, column.defaultValue, projected.DefaultSQL)
+			}
+		}
+		createIndexSQL := make([]string, 0, len(binding.GeneratedIndexes))
+		desiredIndexNames := make([]string, 0, len(binding.GeneratedIndexes))
+		for _, index := range binding.GeneratedIndexes {
+			createIndexSQL = append(createIndexSQL, index.CreateSQL)
+			desiredIndexNames = append(desiredIndexNames, index.Name)
+		}
+		if err := EnsureManagedIndexes(tx, binding.Descriptor.TableName, binding.GeneratedIndexKey, nil, nil); err != nil {
+			return err
+		}
+		changed := false
+		for _, column := range columns {
+			if expectedNames[column.name] && !repairNames[column.name] {
+				continue
+			}
+			if _, err := tx.ExecContext(ctx, `ALTER TABLE `+quoteSQLiteIdentifier(binding.Descriptor.TableName)+` DROP COLUMN `+quoteSQLiteIdentifier(column.name)); err != nil {
+				return fmt.Errorf("drop projection column %s.%s: %w", binding.Descriptor.TableName, column.name, err)
+			}
+			changed = true
+		}
+		for _, projected := range binding.ProjectedColumns {
+			if _, exists := columnsByName[projected.Name]; exists && !repairNames[projected.Name] {
+				continue
+			}
+			if _, err := tx.ExecContext(ctx, `ALTER TABLE `+quoteSQLiteIdentifier(binding.Descriptor.TableName)+` ADD COLUMN `+projectedColumnSQL(projected)); err != nil {
+				return fmt.Errorf("add projection column %s.%s: %w", binding.Descriptor.TableName, projected.Name, err)
+			}
+			changed = true
+		}
+		var currentSchema string
+		schemaErr := tx.QueryRowContext(ctx, `SELECT schema_hash FROM `+CoreTableSchemaStateName+` WHERE table_name = ?`, binding.Descriptor.TableName).Scan(&currentSchema)
+		if schemaErr != nil && !errors.Is(schemaErr, sql.ErrNoRows) {
+			return fmt.Errorf("read projection schema for %s: %w", binding.Descriptor.TableName, schemaErr)
+		}
+		if schemaErr == nil {
+			if err := validateProjectionEvolution(binding.Descriptor.TableName, currentSchema, binding.ProjectedColumns); err != nil {
+				return err
+			}
+		}
+		if changed || currentSchema != binding.ProjectionSchema {
+			if err := reprojectGeneratedTableContext(ctx, tx, binding); err != nil {
+				return err
+			}
+		}
+		if err := EnsureManagedIndexes(tx, binding.Descriptor.TableName, binding.GeneratedIndexKey, createIndexSQL, desiredIndexNames); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO `+CoreTableSchemaStateName+` (table_name, schema_hash) VALUES (?, ?) ON CONFLICT(table_name) DO UPDATE SET schema_hash = excluded.schema_hash`, binding.Descriptor.TableName, binding.ProjectionSchema); err != nil {
+			return fmt.Errorf("write projection schema for %s: %w", binding.Descriptor.TableName, err)
+		}
+		return nil
+	})
+}
+
+func AuditObjectIDsContext(ctx context.Context, q DBTX, bindings []GeneratedTableBinding) error {
+	if q == nil {
+		return errors.New("nil DBTX")
+	}
+	targets := map[string]string{
+		CoreTableDeletedName:     "id",
+		CoreTableSyncName:        "object_id",
+		CoreTableUnknownName:     "id",
+		CoreTableUnknownSyncName: "id",
+		CoreTableExportEntryName: "object_id",
+	}
+	for _, binding := range bindings {
+		targets[binding.Descriptor.TableName] = "id"
+	}
+	for tableName, columnName := range targets {
+		if err := auditObjectIDTableContext(ctx, q, tableName, columnName); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func auditObjectIDTableContext(ctx context.Context, q DBTX, tableName, columnName string) (err error) {
+	var exists int
+	if err := q.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_schema WHERE type = 'table' AND name = ?`, tableName).Scan(&exists); err != nil {
+		return fmt.Errorf("inspect object ID table %s: %w", tableName, err)
+	}
+	if exists == 0 {
+		return nil
+	}
+	rows, err := q.QueryContext(ctx, `SELECT `+quoteSQLiteIdentifier(columnName)+` FROM `+quoteSQLiteIdentifier(tableName))
+	if err != nil {
+		return fmt.Errorf("read object IDs from %s: %w", tableName, err)
+	}
+	defer func() {
+		if closeErr := rows.Close(); closeErr != nil && err == nil {
+			err = fmt.Errorf("close object IDs from %s: %w", tableName, closeErr)
+		}
+	}()
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return fmt.Errorf("scan object ID from %s: %w", tableName, err)
+		}
+		if err := ValidateUUIDv7(id); err != nil {
+			return fmt.Errorf("invalid stored object ID table=%s id=%s: %w", tableName, id, err)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterate object IDs from %s: %w", tableName, err)
+	}
+	return nil
+}
+
+type projectionSignatureField struct {
+	kind     string
+	nullable bool
+}
+
+func validateProjectionEvolution(tableName, previousSchema string, currentColumns []ProjectedColumnDescriptor) error {
+	previous := make(map[string]projectionSignatureField)
+	for entry := range strings.SplitSeq(previousSchema, ";") {
+		parts := strings.Split(entry, ":")
+		if len(parts) < 2 {
+			continue
+		}
+		previous[parts[0]] = projectionSignatureField{kind: parts[1], nullable: len(parts) == 3 && parts[2] == "optional"}
+	}
+	for _, current := range currentColumns {
+		old, ok := previous[current.Name]
+		if !ok {
+			continue
+		}
+		if old.kind != current.ProtoKind {
+			return fmt.Errorf("projection column %s.%s changed protobuf kind from %s to %s", tableName, current.Name, old.kind, current.ProtoKind)
+		}
+		if old.nullable == current.Nullable {
+			continue
+		}
+		if current.LegacyOneofPresenceRepair && !old.nullable && current.Nullable {
+			continue
+		}
+		return fmt.Errorf("projection column %s.%s changed presence semantics", tableName, current.Name)
+	}
+	return nil
+}
+
+type generatedTableColumn struct {
+	name         string
+	sqliteType   string
+	notNull      int
+	defaultValue any
+}
+
+func generatedTableColumnsContext(ctx context.Context, q DBTX, tableName string) (columns []generatedTableColumn, err error) {
+	rows, err := q.QueryContext(ctx, `PRAGMA table_info(`+quoteSQLiteIdentifier(tableName)+`)`)
+	if err != nil {
+		return nil, fmt.Errorf("read columns for %s: %w", tableName, err)
+	}
+	defer func() {
+		if closeErr := rows.Close(); closeErr != nil && err == nil {
+			err = fmt.Errorf("close columns for %s: %w", tableName, closeErr)
+		}
+	}()
+	for rows.Next() {
+		var cid int
+		var column generatedTableColumn
+		var primaryKey int
+		if err := rows.Scan(&cid, &column.name, &column.sqliteType, &column.notNull, &column.defaultValue, &primaryKey); err != nil {
+			return nil, fmt.Errorf("scan columns for %s: %w", tableName, err)
+		}
+		columns = append(columns, column)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate columns for %s: %w", tableName, err)
+	}
+	return columns, nil
+}
+
+func projectedColumnSQL(column ProjectedColumnDescriptor) string {
+	statement := quoteSQLiteIdentifier(column.Name) + " " + column.SQLiteType
+	if column.Nullable {
+		return statement
+	}
+	return statement + " NOT NULL DEFAULT " + column.DefaultSQL
+}
+
+func normalizeSQLiteDefault(value any) string {
+	if value == nil {
+		return ""
+	}
+	return strings.TrimSpace(strings.ToUpper(fmt.Sprint(value)))
+}
+
+func reprojectGeneratedTableContext(ctx context.Context, q DBTX, binding GeneratedTableBinding) (err error) {
+	if len(binding.ProjectedColumns) == 0 {
+		return nil
+	}
+	rows, err := q.QueryContext(ctx, `SELECT id, data FROM `+quoteSQLiteIdentifier(binding.Descriptor.TableName))
+	if err != nil {
+		return fmt.Errorf("query rows for reprojection from %s: %w", binding.Descriptor.TableName, err)
+	}
+	defer func() {
+		if closeErr := rows.Close(); closeErr != nil && err == nil {
+			err = fmt.Errorf("close reprojection rows from %s: %w", binding.Descriptor.TableName, closeErr)
+		}
+	}()
+	type reprojectRow struct {
+		id   string
+		data []byte
+	}
+	buffer := make([]reprojectRow, 0)
+	for rows.Next() {
+		var row reprojectRow
+		if err := rows.Scan(&row.id, &row.data); err != nil {
+			return fmt.Errorf("scan reprojection row from %s: %w", binding.Descriptor.TableName, err)
+		}
+		buffer = append(buffer, row)
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterate reprojection rows from %s: %w", binding.Descriptor.TableName, err)
+	}
+	if err := rows.Close(); err != nil {
+		return fmt.Errorf("close reprojection rows from %s: %w", binding.Descriptor.TableName, err)
+	}
+	assignments := make([]string, 0, len(binding.ProjectedColumns))
+	for _, column := range binding.ProjectedColumns {
+		assignments = append(assignments, quoteSQLiteIdentifier(column.Name)+" = ?")
+	}
+	updateSQL := `UPDATE ` + quoteSQLiteIdentifier(binding.Descriptor.TableName) + ` SET ` + strings.Join(assignments, ", ") + ` WHERE id = ?`
+	for _, row := range buffer {
+		message := binding.NewMessage()
+		if message == nil {
+			return fmt.Errorf("binding for %s created nil message", binding.Descriptor.TypeName)
+		}
+		if err := proto.Unmarshal(row.data, message); err != nil {
+			return fmt.Errorf("unmarshal reprojection row %s/%s: %w", binding.Descriptor.TableName, row.id, err)
+		}
+		values, err := binding.ProjectedValues(message)
+		if err != nil {
+			return fmt.Errorf("project row %s/%s: %w", binding.Descriptor.TableName, row.id, err)
+		}
+		values = append(values, row.id)
+		if _, err := q.ExecContext(ctx, updateSQL, values...); err != nil {
+			return fmt.Errorf("reproject row %s/%s: %w", binding.Descriptor.TableName, row.id, err)
+		}
+	}
+	return nil
+}
+
 func CloseRows(rows *sql.Rows, operation string) error {
 	if rows == nil {
 		return nil
@@ -621,21 +941,32 @@ func UUIDv7() (string, error) {
 	return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x", segment1, segment2, segment3, segment4, segment5), nil
 }
 
-func ValidateUUID(id string) error {
-	parts := strings.Split(id, "-")
-	if len(parts) != 5 {
-		return fmt.Errorf("invalid uuid %q: expected 5 parts", id)
+func ValidateUUIDv7(id string) error {
+	if len(id) != 36 {
+		return fmt.Errorf("invalid uuidv7 %q: expected 36 characters", id)
 	}
-	lengths := []int{8, 4, 4, 4, 12}
-	for index, part := range parts {
-		if len(part) != lengths[index] {
-			return fmt.Errorf("invalid uuid %q: unexpected length for part %d", id, index+1)
+	for index, character := range id {
+		if index == 8 || index == 13 || index == 18 || index == 23 {
+			if character != '-' {
+				return fmt.Errorf("invalid uuidv7 %q: expected hyphen at character %d", id, index+1)
+			}
+			continue
 		}
-		if _, err := hex.DecodeString(part); err != nil {
-			return fmt.Errorf("invalid uuid %q: %w", id, err)
+		if (character < '0' || character > '9') && (character < 'a' || character > 'f') {
+			return fmt.Errorf("invalid uuidv7 %q: expected canonical lowercase hexadecimal", id)
 		}
+	}
+	if id[14] != '7' {
+		return fmt.Errorf("invalid uuidv7 %q: version is not 7", id)
+	}
+	if !strings.ContainsRune("89ab", rune(id[19])) {
+		return fmt.Errorf("invalid uuidv7 %q: invalid RFC variant", id)
 	}
 	return nil
+}
+
+func ValidateUUID(id string) error {
+	return ValidateUUIDv7(id)
 }
 
 func TypeURL(typeName string) string {
@@ -675,19 +1006,32 @@ func MarshalTypeOnlyAnyJSON(typeName string) (json.RawMessage, error) {
 }
 
 func ReadJSONL(r io.Reader, visit func(JSONLRecord, int) error) error {
-	decoder := json.NewDecoder(r)
+	reader := bufio.NewReader(r)
 	lineNumber := 0
 	for {
 		lineNumber++
-		var record JSONLRecord
-		if err := decoder.Decode(&record); err != nil {
-			if errors.Is(err, io.EOF) {
+		line, readErr := reader.ReadString('\n')
+		if len(strings.TrimSpace(line)) == 0 {
+			if errors.Is(readErr, io.EOF) {
 				return nil
 			}
+			if readErr != nil {
+				return fmt.Errorf("read jsonl line %d: %w", lineNumber, readErr)
+			}
+			continue
+		}
+		var record JSONLRecord
+		if err := json.Unmarshal([]byte(line), &record); err != nil {
 			return fmt.Errorf("decode jsonl line %d: %w", lineNumber, err)
 		}
 		if err := visit(record, lineNumber); err != nil {
 			return err
+		}
+		if errors.Is(readErr, io.EOF) {
+			return nil
+		}
+		if readErr != nil {
+			return fmt.Errorf("read jsonl line %d: %w", lineNumber, readErr)
 		}
 	}
 }

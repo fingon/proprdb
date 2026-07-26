@@ -5,6 +5,22 @@ import XCTest
 private let countTombstoneByIDSQL = "SELECT COUNT(*) FROM _deleted WHERE table_name = ? AND id = ?"
 
 final class GeneratedChangeListenerTests: XCTestCase {
+    func testDirectTableInstancesShareChanges() async throws {
+        let database = try SQLiteDatabase(path: ":memory:")
+        let observingTable = PersonTable(database)
+        let writingTable = PersonTable(database)
+        try observingTable.initialize()
+        var changes = observingTable.changes().makeAsyncIterator()
+
+        let inserted = try writingTable.insert(makePerson(name: "Direct", age: 1))
+
+        guard case let .upsert(id, _, data) = await changes.next() else {
+            return XCTFail("expected direct table insert change")
+        }
+        XCTAssertEqual(id, inserted.id)
+        XCTAssertEqual(data.name, "Direct")
+    }
+
     func testLocalChangesThroughSynchronousAPI() async throws {
         let database = try SQLiteDatabase(path: ":memory:")
         let crud = CRUD(database)

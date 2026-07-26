@@ -5,9 +5,10 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"unicode"
 
 	"google.golang.org/protobuf/compiler/protogen"
+	"google.golang.org/protobuf/reflect/protoreflect"
+	descriptorpb "google.golang.org/protobuf/types/descriptorpb"
 )
 
 const (
@@ -87,14 +88,13 @@ func GenerateSwiftFiles(plugin *protogen.Plugin, files []*protogen.File, options
 
 func (e swiftEmitter) emitModel(file *protogen.File, model messageModel) {
 	g := e.g
-	swiftTypeName := swiftMessageTypeName(file, model.GoName)
+	swiftTypeName := model.SwiftTypeName
 	tableNameConst := model.GoName + "TableName"
 	typeNameConst := model.GoName + "TypeName"
 	schemaConst := model.GoName + "ProjectionSchema"
 	createTableConst := model.GoName + "CreateTableSQL"
 	insertConst := model.GoName + "InsertSQL"
 	upsertConst := model.GoName + "UpsertSQL"
-	reprojectConst := model.GoName + "ReprojectSQL"
 	indexPrefixConst := model.GoName + "GeneratedIndexPrefix"
 	visibility := e.visibilityPrefix()
 	sharedVisibility := e.sharedVisibilityPrefix()
@@ -110,15 +110,26 @@ func (e swiftEmitter) emitModel(file *protogen.File, model messageModel) {
 	for indexPosition, indexModel := range model.Indexes {
 		g.P("private let ", model.GoName, "CreateIndexSQL", strconv.Itoa(indexPosition+1), " = ", strconv.Quote(model.createIndexSQL(indexModel)))
 	}
-	if len(model.ProjectedFields) > 0 {
-		g.P("private let ", reprojectConst, " = ", strconv.Quote(model.reprojectSQL()))
-	}
 	g.P()
 	g.P("private let ", model.GoName, "GeneratedBinding = GeneratedTableBinding(")
 	g.P("\tdescriptor: GeneratedTableDescriptor(tableName: ", tableNameConst, ", typeName: ", typeNameConst, ", isCore: false, syncEnabled: ", strconv.FormatBool(!model.OmitSync), ", changeListenersEnabled: ", strconv.FormatBool(model.ChangeListeners), ", queryStatisticsEnabled: ", strconv.FormatBool(model.QueryStatistics), "),")
 	g.P("\tmessageType: ", swiftTypeName, ".self,")
 	g.P("\tinsertSQL: ", insertConst, ",")
 	g.P("\tupsertSQL: ", upsertConst, ",")
+	g.P("\tcreateTableSQL: ", createTableConst, ",")
+	g.P("\tprojectionSchema: ", schemaConst, ",")
+	g.P("\tprojectedColumns: [")
+	for _, projectedField := range model.ProjectedFields {
+		protoKind := strings.TrimPrefix(strings.TrimSuffix(projectedField.SchemaSignature, projectionOptionalFlag), projectedField.ColumnName+":")
+		g.P("\t\tProjectedColumnDescriptor(name: ", strconv.Quote(projectedField.ColumnName), ", protoKind: ", strconv.Quote(protoKind), ", sqliteType: ", strconv.Quote(projectedField.SQLiteType), ", defaultSQL: ", strconv.Quote(projectedField.SQLiteDefault), ", nullable: ", strconv.FormatBool(projectedField.IsOptional), ", legacyOneofPresenceRepair: ", strconv.FormatBool(projectedField.LegacyOneofPresenceRepair), "),")
+	}
+	g.P("\t],")
+	g.P("\tgeneratedIndexes: [")
+	for indexPosition, indexModel := range model.Indexes {
+		g.P("\t\tGeneratedIndexDescriptor(name: ", strconv.Quote(indexModel.IndexName), ", createSQL: ", model.GoName, "CreateIndexSQL", strconv.Itoa(indexPosition+1), "),")
+	}
+	g.P("\t],")
+	g.P("\tgeneratedIndexPrefix: ", indexPrefixConst, ",")
 	g.P("\tdecodeAnyJSON: { try decodeAnyJSON($0, as: ", swiftTypeName, ".self) },")
 	g.P("\tdecodeBinary: { try ", swiftTypeName, "(serializedBytes: $0) },")
 	g.P("\tencodeAnyJSON: { message in")
@@ -133,10 +144,13 @@ func (e swiftEmitter) emitModel(file *protogen.File, model messageModel) {
 	g.P("\t\tguard let data = message as? ", swiftTypeName, " else { throw ProprDBError(\"expected ", swiftTypeName, "\") }")
 	g.P("\t\tvar values: [SQLiteBindValue] = []")
 	for _, projectedField := range model.ProjectedFields {
-		propertyName := swiftPropertyNameFromGoName(projectedField.GetterName[3:])
+		propertyName := projectedField.SwiftPropertyName
 		if projectedField.IsOptional {
-			presenceName := "has" + projectedField.GetterName[3:]
-			g.P("\t\tif data.", presenceName, " { values.append(sqliteBindValue(data.", propertyName, ")) } else { values.append(.null) }")
+			if projectedField.LegacyOneofPresenceRepair {
+				g.P("\t\tif case .", propertyName, " = data.", projectedField.SwiftOneofPropertyName, " { values.append(sqliteBindValue(data.", propertyName, ")) } else { values.append(.null) }")
+			} else {
+				g.P("\t\tif data.", projectedField.SwiftPresenceName, " { values.append(sqliteBindValue(data.", propertyName, ")) } else { values.append(.null) }")
+			}
 		} else {
 			g.P("\t\tvalues.append(sqliteBindValue(data.", propertyName, "))")
 		}
@@ -165,7 +179,11 @@ func (e swiftEmitter) emitModel(file *protogen.File, model messageModel) {
 	g.P(visibility, "struct ", model.TableTypeName, " {")
 	g.P("\tfileprivate let q: any DBTX")
 	g.P("\t", visibility, "init(_ q: any DBTX) {")
-	g.P("\t\tself.q = q")
+	if model.ChangeListeners {
+		g.P("\t\tself.q = withChangeListeners(q)")
+	} else {
+		g.P("\t\tself.q = q")
+	}
 	g.P("\t}")
 	g.P()
 
@@ -175,9 +193,6 @@ func (e swiftEmitter) emitModel(file *protogen.File, model messageModel) {
 	e.emitSwiftUpdateMethod(model, swiftTypeName, tableNameConst, upsertConst)
 	e.emitSwiftDeleteMethod(model)
 	e.emitSwiftApplyWithAtNsMethods(model, swiftTypeName, tableNameConst, upsertConst)
-	if len(model.ProjectedFields) > 0 {
-		e.emitSwiftReprojectMethod(file, model, swiftTypeName, tableNameConst, reprojectConst)
-	}
 	e.emitSwiftDrainUnknownMethod(file, model, swiftTypeName, typeNameConst)
 	if model.ChangeListeners {
 		g.P("\t", visibility, "func changes() -> AsyncStream<", model.GoName, "Change> {")
@@ -189,55 +204,20 @@ func (e swiftEmitter) emitModel(file *protogen.File, model messageModel) {
 	g.P()
 }
 
-func (e swiftEmitter) emitSwiftInitMethod(file *protogen.File, model messageModel, swiftTypeName, tableNameConst, typeNameConst, schemaConst, createTableConst, indexPrefixConst string) {
+func (e swiftEmitter) emitSwiftInitMethod(file *protogen.File, model messageModel, swiftTypeName, _, typeNameConst, schemaConst, createTableConst, indexPrefixConst string) {
 	g := e.g
 	g.P("\t", e.visibilityPrefix(), "func initialize() throws {")
 	g.P("\t\ttry ensureCoreTables(q)")
-	g.P("\t\ttry q.execute(", createTableConst, ")")
-	if len(model.ProjectedFields) > 0 {
-		g.P("\t\tlet existingColumns = try q.withRows(\"PRAGMA table_info(\\\"\\(", tableNameConst, ")\\\")\") { rows in")
-		g.P("\t\t\tvar columns = Set<String>()")
-		g.P("\t\t\twhile let row = try rows.next() {")
-		g.P("\t\t\t\tcolumns.insert(try row.string(at: 1))")
-		g.P("\t\t\t}")
-		g.P("\t\t\treturn columns")
-		g.P("\t\t}")
-		for _, projectedField := range model.ProjectedFields {
-			g.P("\t\tif !existingColumns.contains(", strconv.Quote(projectedField.ColumnName), ") {")
-			g.P("\t\t\ttry q.execute(\"ALTER TABLE \" + ", tableNameConst, "Quoted + \" ADD COLUMN ", escapeSwiftStringLiteralContent(projectedField.createColumnSQL()), "\")")
-			g.P("\t\t}")
-		}
-	}
-
-	g.P("\t\ttry ensureManagedIndexes(q, tableName: ", tableNameConst, ", generatedIndexPrefix: ", indexPrefixConst, ", createIndexSQL: [")
-	for indexPosition := range model.Indexes {
-		g.P("\t\t\t", model.GoName, "CreateIndexSQL", strconv.Itoa(indexPosition+1), ",")
-	}
-	g.P("\t\t], desiredIndexNames: [")
-	for _, indexModel := range model.Indexes {
-		g.P("\t\t\t", strconv.Quote(indexModel.IndexName), ",")
-	}
-	g.P("\t\t])")
-
-	g.P("\t\tlet currentSchema = try q.withRows(\"SELECT schema_hash FROM \\(_proprdbSchemaTableName) WHERE table_name = ?\", arguments: [", tableNameConst, "]) { rows -> String? in")
-	g.P("\t\t\tif let row = try rows.next() {")
-	g.P("\t\t\t\treturn try row.string(at: 0)")
-	g.P("\t\t\t}")
-	g.P("\t\t\treturn nil as String?")
-	g.P("\t\t}")
-	g.P("\t\tif let currentSchema, currentSchema != ", schemaConst, " {")
-	if len(model.ProjectedFields) > 0 {
-		g.P("\t\t\ttry reproject()")
-	}
-	g.P("\t\t\ttry q.execute(\"UPDATE \\(_proprdbSchemaTableName) SET schema_hash = ? WHERE table_name = ?\", arguments: [", schemaConst, ", ", tableNameConst, "])")
-	g.P("\t\t} else if currentSchema == nil {")
-	g.P("\t\t\ttry q.execute(\"INSERT INTO \\(_proprdbSchemaTableName) (table_name, schema_hash) VALUES (?, ?)\", arguments: [", tableNameConst, ", ", schemaConst, "])")
-	g.P("\t\t}")
+	g.P("\t\ttry auditObjectIDs(q, bindings: [", model.GoName, "GeneratedBinding])")
+	g.P("\t\ttry reconcileGeneratedTable(q, binding: ", model.GoName, "GeneratedBinding)")
 	g.P("\t\ttry drainUnknownRows(", typeNameConst, ")")
 	g.P("\t}")
 	g.P()
 	_ = swiftTypeName
 	_ = file
+	_ = schemaConst
+	_ = createTableConst
+	_ = indexPrefixConst
 }
 
 func (e swiftEmitter) emitSwiftSelectMethod(model messageModel, swiftTypeName, tableNameConst string) {
@@ -272,7 +252,7 @@ func (e swiftEmitter) emitSwiftInsertMethod(model messageModel, swiftTypeName, _
 	g := e.g
 	g.P("\t", e.visibilityPrefix(), "func insert(_ data: ", swiftTypeName, ") throws -> ", model.RowTypeName, " {")
 	g.P("\t\tlet id = try uuidV7()")
-	g.P("\t\ttry validateUUID(id)")
+	g.P("\t\ttry validateUUIDV7(id)")
 	g.P("\t\treturn try insertWithIDInternal(id: id, data: data)")
 	g.P("\t}")
 	g.P()
@@ -286,7 +266,7 @@ func (e swiftEmitter) emitSwiftInsertMethod(model messageModel, swiftTypeName, _
 	g.P("\t\tif id.isEmpty {")
 	g.P("\t\t\tthrow ProprDBError(\"empty id\")")
 	g.P("\t\t}")
-	g.P("\t\ttry validateUUID(id)")
+	g.P("\t\ttry validateUUIDV7(id)")
 	if model.ValidateWrite {
 		g.P("\t\ttry validateForWrite(data)")
 	}
@@ -302,7 +282,7 @@ func (e swiftEmitter) emitSwiftUpdateMethod(model messageModel, swiftTypeName, _
 	g.P("\t\tif id.isEmpty {")
 	g.P("\t\t\tthrow ProprDBError(\"empty id\")")
 	g.P("\t\t}")
-	g.P("\t\ttry validateUUID(id)")
+	g.P("\t\ttry validateUUIDV7(id)")
 	if model.ValidateWrite {
 		g.P("\t\ttry validateForWrite(data)")
 	}
@@ -351,30 +331,6 @@ func (e swiftEmitter) emitSwiftApplyWithAtNsMethods(model messageModel, swiftTyp
 	g.P()
 }
 
-func (e swiftEmitter) emitSwiftReprojectMethod(file *protogen.File, model messageModel, swiftTypeName, tableNameConst, reprojectConst string) {
-	g := e.g
-	g.P("\tprivate func reproject() throws {")
-	g.P("\t\tlet rowsToReproject = try q.withRows(\"SELECT id, data FROM \" + ", tableNameConst, "Quoted) { rows in")
-	g.P("\t\t\tvar buffered: [(String, Data)] = []")
-	g.P("\t\t\twhile let row = try rows.next() {")
-	g.P("\t\t\t\tbuffered.append((try row.string(at: 0), try row.data(at: 1)))")
-	g.P("\t\t\t}")
-	g.P("\t\t\treturn buffered")
-	g.P("\t\t}")
-	g.P("\t\tfor (id, dataBytes) in rowsToReproject {")
-	g.P("\t\t\tlet data = try ", swiftTypeName, "(serializedBytes: dataBytes)")
-	g.P("\t\t\tvar reprojectArguments: [Any?] = []")
-	for _, projectedField := range model.ProjectedFields {
-		e.emitSwiftProjectedFieldAppend("reprojectArguments", "data", projectedField, "\t\t\t")
-	}
-	g.P("\t\t\treprojectArguments.append(id)")
-	g.P("\t\t\ttry q.execute(", reprojectConst, ", arguments: reprojectArguments)")
-	g.P("\t\t}")
-	g.P("\t}")
-	g.P()
-	_ = file
-}
-
 func (e swiftEmitter) emitSwiftDrainUnknownMethod(file *protogen.File, model messageModel, _, typeNameConst string) {
 	g := e.g
 	g.P("\tfileprivate func drainUnknownRows(_ typeName: String) throws {")
@@ -389,22 +345,7 @@ func (e swiftEmitter) emitSwiftDrainUnknownMethod(file *protogen.File, model mes
 	_ = file
 }
 
-func (e swiftEmitter) emitSwiftProjectedFieldAppend(argumentsName, dataName string, projectedField projectedField, indent string) {
-	g := e.g
-	propertyName := swiftPropertyNameFromGoName(projectedField.GetterName[3:])
-	if !projectedField.IsOptional {
-		g.P(indent, argumentsName, ".append(", dataName, ".", propertyName, ")")
-		return
-	}
-	presenceName := "has" + projectedField.GetterName[3:]
-	g.P(indent, "if ", dataName, ".", presenceName, " {")
-	g.P(indent, "\t", argumentsName, ".append(", dataName, ".", propertyName, ")")
-	g.P(indent, "} else {")
-	g.P(indent, "\t", argumentsName, ".append(nil)")
-	g.P(indent, "}")
-}
-
-func (e swiftEmitter) emitWrapper(modelFiles map[string]*protogen.File, models []messageModel) {
+func (e swiftEmitter) emitWrapper(_ map[string]*protogen.File, models []messageModel) {
 	g := e.g
 	visibility := e.visibilityPrefix()
 	actorVisibility := e.actorVisibilityPrefix()
@@ -416,7 +357,7 @@ func (e swiftEmitter) emitWrapper(modelFiles map[string]*protogen.File, models [
 	g.P()
 	g.P(visibility, "struct CRUD {")
 	for _, model := range models {
-		g.P("\t", visibility, "let ", swiftPropertyNameFromGoName(model.GoName), ": ", model.TableTypeName)
+		g.P("\t", visibility, "let ", model.SwiftPropertyName, ": ", model.TableTypeName)
 	}
 	g.P("\t", visibility, "init(_ q: any DBTX) {")
 	if modelsHaveChangeListeners(models) {
@@ -427,14 +368,14 @@ func (e swiftEmitter) emitWrapper(modelFiles map[string]*protogen.File, models [
 		if modelsHaveChangeListeners(models) {
 			constructorQ = "tracked"
 		}
-		g.P("\t\tself.", swiftPropertyNameFromGoName(model.GoName), " = ", model.TableTypeName, "(", constructorQ, ")")
+		g.P("\t\tself.", model.SwiftPropertyName, " = ", model.TableTypeName, "(", constructorQ, ")")
 	}
 	g.P("\t}")
-	g.P("\tprivate func dbtx() -> any DBTX { ", swiftPropertyNameFromGoName(models[0].GoName), ".q }")
+	g.P("\tprivate func dbtx() -> any DBTX { ", models[0].SwiftPropertyName, ".q }")
 	g.P("\t", visibility, "func tableDescriptors() -> [GeneratedTableDescriptor] { crudGeneratedBindings.map(\\.descriptor) + coreTableDescriptors() }")
 	g.P("\t", visibility, "func initialize() throws {")
 	for _, model := range models {
-		g.P("\t\ttry ", swiftPropertyNameFromGoName(model.GoName), ".initialize()")
+		g.P("\t\ttry ", model.SwiftPropertyName, ".initialize()")
 	}
 	g.P("\t}")
 	g.P("\t", visibility, "func prepareJSONL(remote: String) throws -> PreparedJSONLExport { try prepareBoundJSONL(dbtx(), bindings: crudGeneratedBindings, remote: remote) }")
@@ -449,8 +390,8 @@ func (e swiftEmitter) emitWrapper(modelFiles map[string]*protogen.File, models [
 	g.P("}")
 	g.P()
 	for _, model := range models {
-		propertyName := swiftPropertyNameFromGoName(model.GoName)
-		swiftTypeName := swiftMessageTypeName(modelFiles[model.TypeName], model.GoName)
+		propertyName := model.SwiftPropertyName
+		swiftTypeName := model.SwiftTypeName
 		proxyName := model.GoName + "TableProxy"
 		g.P(actorVisibility, "struct ", proxyName, ": Sendable {")
 		g.P("\tfileprivate let actor: ProprDBActor")
@@ -476,8 +417,8 @@ func (e swiftEmitter) emitWrapper(modelFiles map[string]*protogen.File, models [
 	g.P("\t", actorVisibility, "func initialize() throws { try withDatabase { try CRUD($0).initialize() } }")
 	g.P("\t", actorVisibility, "func tableDescriptors() throws -> [GeneratedTableDescriptor] { try withDatabase { CRUD($0).tableDescriptors() } }")
 	for _, model := range models {
-		propertyName := swiftPropertyNameFromGoName(model.GoName)
-		swiftTypeName := swiftMessageTypeName(modelFiles[model.TypeName], model.GoName)
+		propertyName := model.SwiftPropertyName
+		swiftTypeName := model.SwiftTypeName
 		proxyName := model.GoName + "TableProxy"
 		g.P("\t", actorVisibility, "nonisolated var ", propertyName, ": ", proxyName, " { ", proxyName, "(actor: self) }")
 		g.P("\tfileprivate func _", propertyName, "Initialize() throws { try withDatabase { try CRUD($0).", propertyName, ".initialize() } }")
@@ -503,7 +444,7 @@ func (e swiftEmitter) emitWrapper(modelFiles map[string]*protogen.File, models [
 	g.P("}")
 }
 
-func (e swiftEmitter) emitLegacyWrapper(modelFiles map[string]*protogen.File, models []messageModel) {
+func (e swiftEmitter) emitLegacyWrapper(_ map[string]*protogen.File, models []messageModel) {
 	g := e.g
 	syncModels := make([]messageModel, 0, len(models))
 	for _, model := range models {
@@ -515,11 +456,11 @@ func (e swiftEmitter) emitLegacyWrapper(modelFiles map[string]*protogen.File, mo
 	visibility := e.visibilityPrefix()
 	g.P(visibility, "struct CRUD {")
 	for _, model := range models {
-		g.P("\t", visibility, "let ", swiftPropertyNameFromGoName(model.GoName), ": ", model.TableTypeName)
+		g.P("\t", visibility, "let ", model.SwiftPropertyName, ": ", model.TableTypeName)
 	}
 	g.P("\t", visibility, "init(_ q: any DBTX) {")
 	for _, model := range models {
-		g.P("\t\tself.", swiftPropertyNameFromGoName(model.GoName), " = ", model.TableTypeName, "(q)")
+		g.P("\t\tself.", model.SwiftPropertyName, " = ", model.TableTypeName, "(q)")
 	}
 	g.P("\t}")
 	g.P()
@@ -536,12 +477,12 @@ func (e swiftEmitter) emitLegacyWrapper(modelFiles map[string]*protogen.File, mo
 	g.P("\t}")
 	g.P()
 	g.P("\tprivate func dbtx() -> any DBTX {")
-	g.P("\t\treturn ", swiftPropertyNameFromGoName(models[0].GoName), ".q")
+	g.P("\t\treturn ", models[0].SwiftPropertyName, ".q")
 	g.P("\t}")
 	g.P()
 	g.P("\t", visibility, "func initialize() throws {")
 	for _, model := range models {
-		g.P("\t\ttry ", swiftPropertyNameFromGoName(model.GoName), ".initialize()")
+		g.P("\t\ttry ", model.SwiftPropertyName, ".initialize()")
 	}
 	g.P("\t}")
 	g.P()
@@ -549,7 +490,7 @@ func (e swiftEmitter) emitLegacyWrapper(modelFiles map[string]*protogen.File, mo
 	g.P("\t\tlet q = dbtx()")
 	g.P("\t\tvar output = \"\"")
 	for _, model := range syncModels {
-		propertyName := swiftPropertyNameFromGoName(model.GoName)
+		propertyName := model.SwiftPropertyName
 		g.P("\t\tfor row in try ", propertyName, ".select() {")
 		g.P("\t\t\tif !(try syncNeedsSend(q, objectID: row.id, tableName: ", model.GoName, "TableName, remote: remote, atNs: row.atNs)) {")
 		g.P("\t\t\t\tcontinue")
@@ -605,7 +546,7 @@ func (e swiftEmitter) emitLegacyWrapper(modelFiles map[string]*protogen.File, mo
 	g.P("\t\t\t\tlet typeName = try typeNameFromAnyJSON(record.data)")
 	g.P("\t\t\t\tswitch typeName {")
 	for _, model := range models {
-		propertyName := swiftPropertyNameFromGoName(model.GoName)
+		propertyName := model.SwiftPropertyName
 		g.P("\t\t\t\tcase ", model.GoName, "TypeName:")
 		if model.OmitSync {
 			g.P("\t\t\t\t\tlogIgnoredUnsyncedJSONLRecord(typeName: typeName, id: record.id, remote: remote, lineNumber: lineNumber)")
@@ -621,7 +562,7 @@ func (e swiftEmitter) emitLegacyWrapper(modelFiles map[string]*protogen.File, mo
 		g.P("\t\t\t\t\t\ttry ", propertyName, ".tombstoneWithAtNs(id: record.id, atNs: record.atNs)")
 		g.P("\t\t\t\t\t\treturn")
 		g.P("\t\t\t\t\t}")
-		g.P("\t\t\t\t\tlet data = try decodeAnyJSON(record.data, as: ", swiftMessageTypeName(modelFiles[model.TypeName], model.GoName), ".self)")
+		g.P("\t\t\t\t\tlet data = try decodeAnyJSON(record.data, as: ", model.SwiftTypeName, ".self)")
 		g.P("\t\t\t\t\ttry ", propertyName, ".upsertWithAtNs(id: record.id, atNs: record.atNs, data: data)")
 		g.P("\t\t\t\t\treturn")
 	}
@@ -651,8 +592,8 @@ func (e swiftEmitter) emitLegacyWrapper(modelFiles map[string]*protogen.File, mo
 	g.P("\t\ttry withDatabase { database in try CRUD(database).initialize() }")
 	g.P("\t}")
 	for _, model := range models {
-		propertyName := swiftPropertyNameFromGoName(model.GoName)
-		swiftTypeName := swiftMessageTypeName(modelFiles[model.TypeName], model.GoName)
+		propertyName := model.SwiftPropertyName
+		swiftTypeName := model.SwiftTypeName
 		g.P()
 		g.P("\t", visibility, "func select", model.GoName, "() throws -> [", model.RowTypeName, "] {")
 		g.P("\t\ttry withDatabase { database in try ", model.TableTypeName, "(database).select() }")
@@ -682,41 +623,135 @@ func (e swiftEmitter) emitLegacyWrapper(modelFiles map[string]*protogen.File, mo
 	g.P("}")
 }
 
-func swiftMessageTypeName(file *protogen.File, goName string) string {
-	packageName := string(file.Desc.Package())
-	if packageName == "" {
-		return goName
+func swiftMessageTypeNameForMessage(message *protogen.Message) string {
+	names := []string{swiftSanitizeTypeName(string(message.Desc.Name()))}
+	for parent := message.Desc.Parent(); ; parent = parent.Parent() {
+		parentMessage, ok := parent.(protoreflect.MessageDescriptor)
+		if !ok {
+			break
+		}
+		names = append([]string{swiftSanitizeTypeName(string(parentMessage.Name()))}, names...)
 	}
-	parts := strings.Split(packageName, ".")
-	swiftParts := make([]string, 0, len(parts)+1)
-	for _, part := range parts {
-		swiftParts = append(swiftParts, swiftTypeNameSegment(part))
-	}
-	swiftParts = append(swiftParts, goName)
-	return strings.Join(swiftParts, "_")
+	prefix := swiftFileTypePrefix(message.Desc.ParentFile())
+	names[0] = prefix + names[0]
+	return strings.Join(names, ".")
 }
 
-func swiftTypeNameSegment(value string) string {
-	if value == "" {
+func swiftFileTypePrefix(file protoreflect.FileDescriptor) string {
+	options, ok := file.Options().(*descriptorpb.FileOptions)
+	if ok && options.SwiftPrefix != nil {
+		return options.GetSwiftPrefix()
+	}
+	packageName := string(file.Package())
+	if packageName == "" {
 		return ""
 	}
-	runes := []rune(strings.ToLower(value))
-	runes[0] = unicode.ToUpper(runes[0])
-	return string(runes)
-}
-
-func swiftPropertyNameFromGoName(value string) string {
-	if value == "" {
-		return value
+	var result strings.Builder
+	uppercaseNext := true
+	for _, character := range packageName {
+		switch character {
+		case '_':
+			uppercaseNext = true
+		case '.':
+			result.WriteRune('_')
+			uppercaseNext = true
+		default:
+			if uppercaseNext {
+				result.WriteString(strings.ToUpper(string(character)))
+				uppercaseNext = false
+			} else {
+				result.WriteRune(character)
+			}
+		}
 	}
-	runes := []rune(value)
-	runes[0] = unicode.ToLower(runes[0])
-	return string(runes)
+	result.WriteRune('_')
+	return result.String()
 }
 
-func escapeSwiftStringLiteralContent(value string) string {
-	replacer := strings.NewReplacer(`\`, `\\`, `"`, `\"`)
-	return replacer.Replace(value)
+func swiftFieldName(protoName string) string {
+	name := swiftLowerCamelCase(protoName)
+	if swiftReservedFieldNames[name] {
+		return name + "_p"
+	}
+	if swiftKeywords[name] {
+		return "`" + name + "`"
+	}
+	return name
+}
+
+func swiftPresenceName(protoName string) string {
+	baseName := swiftLowerCamelCase(protoName)
+	name := "has" + swiftUpperCamelCase(protoName)
+	if swiftReservedFieldNames[baseName] || hasUppercasePrefix(baseName, "has") || hasUppercasePrefix(baseName, "clear") {
+		return name + "_p"
+	}
+	return name
+}
+
+func swiftLowerCamelCase(value string) string {
+	upper := swiftUpperCamelCase(value)
+	if upper == "" {
+		return ""
+	}
+	for _, abbreviation := range []string{"HTTPS", "HTTP", "URL", "ID"} {
+		if strings.HasPrefix(upper, abbreviation) {
+			return strings.ToLower(abbreviation) + upper[len(abbreviation):]
+		}
+	}
+	return strings.ToLower(upper[:1]) + upper[1:]
+}
+
+func swiftUpperCamelCase(value string) string {
+	parts := strings.FieldsFunc(value, func(character rune) bool { return character == '_' })
+	var result strings.Builder
+	for _, part := range parts {
+		lower := strings.ToLower(part)
+		switch lower {
+		case "id", "url", "http", "https":
+			result.WriteString(strings.ToUpper(lower))
+		default:
+			if lower != "" {
+				result.WriteString(strings.ToUpper(lower[:1]))
+				result.WriteString(lower[1:])
+			}
+		}
+	}
+	return result.String()
+}
+
+func swiftSanitizeTypeName(value string) string {
+	if swiftReservedTypeNames[value] || strings.HasSuffix(value, "Message") {
+		return value + "Message"
+	}
+	return value
+}
+
+func hasUppercasePrefix(value, prefix string) bool {
+	if !strings.HasPrefix(value, prefix) || len(value) == len(prefix) {
+		return false
+	}
+	next := value[len(prefix)]
+	return next >= 'A' && next <= 'Z'
+}
+
+var swiftKeywords = map[string]bool{
+	"associatedtype": true, "class": true, "deinit": true, "enum": true, "extension": true,
+	"fileprivate": true, "func": true, "import": true, "init": true, "inout": true,
+	"internal": true, "let": true, "open": true, "operator": true, "private": true,
+	"protocol": true, "public": true, "rethrows": true, "static": true, "struct": true,
+	"subscript": true, "typealias": true, "var": true,
+}
+
+var swiftReservedFieldNames = map[string]bool{
+	"debugDescription": true, "description": true, "dynamicType": true,
+	"hashValue": true, "isInitialized": true, "unknownFields": true,
+}
+
+var swiftReservedTypeNames = map[string]bool{
+	"Extensions": true, "Protocol": true, "Swift": true, "SwiftProtobuf": true,
+	"Type": true, "Equatable": true, "Hashable": true, "Sendable": true,
+	"decodeMessage": true, "description": true, "isInitialized": true,
+	"protoMessageName": true, "traverse": true, "unknownFields": true,
 }
 
 func (e swiftEmitter) visibilityPrefix() string {

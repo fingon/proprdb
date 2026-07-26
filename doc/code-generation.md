@@ -13,6 +13,8 @@
   - Marks scalar message fields to be projected into SQLite columns in addition
     to `data`.
   - If omitted or `false`, field stays only inside serialized protobuf payload.
+  - Fields with protobuf presence, including scalar oneof fields, use nullable
+    projection columns.
 
 Example:
 
@@ -40,7 +42,13 @@ message Person {
 - `proprdb.allow_custom_id_insert` (`bool`, message-level):
   - Generated table keeps `Insert(data)` and additionally gets
     `InsertWithID(id, data)`.
-  - `InsertWithID` requires `id` to be a valid UUID.
+  - `InsertWithID` requires a canonical lowercase UUIDv7.
+
+Existing protobuf field names, numbers, types, and presence semantics are
+immutable. Projection membership may be added or removed. Initialization adds
+new projection columns, removes obsolete ones, and recomputes projection values
+from the protobuf payload. Removing columns requires SQLite 3.35 or newer.
+Incompatible existing projection definitions fail initialization.
 
 - `proprdb.change_listeners` (`bool`, message-level):
   - Generates a typed change stream for the table.

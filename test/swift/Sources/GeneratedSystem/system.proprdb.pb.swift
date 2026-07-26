@@ -14,13 +14,23 @@ private let PersonUpsertSQL = "INSERT INTO \"generatedtest_example_person\" (\"i
 private let PersonGeneratedIndexPrefix = "idx_generatedtest_example_person__"
 private let PersonCreateIndexSQL1 = "CREATE INDEX IF NOT EXISTS \"idx_generatedtest_example_person__name\" ON \"generatedtest_example_person\" (\"name\")"
 private let PersonCreateIndexSQL2 = "CREATE INDEX IF NOT EXISTS \"idx_generatedtest_example_person__name_age\" ON \"generatedtest_example_person\" (\"name\", \"age\")"
-private let PersonReprojectSQL = "UPDATE \"generatedtest_example_person\" SET \"name\" = ?, \"age\" = ? WHERE id = ?"
 
 private let PersonGeneratedBinding = GeneratedTableBinding(
 	descriptor: GeneratedTableDescriptor(tableName: PersonTableName, typeName: PersonTypeName, isCore: false, syncEnabled: true, changeListenersEnabled: true, queryStatisticsEnabled: true),
 	messageType: Generatedtest_Example_Person.self,
 	insertSQL: PersonInsertSQL,
 	upsertSQL: PersonUpsertSQL,
+	createTableSQL: PersonCreateTableSQL,
+	projectionSchema: PersonProjectionSchema,
+	projectedColumns: [
+		ProjectedColumnDescriptor(name: "name", protoKind: "string", sqliteType: "TEXT", defaultSQL: "''", nullable: false, legacyOneofPresenceRepair: false),
+		ProjectedColumnDescriptor(name: "age", protoKind: "int64", sqliteType: "INTEGER", defaultSQL: "0", nullable: false, legacyOneofPresenceRepair: false),
+	],
+	generatedIndexes: [
+		GeneratedIndexDescriptor(name: "idx_generatedtest_example_person__name", createSQL: PersonCreateIndexSQL1),
+		GeneratedIndexDescriptor(name: "idx_generatedtest_example_person__name_age", createSQL: PersonCreateIndexSQL2),
+	],
+	generatedIndexPrefix: PersonGeneratedIndexPrefix,
 	decodeAnyJSON: { try decodeAnyJSON($0, as: Generatedtest_Example_Person.self) },
 	decodeBinary: { try Generatedtest_Example_Person(serializedBytes: $0) },
 	encodeAnyJSON: { message in
@@ -56,44 +66,13 @@ public typealias PersonChange = TableChange<Generatedtest_Example_Person>
 struct PersonTable {
 	fileprivate let q: any DBTX
 	init(_ q: any DBTX) {
-		self.q = q
+		self.q = withChangeListeners(q)
 	}
 
 	func initialize() throws {
 		try ensureCoreTables(q)
-		try q.execute(PersonCreateTableSQL)
-		let existingColumns = try q.withRows("PRAGMA table_info(\"\(PersonTableName)\")") { rows in
-			var columns = Set<String>()
-			while let row = try rows.next() {
-				columns.insert(try row.string(at: 1))
-			}
-			return columns
-		}
-		if !existingColumns.contains("name") {
-			try q.execute("ALTER TABLE " + PersonTableNameQuoted + " ADD COLUMN \"name\" TEXT NOT NULL DEFAULT ''")
-		}
-		if !existingColumns.contains("age") {
-			try q.execute("ALTER TABLE " + PersonTableNameQuoted + " ADD COLUMN \"age\" INTEGER NOT NULL DEFAULT 0")
-		}
-		try ensureManagedIndexes(q, tableName: PersonTableName, generatedIndexPrefix: PersonGeneratedIndexPrefix, createIndexSQL: [
-			PersonCreateIndexSQL1,
-			PersonCreateIndexSQL2,
-		], desiredIndexNames: [
-			"idx_generatedtest_example_person__name",
-			"idx_generatedtest_example_person__name_age",
-		])
-		let currentSchema = try q.withRows("SELECT schema_hash FROM \(_proprdbSchemaTableName) WHERE table_name = ?", arguments: [PersonTableName]) { rows -> String? in
-			if let row = try rows.next() {
-				return try row.string(at: 0)
-			}
-			return nil as String?
-		}
-		if let currentSchema, currentSchema != PersonProjectionSchema {
-			try reproject()
-			try q.execute("UPDATE \(_proprdbSchemaTableName) SET schema_hash = ? WHERE table_name = ?", arguments: [PersonProjectionSchema, PersonTableName])
-		} else if currentSchema == nil {
-			try q.execute("INSERT INTO \(_proprdbSchemaTableName) (table_name, schema_hash) VALUES (?, ?)", arguments: [PersonTableName, PersonProjectionSchema])
-		}
+		try auditObjectIDs(q, bindings: [PersonGeneratedBinding])
+		try reconcileGeneratedTable(q, binding: PersonGeneratedBinding)
 		try drainUnknownRows(PersonTypeName)
 	}
 
@@ -119,7 +98,7 @@ struct PersonTable {
 
 	func insert(_ data: Generatedtest_Example_Person) throws -> PersonRow {
 		let id = try uuidV7()
-		try validateUUID(id)
+		try validateUUIDV7(id)
 		return try insertWithIDInternal(id: id, data: data)
 	}
 
@@ -131,7 +110,7 @@ struct PersonTable {
 		if id.isEmpty {
 			throw ProprDBError("empty id")
 		}
-		try validateUUID(id)
+		try validateUUIDV7(id)
 		try validateForWrite(data)
 		let atNs = try writeLocalObject(q, binding: PersonGeneratedBinding, id: id, message: data, insert: true)
 		return PersonRow(id: id, atNs: atNs, data: data)
@@ -141,7 +120,7 @@ struct PersonTable {
 		if id.isEmpty {
 			throw ProprDBError("empty id")
 		}
-		try validateUUID(id)
+		try validateUUIDV7(id)
 		try validateForWrite(data)
 		let atNs = try writeLocalObject(q, binding: PersonGeneratedBinding, id: id, message: data, insert: false)
 		return PersonRow(id: id, atNs: atNs, data: data)
@@ -178,24 +157,6 @@ struct PersonTable {
 		try applyIncomingObject(q, binding: PersonGeneratedBinding, record: JSONLRecord(id: id, deleted: true, atNs: atNs, data: dataJSON))
 	}
 
-	private func reproject() throws {
-		let rowsToReproject = try q.withRows("SELECT id, data FROM " + PersonTableNameQuoted) { rows in
-			var buffered: [(String, Data)] = []
-			while let row = try rows.next() {
-				buffered.append((try row.string(at: 0), try row.data(at: 1)))
-			}
-			return buffered
-		}
-		for (id, dataBytes) in rowsToReproject {
-			let data = try Generatedtest_Example_Person(serializedBytes: dataBytes)
-			var reprojectArguments: [Any?] = []
-			reprojectArguments.append(data.name)
-			reprojectArguments.append(data.age)
-			reprojectArguments.append(id)
-			try q.execute(PersonReprojectSQL, arguments: reprojectArguments)
-		}
-	}
-
 	fileprivate func drainUnknownRows(_ typeName: String) throws {
 		guard typeName == PersonTypeName else { throw ProprDBError("unexpected type name \(typeName)") }
 		try drainBoundUnknown(q, bindings: [PersonGeneratedBinding])
@@ -219,13 +180,20 @@ private let NoteCreateTableSQL = "CREATE TABLE IF NOT EXISTS \"generatedtest_exa
 private let NoteInsertSQL = "INSERT INTO \"generatedtest_example_note\" (\"id\", \"at_ns\", \"data\", \"text\") VALUES (?, ?, ?, ?)"
 private let NoteUpsertSQL = "INSERT INTO \"generatedtest_example_note\" (\"id\", \"at_ns\", \"data\", \"text\") VALUES (?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET \"at_ns\" = excluded.\"at_ns\", \"data\" = excluded.\"data\", \"text\" = excluded.\"text\""
 private let NoteGeneratedIndexPrefix = "idx_generatedtest_example_note__"
-private let NoteReprojectSQL = "UPDATE \"generatedtest_example_note\" SET \"text\" = ? WHERE id = ?"
 
 private let NoteGeneratedBinding = GeneratedTableBinding(
 	descriptor: GeneratedTableDescriptor(tableName: NoteTableName, typeName: NoteTypeName, isCore: false, syncEnabled: false, changeListenersEnabled: true, queryStatisticsEnabled: false),
 	messageType: Generatedtest_Example_Note.self,
 	insertSQL: NoteInsertSQL,
 	upsertSQL: NoteUpsertSQL,
+	createTableSQL: NoteCreateTableSQL,
+	projectionSchema: NoteProjectionSchema,
+	projectedColumns: [
+		ProjectedColumnDescriptor(name: "text", protoKind: "string", sqliteType: "TEXT", defaultSQL: "''", nullable: false, legacyOneofPresenceRepair: false),
+	],
+	generatedIndexes: [
+	],
+	generatedIndexPrefix: NoteGeneratedIndexPrefix,
 	decodeAnyJSON: { try decodeAnyJSON($0, as: Generatedtest_Example_Note.self) },
 	decodeBinary: { try Generatedtest_Example_Note(serializedBytes: $0) },
 	encodeAnyJSON: { message in
@@ -260,37 +228,13 @@ public typealias NoteChange = TableChange<Generatedtest_Example_Note>
 struct NoteTable {
 	fileprivate let q: any DBTX
 	init(_ q: any DBTX) {
-		self.q = q
+		self.q = withChangeListeners(q)
 	}
 
 	func initialize() throws {
 		try ensureCoreTables(q)
-		try q.execute(NoteCreateTableSQL)
-		let existingColumns = try q.withRows("PRAGMA table_info(\"\(NoteTableName)\")") { rows in
-			var columns = Set<String>()
-			while let row = try rows.next() {
-				columns.insert(try row.string(at: 1))
-			}
-			return columns
-		}
-		if !existingColumns.contains("text") {
-			try q.execute("ALTER TABLE " + NoteTableNameQuoted + " ADD COLUMN \"text\" TEXT NOT NULL DEFAULT ''")
-		}
-		try ensureManagedIndexes(q, tableName: NoteTableName, generatedIndexPrefix: NoteGeneratedIndexPrefix, createIndexSQL: [
-		], desiredIndexNames: [
-		])
-		let currentSchema = try q.withRows("SELECT schema_hash FROM \(_proprdbSchemaTableName) WHERE table_name = ?", arguments: [NoteTableName]) { rows -> String? in
-			if let row = try rows.next() {
-				return try row.string(at: 0)
-			}
-			return nil as String?
-		}
-		if let currentSchema, currentSchema != NoteProjectionSchema {
-			try reproject()
-			try q.execute("UPDATE \(_proprdbSchemaTableName) SET schema_hash = ? WHERE table_name = ?", arguments: [NoteProjectionSchema, NoteTableName])
-		} else if currentSchema == nil {
-			try q.execute("INSERT INTO \(_proprdbSchemaTableName) (table_name, schema_hash) VALUES (?, ?)", arguments: [NoteTableName, NoteProjectionSchema])
-		}
+		try auditObjectIDs(q, bindings: [NoteGeneratedBinding])
+		try reconcileGeneratedTable(q, binding: NoteGeneratedBinding)
 		try drainUnknownRows(NoteTypeName)
 	}
 
@@ -314,7 +258,7 @@ struct NoteTable {
 
 	func insert(_ data: Generatedtest_Example_Note) throws -> NoteRow {
 		let id = try uuidV7()
-		try validateUUID(id)
+		try validateUUIDV7(id)
 		return try insertWithIDInternal(id: id, data: data)
 	}
 
@@ -322,7 +266,7 @@ struct NoteTable {
 		if id.isEmpty {
 			throw ProprDBError("empty id")
 		}
-		try validateUUID(id)
+		try validateUUIDV7(id)
 		let atNs = try writeLocalObject(q, binding: NoteGeneratedBinding, id: id, message: data, insert: true)
 		return NoteRow(id: id, atNs: atNs, data: data)
 	}
@@ -331,7 +275,7 @@ struct NoteTable {
 		if id.isEmpty {
 			throw ProprDBError("empty id")
 		}
-		try validateUUID(id)
+		try validateUUIDV7(id)
 		let atNs = try writeLocalObject(q, binding: NoteGeneratedBinding, id: id, message: data, insert: false)
 		return NoteRow(id: id, atNs: atNs, data: data)
 	}
@@ -367,23 +311,6 @@ struct NoteTable {
 		try applyIncomingObject(q, binding: NoteGeneratedBinding, record: JSONLRecord(id: id, deleted: true, atNs: atNs, data: dataJSON))
 	}
 
-	private func reproject() throws {
-		let rowsToReproject = try q.withRows("SELECT id, data FROM " + NoteTableNameQuoted) { rows in
-			var buffered: [(String, Data)] = []
-			while let row = try rows.next() {
-				buffered.append((try row.string(at: 0), try row.data(at: 1)))
-			}
-			return buffered
-		}
-		for (id, dataBytes) in rowsToReproject {
-			let data = try Generatedtest_Example_Note(serializedBytes: dataBytes)
-			var reprojectArguments: [Any?] = []
-			reprojectArguments.append(data.text)
-			reprojectArguments.append(id)
-			try q.execute(NoteReprojectSQL, arguments: reprojectArguments)
-		}
-	}
-
 	fileprivate func drainUnknownRows(_ typeName: String) throws {
 		guard typeName == NoteTypeName else { throw ProprDBError("unexpected type name \(typeName)") }
 		try drainBoundUnknown(q, bindings: [NoteGeneratedBinding])
@@ -399,24 +326,176 @@ struct NoteTable {
 
 }
 
+let ChoiceTableName = "generatedtest_example_choice"
+private let ChoiceTableNameQuoted = quoteSQLiteIdentifier(ChoiceTableName)
+let ChoiceTypeName = "generatedtest.example.Choice"
+let ChoiceProjectionSchema = "label:string:optional"
+private let ChoiceCreateTableSQL = "CREATE TABLE IF NOT EXISTS \"generatedtest_example_choice\" (\"id\" TEXT PRIMARY KEY, \"at_ns\" INTEGER NOT NULL, \"data\" BLOB NOT NULL, \"label\" TEXT)"
+private let ChoiceInsertSQL = "INSERT INTO \"generatedtest_example_choice\" (\"id\", \"at_ns\", \"data\", \"label\") VALUES (?, ?, ?, ?)"
+private let ChoiceUpsertSQL = "INSERT INTO \"generatedtest_example_choice\" (\"id\", \"at_ns\", \"data\", \"label\") VALUES (?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET \"at_ns\" = excluded.\"at_ns\", \"data\" = excluded.\"data\", \"label\" = excluded.\"label\""
+private let ChoiceGeneratedIndexPrefix = "idx_generatedtest_example_choice__"
+
+private let ChoiceGeneratedBinding = GeneratedTableBinding(
+	descriptor: GeneratedTableDescriptor(tableName: ChoiceTableName, typeName: ChoiceTypeName, isCore: false, syncEnabled: true, changeListenersEnabled: false, queryStatisticsEnabled: false),
+	messageType: Generatedtest_Example_Choice.self,
+	insertSQL: ChoiceInsertSQL,
+	upsertSQL: ChoiceUpsertSQL,
+	createTableSQL: ChoiceCreateTableSQL,
+	projectionSchema: ChoiceProjectionSchema,
+	projectedColumns: [
+		ProjectedColumnDescriptor(name: "label", protoKind: "string", sqliteType: "TEXT", defaultSQL: "''", nullable: true, legacyOneofPresenceRepair: true),
+	],
+	generatedIndexes: [
+	],
+	generatedIndexPrefix: ChoiceGeneratedIndexPrefix,
+	decodeAnyJSON: { try decodeAnyJSON($0, as: Generatedtest_Example_Choice.self) },
+	decodeBinary: { try Generatedtest_Example_Choice(serializedBytes: $0) },
+	encodeAnyJSON: { message in
+		guard let data = message as? Generatedtest_Example_Choice else { throw ProprDBError("expected Generatedtest_Example_Choice") }
+		return try marshalAnyJSON(data, typeName: ChoiceTypeName)
+	},
+	messagesEqual: { left, right in
+		guard let left = left as? Generatedtest_Example_Choice, let right = right as? Generatedtest_Example_Choice else { return false }
+		return left == right
+	},
+	projectedValues: { message in
+		guard let data = message as? Generatedtest_Example_Choice else { throw ProprDBError("expected Generatedtest_Example_Choice") }
+		var values: [SQLiteBindValue] = []
+		if case .label = data.selection { values.append(sqliteBindValue(data.label)) } else { values.append(.null) }
+		return values
+	}
+)
+
+public struct ChoiceRow: Equatable, Sendable {
+	public var id: String
+	public var atNs: Int64
+	public var data: Generatedtest_Example_Choice
+	public init(id: String, atNs: Int64, data: Generatedtest_Example_Choice) {
+		self.id = id
+		self.atNs = atNs
+		self.data = data
+	}
+}
+
+struct ChoiceTable {
+	fileprivate let q: any DBTX
+	init(_ q: any DBTX) {
+		self.q = q
+	}
+
+	func initialize() throws {
+		try ensureCoreTables(q)
+		try auditObjectIDs(q, bindings: [ChoiceGeneratedBinding])
+		try reconcileGeneratedTable(q, binding: ChoiceGeneratedBinding)
+		try drainUnknownRows(ChoiceTypeName)
+	}
+
+	func select(where whereClause: String = "", arguments: [SQLiteBindValue] = []) throws -> [ChoiceRow] {
+		var query = "SELECT id, at_ns, data FROM " + ChoiceTableNameQuoted
+		if !whereClause.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+			query += " WHERE " + whereClause
+		}
+		return try q.withRows(query, bindValues: arguments) { rows in
+			var result: [ChoiceRow] = []
+			while let row = try rows.next() {
+				let id = try row.string(at: 0)
+				let atNs = try row.int64(at: 1)
+				let dataBytes = try row.data(at: 2)
+				let data = try Generatedtest_Example_Choice(serializedBytes: dataBytes)
+				result.append(ChoiceRow(id: id, atNs: atNs, data: data))
+			}
+			return result
+		}
+	}
+
+	func insert(_ data: Generatedtest_Example_Choice) throws -> ChoiceRow {
+		let id = try uuidV7()
+		try validateUUIDV7(id)
+		return try insertWithIDInternal(id: id, data: data)
+	}
+
+	private func insertWithIDInternal(id: String, data: Generatedtest_Example_Choice) throws -> ChoiceRow {
+		if id.isEmpty {
+			throw ProprDBError("empty id")
+		}
+		try validateUUIDV7(id)
+		let atNs = try writeLocalObject(q, binding: ChoiceGeneratedBinding, id: id, message: data, insert: true)
+		return ChoiceRow(id: id, atNs: atNs, data: data)
+	}
+
+	func updateByID(_ id: String, data: Generatedtest_Example_Choice) throws -> ChoiceRow {
+		if id.isEmpty {
+			throw ProprDBError("empty id")
+		}
+		try validateUUIDV7(id)
+		let atNs = try writeLocalObject(q, binding: ChoiceGeneratedBinding, id: id, message: data, insert: false)
+		return ChoiceRow(id: id, atNs: atNs, data: data)
+	}
+
+	func updateRow(_ row: ChoiceRow) throws -> ChoiceRow {
+		return try updateByID(row.id, data: row.data)
+	}
+
+	func deleteByID(_ id: String) throws {
+		if id.isEmpty {
+			throw ProprDBError("empty id")
+		}
+		try deleteLocalObject(q, binding: ChoiceGeneratedBinding, id: id)
+	}
+
+	func deleteRow(_ row: ChoiceRow) throws {
+		try deleteByID(row.id)
+	}
+
+	fileprivate func upsertWithAtNs(id: String, atNs: Int64, data: Generatedtest_Example_Choice) throws {
+		if id.isEmpty {
+			throw ProprDBError("empty id")
+		}
+		let dataJSON = try marshalAnyJSON(data, typeName: ChoiceTypeName)
+		try applyIncomingObject(q, binding: ChoiceGeneratedBinding, record: JSONLRecord(id: id, deleted: false, atNs: atNs, data: dataJSON))
+	}
+
+	fileprivate func tombstoneWithAtNs(id: String, atNs: Int64) throws {
+		if id.isEmpty {
+			throw ProprDBError("empty id")
+		}
+		let dataJSON = try marshalTypeOnlyAnyJSON(typeName: ChoiceTypeName)
+		try applyIncomingObject(q, binding: ChoiceGeneratedBinding, record: JSONLRecord(id: id, deleted: true, atNs: atNs, data: dataJSON))
+	}
+
+	fileprivate func drainUnknownRows(_ typeName: String) throws {
+		guard typeName == ChoiceTypeName else { throw ProprDBError("unexpected type name \(typeName)") }
+		try drainBoundUnknown(q, bindings: [ChoiceGeneratedBinding])
+	}
+
+	func drainUnknownRows() throws {
+		try drainUnknownRows(ChoiceTypeName)
+	}
+
+}
+
 private let crudGeneratedBindings = [
 	PersonGeneratedBinding,
 	NoteGeneratedBinding,
+	ChoiceGeneratedBinding,
 ]
 
 struct CRUD {
 	let person: PersonTable
 	let note: NoteTable
+	let choice: ChoiceTable
 	init(_ q: any DBTX) {
 		let tracked = withChangeListeners(q)
 		self.person = PersonTable(tracked)
 		self.note = NoteTable(tracked)
+		self.choice = ChoiceTable(tracked)
 	}
 	private func dbtx() -> any DBTX { person.q }
 	func tableDescriptors() -> [GeneratedTableDescriptor] { crudGeneratedBindings.map(\.descriptor) + coreTableDescriptors() }
 	func initialize() throws {
 		try person.initialize()
 		try note.initialize()
+		try choice.initialize()
 	}
 	func prepareJSONL(remote: String) throws -> PreparedJSONLExport { try prepareBoundJSONL(dbtx(), bindings: crudGeneratedBindings, remote: remote) }
 	func acknowledgeJSONL(_ checkpoint: JSONLCheckpoint) throws { try acknowledgeBoundJSONL(dbtx(), checkpoint: checkpoint) }
@@ -458,6 +537,19 @@ public struct NoteTableProxy: Sendable {
 	public func changes() async throws -> AsyncStream<NoteChange> { try await actor._noteChanges() }
 }
 
+public struct ChoiceTableProxy: Sendable {
+	fileprivate let actor: ProprDBActor
+
+	public func initialize() async throws { try await actor._choiceInitialize() }
+	public func select(where whereClause: String = "", arguments: [SQLiteBindValue] = []) async throws -> [ChoiceRow] { try await actor._choiceSelect(where: whereClause, arguments: arguments) }
+	public func insert(_ data: Generatedtest_Example_Choice) async throws -> ChoiceRow { try await actor._choiceInsert(data) }
+	public func updateByID(_ id: String, data: Generatedtest_Example_Choice) async throws -> ChoiceRow { try await actor._choiceUpdateByID(id, data: data) }
+	public func updateRow(_ row: ChoiceRow) async throws -> ChoiceRow { try await actor._choiceUpdateRow(row) }
+	public func deleteByID(_ id: String) async throws { try await actor._choiceDeleteByID(id) }
+	public func deleteRow(_ row: ChoiceRow) async throws { try await actor._choiceDeleteRow(row) }
+	public func drainUnknownRows() async throws { try await actor._choiceDrainUnknownRows() }
+}
+
 extension ProprDBActor {
 	public func initialize() throws { try withDatabase { try CRUD($0).initialize() } }
 	public func tableDescriptors() throws -> [GeneratedTableDescriptor] { try withDatabase { CRUD($0).tableDescriptors() } }
@@ -482,6 +574,15 @@ extension ProprDBActor {
 	fileprivate func _noteDeleteRow(_ row: NoteRow) throws { try withDatabase { try CRUD($0).note.deleteRow(row) } }
 	fileprivate func _noteDrainUnknownRows() throws { try withDatabase { try CRUD($0).note.drainUnknownRows() } }
 	fileprivate func _noteChanges() throws -> AsyncStream<NoteChange> { try withDatabase { CRUD($0).note.changes() } }
+	public nonisolated var choice: ChoiceTableProxy { ChoiceTableProxy(actor: self) }
+	fileprivate func _choiceInitialize() throws { try withDatabase { try CRUD($0).choice.initialize() } }
+	fileprivate func _choiceSelect(where whereClause: String, arguments: [SQLiteBindValue]) throws -> [ChoiceRow] { try withDatabase { try CRUD($0).choice.select(where: whereClause, arguments: arguments) } }
+	fileprivate func _choiceInsert(_ data: Generatedtest_Example_Choice) throws -> ChoiceRow { try withDatabase { try CRUD($0).choice.insert(data) } }
+	fileprivate func _choiceUpdateByID(_ id: String, data: Generatedtest_Example_Choice) throws -> ChoiceRow { try withDatabase { try CRUD($0).choice.updateByID(id, data: data) } }
+	fileprivate func _choiceUpdateRow(_ row: ChoiceRow) throws -> ChoiceRow { try withDatabase { try CRUD($0).choice.updateRow(row) } }
+	fileprivate func _choiceDeleteByID(_ id: String) throws { try withDatabase { try CRUD($0).choice.deleteByID(id) } }
+	fileprivate func _choiceDeleteRow(_ row: ChoiceRow) throws { try withDatabase { try CRUD($0).choice.deleteRow(row) } }
+	fileprivate func _choiceDrainUnknownRows() throws { try withDatabase { try CRUD($0).choice.drainUnknownRows() } }
 	public func prepareJSONL(remote: String) throws -> PreparedJSONLExport { try withDatabase { try CRUD($0).prepareJSONL(remote: remote) } }
 	public func acknowledgeJSONL(_ checkpoint: JSONLCheckpoint) throws { try withDatabase { try CRUD($0).acknowledgeJSONL(checkpoint) } }
 	public func discardJSONL(_ checkpoint: JSONLCheckpoint) throws { try withDatabase { try CRUD($0).discardJSONL(checkpoint) } }

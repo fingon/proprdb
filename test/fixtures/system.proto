@@ -26,6 +26,13 @@ message Note {
   string text = 1 [(com.github.fingon.proprdb.external) = true];
 }
 
+message Choice {
+  oneof selection {
+    string label = 1 [(com.github.fingon.proprdb.external) = true];
+    int64 count = 2;
+  }
+}
+
 message Hidden {
   option (com.github.fingon.proprdb.omit_table) = true;
   string text = 1 [(com.github.fingon.proprdb.external) = true];

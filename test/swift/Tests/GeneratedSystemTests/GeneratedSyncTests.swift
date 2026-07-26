@@ -116,6 +116,32 @@ final class GeneratedSyncTests: XCTestCase {
         XCTAssertEqual(try scalarInt(db, sql: "SELECT at_ns FROM _unknown_types WHERE type_name = ? AND id = ?", arguments: [unknownTypeName, unknownID]), 20)
     }
 
+    func testJSONLRejectsInvalidScalarCoercions() throws {
+        let valid = "{\"id\":\(jsonString(unknownID)),\"atNs\":42,\"data\":{\"@type\":\(jsonString(typeURL(unknownTypeName)))}}\n"
+        XCTAssertNoThrow(try readJSONL(text: valid) { _, _ in })
+        XCTAssertThrowsError(try readJSONL(text: valid.replacingOccurrences(of: "\"atNs\":42", with: "\"deleted\":1,\"atNs\":42")) { _, _ in })
+        XCTAssertThrowsError(try readJSONL(text: valid.replacingOccurrences(of: "\"atNs\":42", with: "\"atNs\":true")) { _, _ in })
+        XCTAssertThrowsError(try readJSONL(text: valid.replacingOccurrences(of: "\"atNs\":42", with: "\"atNs\":42.5")) { _, _ in })
+        XCTAssertThrowsError(try readJSONL(text: valid.replacingOccurrences(of: "\"data\":{\"@type\":\(jsonString(typeURL(unknownTypeName)))}", with: "\"data\":[]")) { _, _ in })
+    }
+
+    func testKnownOmitSyncParkedRecordDoesNotExport() throws {
+        let db = try SQLiteDatabase(path: ":memory:")
+        let crud = CRUD(db)
+        try crud.initialize()
+        let dataJSON = String(decoding: try marshalTypeOnlyAnyJSON(typeName: NoteTypeName), as: UTF8.self)
+        try db.execute(
+            "INSERT INTO _unknown_types (type_name, id, at_ns, deleted, data_json) VALUES (?, ?, ?, ?, ?)",
+            arguments: [NoteTypeName, unknownID, Int64(1), 0, dataJSON]
+        )
+
+        XCTAssertEqual(try crud.writeJSONL(remote: ""), "")
+        XCTAssertEqual(
+            try scalarInt(db, sql: "SELECT COUNT(*) FROM _unknown_types WHERE type_name = ? AND id = ?", arguments: [NoteTypeName, unknownID]),
+            1
+        )
+    }
+
     func testGeneratedInitDrainsUnknownRowsForKnownType() throws {
         let db = try SQLiteDatabase(path: ":memory:")
         let crud = CRUD(db)

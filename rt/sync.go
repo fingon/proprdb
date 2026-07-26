@@ -52,6 +52,9 @@ func WriteLocalObjectContext(ctx context.Context, q DBTX, binding GeneratedTable
 	if id == "" {
 		return 0, errors.New("empty id")
 	}
+	if err := ValidateUUIDv7(id); err != nil {
+		return 0, err
+	}
 	if message == nil {
 		return 0, errors.New("nil message")
 	}
@@ -90,6 +93,9 @@ func DeleteLocalBoundObjectContext(ctx context.Context, q DBTX, binding Generate
 	if id == "" {
 		return errors.New("empty id")
 	}
+	if err := ValidateUUIDv7(id); err != nil {
+		return err
+	}
 	return q.WithTransaction(ctx, func(tx DBTX) error {
 		atNs, err := NextObjectAtNsContext(ctx, tx, binding.Descriptor.TableName, id)
 		if err != nil {
@@ -105,6 +111,9 @@ func DeleteLocalBoundObjectContext(ctx context.Context, q DBTX, binding Generate
 
 func ApplyIncomingObjectContext(ctx context.Context, q DBTX, binding GeneratedTableBinding, record JSONLRecord) error {
 	if err := validateBinding(binding); err != nil {
+		return err
+	}
+	if err := ValidateUUIDv7(record.ID); err != nil {
 		return err
 	}
 	if record.Deleted {
@@ -344,7 +353,9 @@ func stageJSONLRecord(ctx context.Context, q DBTX, checkpoint JSONLCheckpoint, s
 
 func stageTombstonesAndUnknown(ctx context.Context, q DBTX, bindings []GeneratedTableBinding, remote string, checkpoint JSONLCheckpoint, sequence int) (int, error) {
 	byTable := make(map[string]GeneratedTableBinding, len(bindings))
+	knownTypes := make(map[string]bool, len(bindings))
 	for _, binding := range bindings {
+		knownTypes[binding.Descriptor.TypeName] = true
 		if binding.Descriptor.SyncEnabled {
 			byTable[binding.Descriptor.TableName] = binding
 		}
@@ -390,6 +401,9 @@ ORDER BY deleted.table_name, deleted.id`, remote, remote)
 		return sequence, err
 	}
 	for _, unknownRecord := range unknownRecords {
+		if knownTypes[unknownRecord.TypeName] {
+			continue
+		}
 		if err := stageJSONLRecord(ctx, q, checkpoint, sequence, UnknownBatchTableName(unknownRecord.TypeName), unknownRecord.Record); err != nil {
 			return sequence, err
 		}
