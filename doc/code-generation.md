@@ -105,3 +105,75 @@ protoc \
   --proprdb_out=paths=source_relative:test/system \
   test/fixtures/system.proto
 ```
+
+## Rust target
+
+Build the protoc plugin with `make protoc-gen-proprdb-rust`. Generate message
+structs using Prost, then generate the database bindings:
+
+```sh
+protoc -I test/fixtures -I . \
+  --plugin=protoc-gen-proprdb-rust=./protoc-gen-proprdb-rust \
+  --proprdb-rust_out=paths=source_relative:test/rust/src \
+  test/fixtures/system.proto
+```
+
+The plugin emits `<first-file>.proprdb.pb.rs`, with input files sorted by path.
+Pass all schemas for a database in one invocation to get one `Crud` wrapper.
+The generated bindings reference Prost types through `crate::<proto package>`;
+use `prost_build::Config::include_file` to include the message module tree at
+crate root. A `go_package` option is optional for the Rust target.
+
+Add the `proprdb-runtime` crate from `rt/rust` as a dependency and include the
+bindings in a module. The runtime uses Prost 0.14 and rusqlite 0.40. See
+`test/rust` for a complete example.
+
+```rust
+let connection = proprdb_runtime::Connection::open_in_memory()?;
+let crud = system::Crud::new(&connection);
+crud.initialize()?;
+let row = crud.person.insert(&person)?;
+let found = crud.person.select_by_id(&row.id)?;
+```
+
+The Rust target supports typed CRUD, UUIDv7 IDs, scalar projections (including
+optional and oneof presence), generated indexes, projection reconciliation,
+write validation, custom ID insertion, change listeners, and query statistics.
+With `validate_write`, implement `valid(&self) -> proprdb_runtime::Result<()>`
+on the message type. `insert_with_id` is only available for messages declaring
+`allow_custom_id_insert`. SQL selection takes a predicate and bound
+`proprdb_runtime::Value` arguments; an empty predicate is rejected.
+
+Tables borrow a `proprdb_runtime::Connection`, which wraps rusqlite and shares
+change listeners across table and CRUD wrappers. Use `connection.transaction()`
+for an explicit transaction: notifications are delivered after commit and
+discarded on rollback, including rollback on drop. Writes and schema
+reconciliation use savepoints. `proprdb_runtime::atomic` supports nested
+savepoint operations with the same notification semantics. Failed validation
+and writes produce no notifications.
+
+Updates insert a row when its ID does not exist. Deleting an absent ID still
+records a tombstone, unless `omit_sync` is set. Write IDs must be canonical
+lowercase UUIDv7 values. Initialization audits stored IDs and reconciles all
+generated tables atomically.
+
+`Crud` exposes `read_jsonl`, `prepare_jsonl`, `acknowledge_jsonl`,
+`discard_jsonl`, and `write_jsonl`, using the same JSONL, checkpoint, projection
+history, and core table formats as Go. Import commits each physical record
+separately, preserves unknown types for later replay, rejects conflicting
+equal timestamps, and transfers remote watermarks when unknown types drain.
+Local write validation does not apply to sync imports. An empty remote disables
+watermark bookkeeping; whitespace is a remote name. Prepared exports stage a
+stable snapshot, and acknowledging a checkpoint only marks exported versions
+as delivered. Failed writes discard the batch without advancing watermarks.
+
+`Crud::introspect_tables` reports generated and core table descriptors, counts,
+and payload sizes. `proprdb_runtime::query_statistics` lists persistent call
+counts and durations keyed by full parameterized SQL; `clear_query_statistics`
+clears them. Table-level `query_statistics(predicate)` remains a convenience
+lookup for a specific predicate.
+
+Run `make rust-test`, `make rust-build`, and `make rust-lint` for the Rust
+checks. These are also included in the project-wide test, build, and lint
+targets; `make generate` and `make verify-generated` cover Rust fixtures and
+golden files as well.

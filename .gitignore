@@ -2,3 +2,6 @@
 /protoc-gen-proprdb-swift
 .build
 .swiftpm
+
+/protoc-gen-proprdb-rust
+/target

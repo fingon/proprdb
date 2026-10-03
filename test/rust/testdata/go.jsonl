@@ -1,0 +1,4 @@
+{"id":"01951d6e-a000-7000-8000-000000000001","atNs":"1761736535123456789","data":{"@type":"type.googleapis.com/generatedtest.example.Person","name":"Ada","age":"35"}}
+{"id":"01951d6e-a000-7000-8000-000000000002","atNs":1761736535123456790,"data":{"@type":"type.googleapis.com/generatedtest.example.Choice","count":"9007199254740993"}}
+{"id":"01951d6e-a000-7000-8000-000000000003","atNs":1761736535123456791,"deleted":true,"data":{"@type":"type.googleapis.com/generatedtest.example.Person"}}
+{"id":"01951d6e-a000-7000-8000-000000000004","atNs":1761736535123456792,"data":{"@type":"type.googleapis.com/future.Message","value":9007199254740993}}

@@ -1,0 +1,15 @@
+[package]
+name = "proprdb-runtime"
+version = "0.1.0"
+edition.workspace = true
+license-file = "../../LICENSE"
+
+[dependencies]
+prost.workspace = true
+rusqlite.workspace = true
+thiserror = "2"
+uuid = { version = "1", features = ["v7"] }
+prost-reflect = { version = "0.16", features = ["serde"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["arbitrary_precision"] }
+log = "0.4"

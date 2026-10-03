@@ -1,0 +1,17 @@
+[package]
+name = "proprdb-rust-tests"
+version = "0.1.0"
+edition.workspace = true
+publish = false
+
+[dependencies]
+proprdb-runtime = { path = "../../rt/rust" }
+prost.workspace = true
+prost-types = "0.14"
+serde_json = { version = "1", features = ["arbitrary_precision"] }
+
+[build-dependencies]
+prost-build = "0.14"
+
+[dev-dependencies]
+tempfile = "3"

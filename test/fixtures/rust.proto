@@ -1,0 +1,47 @@
+syntax = "proto3";
+
+package rusttest;
+
+import "google/protobuf/any.proto";
+import "google/protobuf/timestamp.proto";
+import "proto/proprdb/options.proto";
+
+message Scalars {
+  option (com.github.fingon.proprdb.omit_sync) = true;
+  optional string nick = 1 [(com.github.fingon.proprdb.external) = true];
+  bool enabled = 2 [(com.github.fingon.proprdb.external) = true];
+  bytes payload = 3 [(com.github.fingon.proprdb.external) = true];
+  double score = 4 [(com.github.fingon.proprdb.external) = true];
+  uint32 amount = 5 [(com.github.fingon.proprdb.external) = true];
+  State state = 6 [(com.github.fingon.proprdb.external) = true];
+  string type = 7 [(com.github.fingon.proprdb.external) = true];
+  enum State {
+    STATE_UNKNOWN = 0;
+    STATE_READY = 1;
+  }
+}
+
+message Outer {
+  option (com.github.fingon.proprdb.omit_table) = true;
+  message Inner {
+    oneof selection {
+      bytes blob = 1 [(com.github.fingon.proprdb.external) = true];
+      double number = 2 [(com.github.fingon.proprdb.external) = true];
+    }
+  }
+}
+
+message SyncPayload {
+  option (com.github.fingon.proprdb.allow_custom_id_insert) = true;
+  string title = 1 [(com.github.fingon.proprdb.external) = true];
+  repeated string tags = 2;
+  map<string, int64> counters = 3;
+  bytes payload = 4;
+  Scalars.State state = 5;
+  google.protobuf.Timestamp created_at = 6;
+  google.protobuf.Any detail = 7;
+  message Detail {
+    option (com.github.fingon.proprdb.omit_table) = true;
+    string text = 1;
+  }
+}

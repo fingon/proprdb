@@ -38,3 +38,10 @@ repos:
         files: '^go\.(mod|sum)$'
         pass_filenames: false
         entry: go mod tidy -v
+
+      - id: rust-format
+        name: "Check Rust formatting"
+        language: system
+        files: '(\.rs$|^Makefile$)'
+        entry: cargo fmt --all -- --check
+        pass_filenames: false

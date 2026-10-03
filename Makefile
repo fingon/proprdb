@@ -9,7 +9,7 @@
 #
 #
 
-BINARIES=protoc-gen-proprdb protoc-gen-proprdb-swift
+BINARIES=protoc-gen-proprdb protoc-gen-proprdb-swift protoc-gen-proprdb-rust
 SWIFT_ENV=HOME=/tmp SWIFTPM_MODULECACHE_OVERRIDE=/tmp/swiftpm-module-cache CLANG_MODULE_CACHE_PATH=/tmp/clang-module-cache
 SWIFT_ARGS?=--disable-sandbox
 PROTOC_GEN_SWIFT=test/swift/.build/checkouts/swift-protobuf/.build/debug/protoc-gen-swift
@@ -23,13 +23,16 @@ protoc-gen-proprdb: $(wildcard **/*.go)
 protoc-gen-proprdb-swift: $(wildcard **/*.go)
 	go build ./cmd/protoc-gen-proprdb-swift
 
+protoc-gen-proprdb-rust: $(wildcard **/*.go)
+	go build ./cmd/protoc-gen-proprdb-rust
+
 .PHONY: protoc-gen-swift
 protoc-gen-swift: test/swift/Package.resolved
 	cd test/swift && $(SWIFT_ENV) swift package resolve $(SWIFT_ARGS)
 	$(SWIFT_ENV) swift build --package-path test/swift/.build/checkouts/swift-protobuf --product protoc-gen-swift $(SWIFT_ARGS)
 
-.PHONY: protoc-gen-proprdb protoc-gen-proprdb-swift build
-build: $(BINARIES) swift-build
+.PHONY: protoc-gen-proprdb protoc-gen-proprdb-swift protoc-gen-proprdb-rust build
+build: $(BINARIES) swift-build rust-build
 
 .PHONY: generate
 generate: $(BINARIES) protoc-gen-swift
@@ -37,11 +40,12 @@ generate: $(BINARIES) protoc-gen-swift
 	mkdir -p test/swift/Sources/GeneratedSystem
 	protoc -I test/fixtures -I . --plugin=protoc-gen-swift=$(PROTOC_GEN_SWIFT) --swift_out=Visibility=Public:test/swift/Sources/GeneratedSystem test/fixtures/system.proto
 	protoc -I test/fixtures -I . --plugin=protoc-gen-proprdb-swift=./protoc-gen-proprdb-swift --proprdb-swift_out=Visibility=Public,paths=source_relative:test/swift/Sources/GeneratedSystem test/fixtures/system.proto
+	$(MAKE) rust-fixtures
 	go test ./test -update
 
 .PHONY: verify-generated
 verify-generated:
-	go test ./test -run 'TestProtoc(Plugin|SwiftPlugin)Golden'
+	go test ./test -run 'TestProtoc(Plugin|SwiftPlugin|RustPlugin)Golden'
 
 .PHONY: swift-fixtures
 swift-fixtures: protoc-gen-swift
@@ -58,11 +62,27 @@ swift-test: swift-fixtures
 swift-build: swift-fixtures
 	cd test/swift && $(SWIFT_ENV) swift build $(SWIFT_ARGS)
 
+.PHONY: rust-fixtures rust-test rust-build rust-lint
+rust-fixtures: protoc-gen-proprdb-rust
+	protoc -I test/fixtures -I . --plugin=protoc-gen-proprdb-rust=./protoc-gen-proprdb-rust --proprdb-rust_out=paths=source_relative:test/rust/src test/fixtures/system.proto
+	protoc -I test/fixtures -I . --plugin=protoc-gen-proprdb-rust=./protoc-gen-proprdb-rust --proprdb-rust_out=paths=source_relative:test/rust/src test/fixtures/rust.proto
+
+rust-test: rust-fixtures
+	cargo test --workspace --locked
+
+rust-build: rust-fixtures
+	cargo build --workspace --locked
+
+rust-lint:
+	cargo fmt --all -- --check
+	cargo clippy --workspace --all-targets --locked -- -D warnings
+
 .PHONY: test
 test:
 	go test ./...
 	cd test/system && go test ./...
 	$(MAKE) swift-test
+	$(MAKE) rust-test
 
 .PHONY: race
 race:
@@ -73,7 +93,7 @@ race:
 check: lint verify-generated test build
 
 .PHONY: lint
-lint:
+lint: rust-lint
 	go tool golangci-lint run
 
 .PHONY: release-minor release-patch

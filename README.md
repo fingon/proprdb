@@ -27,6 +27,7 @@ Prerequisites:
 
 - Go `1.25+`
 - SQLite `3.35+` for projection removal
+- Rust (edition 2024), Cargo, and `protoc` for the Rust target
 
 Commands:
 
@@ -34,3 +35,8 @@ Commands:
 make test
 make lint
 ```
+
+Rust bindings use Prost and the runtime in `rt/rust`. Build the plugin with
+`make protoc-gen-proprdb-rust` and run its integration tests with
+`make rust-test`. See [Rust code generation](doc/code-generation.md#rust-target)
+for usage and the current feature coverage.
