@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -77,7 +78,7 @@ func TestEqualTimestampConflictAndStringTimestamp(t *testing.T) {
 
 	const objectID = "018f4f3f-6f9f-7a1b-8f55-1234567890dd"
 	const atNs = int64(1_761_736_535_123_456_789)
-	line := fmt.Sprintf("{\"id\":%q,\"atNs\":%q,\"data\":{\"@type\":%q,\"name\":\"same\"}}\n", objectID, fmt.Sprint(atNs), typeURLPrefix+PersonTypeName)
+	line := fmt.Sprintf("{\"id\":%q,\"atNs\":%q,\"data\":{\"@type\":%q,\"name\":\"same\"}}\n", objectID, strconv.FormatInt(atNs, 10), typeURLPrefix+PersonTypeName)
 	assert.NilError(t, crud.ReadJSONL("remote", strings.NewReader(line)))
 	assert.NilError(t, crud.ReadJSONL("remote", strings.NewReader(line)))
 

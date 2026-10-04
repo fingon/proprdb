@@ -155,12 +155,12 @@ fn now_ns() -> Result<i64> {
 pub fn validate_id(id: &str) -> Result<()> {
     let uuid =
         Uuid::parse_str(id).map_err(|error| Error::Invalid(format!("invalid UUID: {error}")))?;
-    if uuid.get_version_num() != 7
+    if !(1..=8).contains(&uuid.get_version_num())
         || uuid.get_variant() != uuid::Variant::RFC4122
         || uuid.to_string() != id
     {
         return Err(Error::Invalid(
-            "id must be a canonical lowercase UUIDv7".into(),
+            "id must be a canonical lowercase RFC UUID".into(),
         ));
     }
     Ok(())

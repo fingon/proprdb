@@ -282,7 +282,7 @@ fn updates_create_rows_and_missing_deletes_create_tombstones() -> Result<()> {
     assert!(row.at_ns > first_export[0].at_ns);
     assert_eq!(crud.person.select_by_id(FIRST_ID)?, Some(row.clone()));
     assert!(crud.person.delete_row(&row)?);
-    for id in ["", "invalid", "01951d6e-a000-4000-8000-000000000001"] {
+    for id in ["", "invalid", "01951d6e-a000-0000-8000-000000000001"] {
         assert!(crud.person.update_by_id(id, &person()).is_err());
         assert!(crud.person.delete_by_id(id).is_err());
     }

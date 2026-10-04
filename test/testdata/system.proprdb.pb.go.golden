@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"strings"
 
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
@@ -27,11 +26,7 @@ const PersonGeneratedIndexPrefix = "idx_generatedtest_example_person__"
 const PersonCreateIndexSQL1 = "CREATE INDEX IF NOT EXISTS \"idx_generatedtest_example_person__name\" ON \"generatedtest_example_person\" (\"name\")"
 const PersonCreateIndexSQL2 = "CREATE INDEX IF NOT EXISTS \"idx_generatedtest_example_person__name_age\" ON \"generatedtest_example_person\" (\"name\", \"age\")"
 
-type PersonRow struct {
-	ID   string
-	AtNs int64
-	Data *Person
-}
+type PersonRow = rt.Row[*Person]
 
 type PersonChange = rt.TableChange[*Person]
 
@@ -55,6 +50,13 @@ var PersonGeneratedBinding = rt.GeneratedTableBinding{
 		{Name: "idx_generatedtest_example_person__name", CreateSQL: PersonCreateIndexSQL1},
 		{Name: "idx_generatedtest_example_person__name_age", CreateSQL: PersonCreateIndexSQL2},
 	},
+	ValidateMessage: func(message proto.Message) error {
+		data, ok := message.(*Person)
+		if !ok {
+			return fmt.Errorf("expected *Person, got %T", message)
+		}
+		return data.Valid()
+	},
 	ProjectedValues: func(message proto.Message) ([]any, error) {
 		data, ok := message.(*Person)
 		if !ok {
@@ -72,238 +74,64 @@ func NewPersonTable(q DBTX) *PersonTable {
 	return &PersonTable{q: q}
 }
 
+func (t *PersonTable) runtimeTable() rt.Table {
+	return rt.NewTable(t.q, PersonGeneratedBinding)
+}
+
 func (t *PersonTable) Init() error {
-	return t.init(true)
+	return t.runtimeTable().Init(true)
 }
 
 func (t *PersonTable) init(ensureCore bool) error {
-	if t.q == nil {
-		return errors.New("nil DBTX")
-	}
-	if ensureCore {
-		if err := rt.EnsureCoreTables(t.q); err != nil {
-			return err
-		}
-	}
-	if err := rt.AuditObjectIDsContext(context.Background(), t.q, []rt.GeneratedTableBinding{PersonGeneratedBinding}); err != nil {
-		return err
-	}
-	if err := rt.ReconcileGeneratedTableContext(context.Background(), t.q, PersonGeneratedBinding); err != nil {
-		return err
-	}
-	if err := t.drainUnknownRows(PersonTypeName); err != nil {
-		return fmt.Errorf("drain unknown rows for %s: %w", PersonTableName, err)
-	}
-	return nil
+	return t.runtimeTable().Init(ensureCore)
 }
 
 func (t *PersonTable) Select(where string, args ...any) ([]PersonRow, error) {
-	if t.q == nil {
-		return nil, errors.New("nil DBTX")
-	}
-	ctx := context.Background()
-	query := `SELECT id, at_ns, data FROM "` + PersonTableName + `"`
-	if strings.TrimSpace(where) != "" {
-		query += " WHERE " + where
-	}
-	return rt.MeasureQueryContext(ctx, t.q, PersonTableName, query, func() ([]PersonRow, error) {
-		rows, err := t.q.QueryContext(ctx, query, args...)
-		if err != nil {
-			return nil, fmt.Errorf("select from %s: %w", PersonTableName, err)
-		}
-		result := make([]PersonRow, 0)
-		for rows.Next() {
-			var id string
-			var atNs int64
-			var dataBytes []byte
-			if err := rows.Scan(&id, &atNs, &dataBytes); err != nil {
-				if closeErr := rt.CloseRows(rows, "select"); closeErr != nil {
-					return nil, fmt.Errorf("scan row from %s: %w (additionally, %v)", PersonTableName, err, closeErr)
-				}
-				return nil, fmt.Errorf("scan row from %s: %w", PersonTableName, err)
-			}
-			data := &Person{}
-			if err := proto.Unmarshal(dataBytes, data); err != nil {
-				if closeErr := rt.CloseRows(rows, "select"); closeErr != nil {
-					return nil, fmt.Errorf("unmarshal Person row: %w (additionally, %v)", err, closeErr)
-				}
-				return nil, fmt.Errorf("unmarshal Person row: %w", err)
-			}
-			result = append(result, PersonRow{ID: id, AtNs: atNs, Data: data})
-		}
-		if err := rows.Err(); err != nil {
-			if closeErr := rt.CloseRows(rows, "select"); closeErr != nil {
-				return nil, fmt.Errorf("iterate rows from %s: %w (additionally, %v)", PersonTableName, err, closeErr)
-			}
-			return nil, fmt.Errorf("iterate rows from %s: %w", PersonTableName, err)
-		}
-		if err := rt.CloseRows(rows, "select"); err != nil {
-			return nil, err
-		}
-		return result, nil
-	})
+	return t.runtimeTable().Select[Person, *Person](where, args...)
 }
 
 func (t *PersonTable) Insert(data *Person) (PersonRow, error) {
-	if t.q == nil {
-		return PersonRow{}, errors.New("nil DBTX")
-	}
-	if data == nil {
-		return PersonRow{}, errors.New("nil data")
-	}
-	id, err := rt.UUIDv7()
-	if err != nil {
-		return PersonRow{}, fmt.Errorf("generate uuidv7: %w", err)
-	}
-	if err := rt.ValidateUUIDv7(id); err != nil {
-		return PersonRow{}, fmt.Errorf("validate generated id %s: %w", id, err)
-	}
-	return t.insertWithID(id, data)
-}
-
-func (t *PersonTable) InsertWithID(id string, data *Person) (PersonRow, error) {
-	if t.q == nil {
-		return PersonRow{}, errors.New("nil DBTX")
-	}
-	if data == nil {
-		return PersonRow{}, errors.New("nil data")
-	}
-	return t.insertWithID(id, data)
+	return t.runtimeTable().Insert[Person, *Person](data)
 }
 
 func (t *PersonTable) insertWithID(id string, data *Person) (PersonRow, error) {
-	if t.q == nil {
-		return PersonRow{}, errors.New("nil DBTX")
-	}
-	if data == nil {
-		return PersonRow{}, errors.New("nil data")
-	}
-	if id == "" {
-		return PersonRow{}, errors.New("empty id")
-	}
-	if err := rt.ValidateUUIDv7(id); err != nil {
-		return PersonRow{}, fmt.Errorf("validate id %s: %w", id, err)
-	}
-	if err := data.Valid(); err != nil {
-		return PersonRow{}, fmt.Errorf("validate Person: %w", err)
-	}
-	atNs, err := rt.WriteLocalObjectContext(context.Background(), t.q, PersonGeneratedBinding, id, data, true)
-	if err != nil {
-		return PersonRow{}, err
-	}
-	return PersonRow{ID: id, AtNs: atNs, Data: data}, nil
+	return t.runtimeTable().InsertWithID[Person, *Person](id, data)
 }
 
 func (t *PersonTable) UpdateByID(id string, data *Person) (PersonRow, error) {
-	if t.q == nil {
-		return PersonRow{}, errors.New("nil DBTX")
-	}
-	if id == "" {
-		return PersonRow{}, errors.New("empty id")
-	}
-	if err := rt.ValidateUUIDv7(id); err != nil {
-		return PersonRow{}, fmt.Errorf("validate id %s: %w", id, err)
-	}
-	if data == nil {
-		return PersonRow{}, errors.New("nil data")
-	}
-	if err := data.Valid(); err != nil {
-		return PersonRow{}, fmt.Errorf("validate Person: %w", err)
-	}
-	atNs, err := rt.WriteLocalObjectContext(context.Background(), t.q, PersonGeneratedBinding, id, data, false)
-	if err != nil {
-		return PersonRow{}, err
-	}
-	return PersonRow{ID: id, AtNs: atNs, Data: data}, nil
+	return t.runtimeTable().UpdateByID[Person, *Person](id, data)
 }
 
 func (t *PersonTable) UpdateRow(row PersonRow) (PersonRow, error) {
-	if t.q == nil {
-		return PersonRow{}, errors.New("nil DBTX")
-	}
-	if row.ID == "" {
-		return PersonRow{}, errors.New("empty id")
-	}
-	if row.Data == nil {
-		return PersonRow{}, errors.New("nil data")
-	}
-	return t.UpdateByID(row.ID, row.Data)
+	return t.runtimeTable().UpdateRow[Person, *Person](row)
 }
 
 func (t *PersonTable) DeleteByID(id string) error {
-	if t.q == nil {
-		return errors.New("nil DBTX")
-	}
-	if id == "" {
-		return errors.New("empty id")
-	}
-	return rt.DeleteLocalBoundObjectContext(context.Background(), t.q, PersonGeneratedBinding, id)
+	return t.runtimeTable().DeleteByID(id)
 }
 
 func (t *PersonTable) DeleteRow(row PersonRow) error {
-	if t.q == nil {
-		return errors.New("nil DBTX")
-	}
-	if row.ID == "" {
-		return errors.New("empty id")
-	}
-	return t.DeleteByID(row.ID)
-}
-
-func (t *PersonTable) Changes(ctx context.Context) (<-chan PersonChange, error) {
-	if t.q == nil {
-		return nil, errors.New("nil DBTX")
-	}
-	return rt.TableChanges[*Person](ctx, t.q, PersonTableName)
+	return t.runtimeTable().DeleteRow(row)
 }
 
 func (t *PersonTable) upsertWithAtNs(id string, atNs int64, data *Person) error {
-	if t.q == nil {
-		return errors.New("nil DBTX")
-	}
-	if id == "" {
-		return errors.New("empty id")
-	}
-	if data == nil {
-		return errors.New("nil data")
-	}
-	dataJSON, err := rt.MarshalAnyJSON(data)
-	if err != nil {
-		return err
-	}
-	return t.q.WithTransaction(context.Background(), func(tx rt.DBTX) error {
-		return rt.ApplyIncomingObjectContext(context.Background(), tx, PersonGeneratedBinding, rt.JSONLRecord{ID: id, AtNs: atNs, Data: dataJSON})
-	})
+	return t.runtimeTable().UpsertWithAtNs[Person, *Person](id, atNs, data)
 }
 
 func (t *PersonTable) tombstoneWithAtNs(id string, atNs int64) error {
-	if t.q == nil {
-		return errors.New("nil DBTX")
-	}
-	if id == "" {
-		return errors.New("empty id")
-	}
-	dataJSON, err := rt.MarshalTypeOnlyAnyJSON(PersonTypeName)
-	if err != nil {
-		return err
-	}
-	return t.q.WithTransaction(context.Background(), func(tx rt.DBTX) error {
-		return rt.ApplyIncomingObjectContext(context.Background(), tx, PersonGeneratedBinding, rt.JSONLRecord{ID: id, Deleted: true, AtNs: atNs, Data: dataJSON})
-	})
-}
-
-func (t *PersonTable) drainUnknownRows(typeName string) error {
-	if t.q == nil {
-		return errors.New("nil DBTX")
-	}
-	if typeName == "" {
-		return errors.New("empty type name")
-	}
-	return rt.DrainUnknownBindingsContext(context.Background(), t.q, []rt.GeneratedTableBinding{PersonGeneratedBinding})
+	return t.runtimeTable().TombstoneWithAtNs(id, atNs)
 }
 
 func (t *PersonTable) DrainUnknownRows() error {
-	return t.drainUnknownRows(PersonTypeName)
+	return t.runtimeTable().DrainUnknownRows()
+}
+
+func (t *PersonTable) InsertWithID(id string, data *Person) (PersonRow, error) {
+	return t.runtimeTable().InsertWithID[Person, *Person](id, data)
+}
+
+func (t *PersonTable) Changes(ctx context.Context) (<-chan PersonChange, error) {
+	return t.runtimeTable().Changes[*Person](ctx)
 }
 
 const NoteTableName = "generatedtest_example_note"
@@ -314,11 +142,7 @@ const NoteInsertSQL = "INSERT INTO \"generatedtest_example_note\" (\"id\", \"at_
 const NoteUpsertSQL = "INSERT INTO \"generatedtest_example_note\" (\"id\", \"at_ns\", \"data\", \"text\") VALUES (?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET \"at_ns\" = excluded.\"at_ns\", \"data\" = excluded.\"data\", \"text\" = excluded.\"text\""
 const NoteGeneratedIndexPrefix = "idx_generatedtest_example_note__"
 
-type NoteRow struct {
-	ID   string
-	AtNs int64
-	Data *Note
-}
+type NoteRow = rt.Row[*Note]
 
 type NoteChange = rt.TableChange[*Note]
 
@@ -354,220 +178,60 @@ func NewNoteTable(q DBTX) *NoteTable {
 	return &NoteTable{q: q}
 }
 
+func (t *NoteTable) runtimeTable() rt.Table {
+	return rt.NewTable(t.q, NoteGeneratedBinding)
+}
+
 func (t *NoteTable) Init() error {
-	return t.init(true)
+	return t.runtimeTable().Init(true)
 }
 
 func (t *NoteTable) init(ensureCore bool) error {
-	if t.q == nil {
-		return errors.New("nil DBTX")
-	}
-	if ensureCore {
-		if err := rt.EnsureCoreTables(t.q); err != nil {
-			return err
-		}
-	}
-	if err := rt.AuditObjectIDsContext(context.Background(), t.q, []rt.GeneratedTableBinding{NoteGeneratedBinding}); err != nil {
-		return err
-	}
-	if err := rt.ReconcileGeneratedTableContext(context.Background(), t.q, NoteGeneratedBinding); err != nil {
-		return err
-	}
-	if err := t.drainUnknownRows(NoteTypeName); err != nil {
-		return fmt.Errorf("drain unknown rows for %s: %w", NoteTableName, err)
-	}
-	return nil
+	return t.runtimeTable().Init(ensureCore)
 }
 
 func (t *NoteTable) Select(where string, args ...any) ([]NoteRow, error) {
-	if t.q == nil {
-		return nil, errors.New("nil DBTX")
-	}
-	ctx := context.Background()
-	query := `SELECT id, at_ns, data FROM "` + NoteTableName + `"`
-	if strings.TrimSpace(where) != "" {
-		query += " WHERE " + where
-	}
-	rows, err := t.q.QueryContext(ctx, query, args...)
-	if err != nil {
-		return nil, fmt.Errorf("select from %s: %w", NoteTableName, err)
-	}
-	result := make([]NoteRow, 0)
-	for rows.Next() {
-		var id string
-		var atNs int64
-		var dataBytes []byte
-		if err := rows.Scan(&id, &atNs, &dataBytes); err != nil {
-			if closeErr := rt.CloseRows(rows, "select"); closeErr != nil {
-				return nil, fmt.Errorf("scan row from %s: %w (additionally, %v)", NoteTableName, err, closeErr)
-			}
-			return nil, fmt.Errorf("scan row from %s: %w", NoteTableName, err)
-		}
-		data := &Note{}
-		if err := proto.Unmarshal(dataBytes, data); err != nil {
-			if closeErr := rt.CloseRows(rows, "select"); closeErr != nil {
-				return nil, fmt.Errorf("unmarshal Note row: %w (additionally, %v)", err, closeErr)
-			}
-			return nil, fmt.Errorf("unmarshal Note row: %w", err)
-		}
-		result = append(result, NoteRow{ID: id, AtNs: atNs, Data: data})
-	}
-	if err := rows.Err(); err != nil {
-		if closeErr := rt.CloseRows(rows, "select"); closeErr != nil {
-			return nil, fmt.Errorf("iterate rows from %s: %w (additionally, %v)", NoteTableName, err, closeErr)
-		}
-		return nil, fmt.Errorf("iterate rows from %s: %w", NoteTableName, err)
-	}
-	if err := rt.CloseRows(rows, "select"); err != nil {
-		return nil, err
-	}
-	return result, nil
+	return t.runtimeTable().Select[Note, *Note](where, args...)
 }
 
 func (t *NoteTable) Insert(data *Note) (NoteRow, error) {
-	if t.q == nil {
-		return NoteRow{}, errors.New("nil DBTX")
-	}
-	if data == nil {
-		return NoteRow{}, errors.New("nil data")
-	}
-	id, err := rt.UUIDv7()
-	if err != nil {
-		return NoteRow{}, fmt.Errorf("generate uuidv7: %w", err)
-	}
-	if err := rt.ValidateUUIDv7(id); err != nil {
-		return NoteRow{}, fmt.Errorf("validate generated id %s: %w", id, err)
-	}
-	return t.insertWithID(id, data)
+	return t.runtimeTable().Insert[Note, *Note](data)
 }
 
 func (t *NoteTable) insertWithID(id string, data *Note) (NoteRow, error) {
-	if t.q == nil {
-		return NoteRow{}, errors.New("nil DBTX")
-	}
-	if data == nil {
-		return NoteRow{}, errors.New("nil data")
-	}
-	if id == "" {
-		return NoteRow{}, errors.New("empty id")
-	}
-	if err := rt.ValidateUUIDv7(id); err != nil {
-		return NoteRow{}, fmt.Errorf("validate id %s: %w", id, err)
-	}
-	atNs, err := rt.WriteLocalObjectContext(context.Background(), t.q, NoteGeneratedBinding, id, data, true)
-	if err != nil {
-		return NoteRow{}, err
-	}
-	return NoteRow{ID: id, AtNs: atNs, Data: data}, nil
+	return t.runtimeTable().InsertWithID[Note, *Note](id, data)
 }
 
 func (t *NoteTable) UpdateByID(id string, data *Note) (NoteRow, error) {
-	if t.q == nil {
-		return NoteRow{}, errors.New("nil DBTX")
-	}
-	if id == "" {
-		return NoteRow{}, errors.New("empty id")
-	}
-	if err := rt.ValidateUUIDv7(id); err != nil {
-		return NoteRow{}, fmt.Errorf("validate id %s: %w", id, err)
-	}
-	if data == nil {
-		return NoteRow{}, errors.New("nil data")
-	}
-	atNs, err := rt.WriteLocalObjectContext(context.Background(), t.q, NoteGeneratedBinding, id, data, false)
-	if err != nil {
-		return NoteRow{}, err
-	}
-	return NoteRow{ID: id, AtNs: atNs, Data: data}, nil
+	return t.runtimeTable().UpdateByID[Note, *Note](id, data)
 }
 
 func (t *NoteTable) UpdateRow(row NoteRow) (NoteRow, error) {
-	if t.q == nil {
-		return NoteRow{}, errors.New("nil DBTX")
-	}
-	if row.ID == "" {
-		return NoteRow{}, errors.New("empty id")
-	}
-	if row.Data == nil {
-		return NoteRow{}, errors.New("nil data")
-	}
-	return t.UpdateByID(row.ID, row.Data)
+	return t.runtimeTable().UpdateRow[Note, *Note](row)
 }
 
 func (t *NoteTable) DeleteByID(id string) error {
-	if t.q == nil {
-		return errors.New("nil DBTX")
-	}
-	if id == "" {
-		return errors.New("empty id")
-	}
-	return rt.DeleteLocalBoundObjectContext(context.Background(), t.q, NoteGeneratedBinding, id)
+	return t.runtimeTable().DeleteByID(id)
 }
 
 func (t *NoteTable) DeleteRow(row NoteRow) error {
-	if t.q == nil {
-		return errors.New("nil DBTX")
-	}
-	if row.ID == "" {
-		return errors.New("empty id")
-	}
-	return t.DeleteByID(row.ID)
-}
-
-func (t *NoteTable) Changes(ctx context.Context) (<-chan NoteChange, error) {
-	if t.q == nil {
-		return nil, errors.New("nil DBTX")
-	}
-	return rt.TableChanges[*Note](ctx, t.q, NoteTableName)
+	return t.runtimeTable().DeleteRow(row)
 }
 
 func (t *NoteTable) upsertWithAtNs(id string, atNs int64, data *Note) error {
-	if t.q == nil {
-		return errors.New("nil DBTX")
-	}
-	if id == "" {
-		return errors.New("empty id")
-	}
-	if data == nil {
-		return errors.New("nil data")
-	}
-	dataJSON, err := rt.MarshalAnyJSON(data)
-	if err != nil {
-		return err
-	}
-	return t.q.WithTransaction(context.Background(), func(tx rt.DBTX) error {
-		return rt.ApplyIncomingObjectContext(context.Background(), tx, NoteGeneratedBinding, rt.JSONLRecord{ID: id, AtNs: atNs, Data: dataJSON})
-	})
+	return t.runtimeTable().UpsertWithAtNs[Note, *Note](id, atNs, data)
 }
 
 func (t *NoteTable) tombstoneWithAtNs(id string, atNs int64) error {
-	if t.q == nil {
-		return errors.New("nil DBTX")
-	}
-	if id == "" {
-		return errors.New("empty id")
-	}
-	dataJSON, err := rt.MarshalTypeOnlyAnyJSON(NoteTypeName)
-	if err != nil {
-		return err
-	}
-	return t.q.WithTransaction(context.Background(), func(tx rt.DBTX) error {
-		return rt.ApplyIncomingObjectContext(context.Background(), tx, NoteGeneratedBinding, rt.JSONLRecord{ID: id, Deleted: true, AtNs: atNs, Data: dataJSON})
-	})
-}
-
-func (t *NoteTable) drainUnknownRows(typeName string) error {
-	if t.q == nil {
-		return errors.New("nil DBTX")
-	}
-	if typeName == "" {
-		return errors.New("empty type name")
-	}
-	return rt.DrainUnknownBindingsContext(context.Background(), t.q, []rt.GeneratedTableBinding{NoteGeneratedBinding})
+	return t.runtimeTable().TombstoneWithAtNs(id, atNs)
 }
 
 func (t *NoteTable) DrainUnknownRows() error {
-	return t.drainUnknownRows(NoteTypeName)
+	return t.runtimeTable().DrainUnknownRows()
+}
+
+func (t *NoteTable) Changes(ctx context.Context) (<-chan NoteChange, error) {
+	return t.runtimeTable().Changes[*Note](ctx)
 }
 
 const ChoiceTableName = "generatedtest_example_choice"
@@ -578,11 +242,7 @@ const ChoiceInsertSQL = "INSERT INTO \"generatedtest_example_choice\" (\"id\", \
 const ChoiceUpsertSQL = "INSERT INTO \"generatedtest_example_choice\" (\"id\", \"at_ns\", \"data\", \"label\") VALUES (?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET \"at_ns\" = excluded.\"at_ns\", \"data\" = excluded.\"data\", \"label\" = excluded.\"label\""
 const ChoiceGeneratedIndexPrefix = "idx_generatedtest_example_choice__"
 
-type ChoiceRow struct {
-	ID   string
-	AtNs int64
-	Data *Choice
-}
+type ChoiceRow = rt.Row[*Choice]
 
 type ChoiceTable struct {
 	q DBTX
@@ -620,213 +280,56 @@ func NewChoiceTable(q DBTX) *ChoiceTable {
 	return &ChoiceTable{q: q}
 }
 
+func (t *ChoiceTable) runtimeTable() rt.Table {
+	return rt.NewTable(t.q, ChoiceGeneratedBinding)
+}
+
 func (t *ChoiceTable) Init() error {
-	return t.init(true)
+	return t.runtimeTable().Init(true)
 }
 
 func (t *ChoiceTable) init(ensureCore bool) error {
-	if t.q == nil {
-		return errors.New("nil DBTX")
-	}
-	if ensureCore {
-		if err := rt.EnsureCoreTables(t.q); err != nil {
-			return err
-		}
-	}
-	if err := rt.AuditObjectIDsContext(context.Background(), t.q, []rt.GeneratedTableBinding{ChoiceGeneratedBinding}); err != nil {
-		return err
-	}
-	if err := rt.ReconcileGeneratedTableContext(context.Background(), t.q, ChoiceGeneratedBinding); err != nil {
-		return err
-	}
-	if err := t.drainUnknownRows(ChoiceTypeName); err != nil {
-		return fmt.Errorf("drain unknown rows for %s: %w", ChoiceTableName, err)
-	}
-	return nil
+	return t.runtimeTable().Init(ensureCore)
 }
 
 func (t *ChoiceTable) Select(where string, args ...any) ([]ChoiceRow, error) {
-	if t.q == nil {
-		return nil, errors.New("nil DBTX")
-	}
-	ctx := context.Background()
-	query := `SELECT id, at_ns, data FROM "` + ChoiceTableName + `"`
-	if strings.TrimSpace(where) != "" {
-		query += " WHERE " + where
-	}
-	rows, err := t.q.QueryContext(ctx, query, args...)
-	if err != nil {
-		return nil, fmt.Errorf("select from %s: %w", ChoiceTableName, err)
-	}
-	result := make([]ChoiceRow, 0)
-	for rows.Next() {
-		var id string
-		var atNs int64
-		var dataBytes []byte
-		if err := rows.Scan(&id, &atNs, &dataBytes); err != nil {
-			if closeErr := rt.CloseRows(rows, "select"); closeErr != nil {
-				return nil, fmt.Errorf("scan row from %s: %w (additionally, %v)", ChoiceTableName, err, closeErr)
-			}
-			return nil, fmt.Errorf("scan row from %s: %w", ChoiceTableName, err)
-		}
-		data := &Choice{}
-		if err := proto.Unmarshal(dataBytes, data); err != nil {
-			if closeErr := rt.CloseRows(rows, "select"); closeErr != nil {
-				return nil, fmt.Errorf("unmarshal Choice row: %w (additionally, %v)", err, closeErr)
-			}
-			return nil, fmt.Errorf("unmarshal Choice row: %w", err)
-		}
-		result = append(result, ChoiceRow{ID: id, AtNs: atNs, Data: data})
-	}
-	if err := rows.Err(); err != nil {
-		if closeErr := rt.CloseRows(rows, "select"); closeErr != nil {
-			return nil, fmt.Errorf("iterate rows from %s: %w (additionally, %v)", ChoiceTableName, err, closeErr)
-		}
-		return nil, fmt.Errorf("iterate rows from %s: %w", ChoiceTableName, err)
-	}
-	if err := rt.CloseRows(rows, "select"); err != nil {
-		return nil, err
-	}
-	return result, nil
+	return t.runtimeTable().Select[Choice, *Choice](where, args...)
 }
 
 func (t *ChoiceTable) Insert(data *Choice) (ChoiceRow, error) {
-	if t.q == nil {
-		return ChoiceRow{}, errors.New("nil DBTX")
-	}
-	if data == nil {
-		return ChoiceRow{}, errors.New("nil data")
-	}
-	id, err := rt.UUIDv7()
-	if err != nil {
-		return ChoiceRow{}, fmt.Errorf("generate uuidv7: %w", err)
-	}
-	if err := rt.ValidateUUIDv7(id); err != nil {
-		return ChoiceRow{}, fmt.Errorf("validate generated id %s: %w", id, err)
-	}
-	return t.insertWithID(id, data)
+	return t.runtimeTable().Insert[Choice, *Choice](data)
 }
 
 func (t *ChoiceTable) insertWithID(id string, data *Choice) (ChoiceRow, error) {
-	if t.q == nil {
-		return ChoiceRow{}, errors.New("nil DBTX")
-	}
-	if data == nil {
-		return ChoiceRow{}, errors.New("nil data")
-	}
-	if id == "" {
-		return ChoiceRow{}, errors.New("empty id")
-	}
-	if err := rt.ValidateUUIDv7(id); err != nil {
-		return ChoiceRow{}, fmt.Errorf("validate id %s: %w", id, err)
-	}
-	atNs, err := rt.WriteLocalObjectContext(context.Background(), t.q, ChoiceGeneratedBinding, id, data, true)
-	if err != nil {
-		return ChoiceRow{}, err
-	}
-	return ChoiceRow{ID: id, AtNs: atNs, Data: data}, nil
+	return t.runtimeTable().InsertWithID[Choice, *Choice](id, data)
 }
 
 func (t *ChoiceTable) UpdateByID(id string, data *Choice) (ChoiceRow, error) {
-	if t.q == nil {
-		return ChoiceRow{}, errors.New("nil DBTX")
-	}
-	if id == "" {
-		return ChoiceRow{}, errors.New("empty id")
-	}
-	if err := rt.ValidateUUIDv7(id); err != nil {
-		return ChoiceRow{}, fmt.Errorf("validate id %s: %w", id, err)
-	}
-	if data == nil {
-		return ChoiceRow{}, errors.New("nil data")
-	}
-	atNs, err := rt.WriteLocalObjectContext(context.Background(), t.q, ChoiceGeneratedBinding, id, data, false)
-	if err != nil {
-		return ChoiceRow{}, err
-	}
-	return ChoiceRow{ID: id, AtNs: atNs, Data: data}, nil
+	return t.runtimeTable().UpdateByID[Choice, *Choice](id, data)
 }
 
 func (t *ChoiceTable) UpdateRow(row ChoiceRow) (ChoiceRow, error) {
-	if t.q == nil {
-		return ChoiceRow{}, errors.New("nil DBTX")
-	}
-	if row.ID == "" {
-		return ChoiceRow{}, errors.New("empty id")
-	}
-	if row.Data == nil {
-		return ChoiceRow{}, errors.New("nil data")
-	}
-	return t.UpdateByID(row.ID, row.Data)
+	return t.runtimeTable().UpdateRow[Choice, *Choice](row)
 }
 
 func (t *ChoiceTable) DeleteByID(id string) error {
-	if t.q == nil {
-		return errors.New("nil DBTX")
-	}
-	if id == "" {
-		return errors.New("empty id")
-	}
-	return rt.DeleteLocalBoundObjectContext(context.Background(), t.q, ChoiceGeneratedBinding, id)
+	return t.runtimeTable().DeleteByID(id)
 }
 
 func (t *ChoiceTable) DeleteRow(row ChoiceRow) error {
-	if t.q == nil {
-		return errors.New("nil DBTX")
-	}
-	if row.ID == "" {
-		return errors.New("empty id")
-	}
-	return t.DeleteByID(row.ID)
+	return t.runtimeTable().DeleteRow(row)
 }
 
 func (t *ChoiceTable) upsertWithAtNs(id string, atNs int64, data *Choice) error {
-	if t.q == nil {
-		return errors.New("nil DBTX")
-	}
-	if id == "" {
-		return errors.New("empty id")
-	}
-	if data == nil {
-		return errors.New("nil data")
-	}
-	dataJSON, err := rt.MarshalAnyJSON(data)
-	if err != nil {
-		return err
-	}
-	return t.q.WithTransaction(context.Background(), func(tx rt.DBTX) error {
-		return rt.ApplyIncomingObjectContext(context.Background(), tx, ChoiceGeneratedBinding, rt.JSONLRecord{ID: id, AtNs: atNs, Data: dataJSON})
-	})
+	return t.runtimeTable().UpsertWithAtNs[Choice, *Choice](id, atNs, data)
 }
 
 func (t *ChoiceTable) tombstoneWithAtNs(id string, atNs int64) error {
-	if t.q == nil {
-		return errors.New("nil DBTX")
-	}
-	if id == "" {
-		return errors.New("empty id")
-	}
-	dataJSON, err := rt.MarshalTypeOnlyAnyJSON(ChoiceTypeName)
-	if err != nil {
-		return err
-	}
-	return t.q.WithTransaction(context.Background(), func(tx rt.DBTX) error {
-		return rt.ApplyIncomingObjectContext(context.Background(), tx, ChoiceGeneratedBinding, rt.JSONLRecord{ID: id, Deleted: true, AtNs: atNs, Data: dataJSON})
-	})
-}
-
-func (t *ChoiceTable) drainUnknownRows(typeName string) error {
-	if t.q == nil {
-		return errors.New("nil DBTX")
-	}
-	if typeName == "" {
-		return errors.New("empty type name")
-	}
-	return rt.DrainUnknownBindingsContext(context.Background(), t.q, []rt.GeneratedTableBinding{ChoiceGeneratedBinding})
+	return t.runtimeTable().TombstoneWithAtNs(id, atNs)
 }
 
 func (t *ChoiceTable) DrainUnknownRows() error {
-	return t.drainUnknownRows(ChoiceTypeName)
+	return t.runtimeTable().DrainUnknownRows()
 }
 
 type CRUD struct {

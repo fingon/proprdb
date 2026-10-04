@@ -1073,7 +1073,7 @@ public func auditObjectIDs(_ q: any DBTX, bindings: [GeneratedTableBinding]) thr
             while let row = try rows.next() {
                 let id = try row.string(at: 0)
                 do {
-                    try validateUUIDV7(id)
+                    try validateUUID(id)
                 } catch {
                     throw ProprDBError("invalid stored object ID table=\(tableName) id=\(id): \(error)")
                 }
@@ -1174,34 +1174,37 @@ public func uuidV7() throws -> String {
                   bytes[8], bytes[9], bytes[10], bytes[11], bytes[12], bytes[13], bytes[14], bytes[15])
 }
 
-public func validateUUIDV7(_ id: String) throws {
+public func validateUUID(_ id: String) throws {
     let characters = Array(id)
     guard characters.count == 36 else {
-        throw ProprDBError("invalid uuidv7 \(id): expected 36 characters")
+        throw ProprDBError("invalid uuid \(id): expected 36 characters")
     }
     let hyphenIndexes = Set([8, 13, 18, 23])
     let hexadecimal = CharacterSet(charactersIn: "0123456789abcdef")
     for (index, character) in characters.enumerated() {
         if hyphenIndexes.contains(index) {
             guard character == "-" else {
-                throw ProprDBError("invalid uuidv7 \(id): expected hyphen at character \(index + 1)")
+                throw ProprDBError("invalid uuid \(id): expected hyphen at character \(index + 1)")
             }
         } else {
             guard character.unicodeScalars.allSatisfy(hexadecimal.contains) else {
-                throw ProprDBError("invalid uuidv7 \(id): expected canonical lowercase hexadecimal")
+                throw ProprDBError("invalid uuid \(id): expected canonical lowercase hexadecimal")
             }
         }
     }
-    guard characters[14] == "7" else {
-        throw ProprDBError("invalid uuidv7 \(id): version is not 7")
+    guard "12345678".contains(characters[14]) else {
+        throw ProprDBError("invalid uuid \(id): unsupported version")
     }
     guard "89ab".contains(characters[19]) else {
-        throw ProprDBError("invalid uuidv7 \(id): invalid RFC variant")
+        throw ProprDBError("invalid uuid \(id): invalid RFC variant")
     }
 }
 
-public func validateUUID(_ id: String) throws {
-    try validateUUIDV7(id)
+public func validateUUIDV7(_ id: String) throws {
+    try validateUUID(id)
+    guard Array(id)[14] == "7" else {
+        throw ProprDBError("invalid uuidv7 \(id): version is not 7")
+    }
 }
 
 public func typeURL(_ typeName: String) -> String {
@@ -1288,7 +1291,7 @@ public func readJSONL(text: String, visit: (JSONLRecord, Int) throws -> Void) th
         }
         let dataJSON = try JSONSerialization.data(withJSONObject: dataObject, options: [.sortedKeys])
         _ = try typeNameFromAnyJSON(dataJSON)
-        try validateUUIDV7(id)
+        try validateUUID(id)
         try visit(JSONLRecord(id: id, deleted: deleted, atNs: atNs, data: dataJSON), lineNumber)
     }
 }
@@ -1309,7 +1312,7 @@ public func unknownInsert(_ q: any DBTX, typeName: String, record: JSONLRecord) 
     guard !typeName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
         throw ProprDBError("empty type name")
     }
-    try validateUUIDV7(record.id)
+    try validateUUID(record.id)
     let canonicalData = try JSONSerialization.data(withJSONObject: jsonObject(from: record.data), options: [.sortedKeys])
     let dataJSON = String(decoding: canonicalData, as: UTF8.self)
     let existing = try q.withRows("SELECT at_ns, deleted, data_json FROM \(_unknownTypesTableName) WHERE type_name = ? AND id = ?", arguments: [typeName, record.id]) { rows -> (Int64, Bool, String)? in
@@ -1431,7 +1434,7 @@ public func writeLocalObject(
     message: any Message,
     insert: Bool
 ) throws -> Int64 {
-    try validateUUIDV7(id)
+    try validateUUID(id)
     return try q.withTransaction { transaction in
         let atNs = try nextObjectAtNs(transaction, tableName: binding.descriptor.tableName, objectID: id)
         let arguments = try bindingArguments(binding, id: id, atNs: atNs, message: message)
@@ -1443,7 +1446,7 @@ public func writeLocalObject(
 }
 
 public func deleteLocalObject(_ q: any DBTX, binding: GeneratedTableBinding, id: String) throws {
-    try validateUUIDV7(id)
+    try validateUUID(id)
     try q.withTransaction { transaction in
         let atNs = try nextObjectAtNs(transaction, tableName: binding.descriptor.tableName, objectID: id)
         try applyBoundDeletion(transaction, binding: binding, id: id, atNs: atNs)
@@ -1456,7 +1459,7 @@ private func decodedBindingMessage(_ binding: GeneratedTableBinding, data: Data)
 }
 
 public func applyIncomingObject(_ q: any DBTX, binding: GeneratedTableBinding, record: JSONLRecord) throws {
-    try validateUUIDV7(record.id)
+    try validateUUID(record.id)
     let localAtNs = try localMaxAtNs(q, tableName: binding.descriptor.tableName, objectID: record.id)
     if record.atNs < localAtNs {
         return

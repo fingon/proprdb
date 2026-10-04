@@ -25,7 +25,7 @@ of mine don't roll that way.
 
 Prerequisites:
 
-- Go `1.25+`
+- Go `1.27+`
 - SQLite `3.35+` for projection removal
 - Rust (edition 2024), Cargo, and `protoc` for the Rust target
 

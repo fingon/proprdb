@@ -11,10 +11,12 @@ import (
 	is "gotest.tools/v3/assert/cmp"
 )
 
-const countTombstoneByIDSQL = "SELECT COUNT(*) FROM _deleted WHERE table_name = ? AND id = ?"
-const personNameIndex = "idx_generatedtest_example_person__name"
-const personNameAgeIndex = "idx_generatedtest_example_person__name_age"
-const personStaleIndex = "idx_generatedtest_example_person__stale"
+const (
+	countTombstoneByIDSQL = "SELECT COUNT(*) FROM _deleted WHERE table_name = ? AND id = ?"
+	personNameIndex       = "idx_generatedtest_example_person__name"
+	personNameAgeIndex    = "idx_generatedtest_example_person__name_age"
+	personStaleIndex      = "idx_generatedtest_example_person__stale"
+)
 
 func TestGeneratedCRUD(t *testing.T) {
 	ctx := context.Background()
@@ -27,25 +29,25 @@ func TestGeneratedCRUD(t *testing.T) {
 	crud := NewCRUD(rt.WrapDB(db))
 	assert.NilError(t, crud.Init())
 
-	indexesAfterInit := tableIndexNamesByName(t, ctx, db, PersonTableName)
+	indexesAfterInit := tableIndexNamesByName(ctx, t, db, PersonTableName)
 	expectedIndexes := []string{personNameIndex, personNameAgeIndex}
 	for _, indexName := range expectedIndexes {
 		assert.Check(t, indexesAfterInit[indexName])
 	}
 
 	assert.NilError(t, crud.Person.Init())
-	indexesAfterSecondInit := tableIndexNamesByName(t, ctx, db, PersonTableName)
+	indexesAfterSecondInit := tableIndexNamesByName(ctx, t, db, PersonTableName)
 	for _, indexName := range expectedIndexes {
 		assert.Check(t, indexesAfterSecondInit[indexName])
 	}
 
 	_, err = db.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS "`+personStaleIndex+`" ON "`+PersonTableName+`" ("name")`)
 	assert.NilError(t, err)
-	indexesWithStale := tableIndexNamesByName(t, ctx, db, PersonTableName)
+	indexesWithStale := tableIndexNamesByName(ctx, t, db, PersonTableName)
 	assert.Check(t, indexesWithStale[personStaleIndex])
 
 	assert.NilError(t, crud.Person.Init())
-	indexesAfterCleanup := tableIndexNamesByName(t, ctx, db, PersonTableName)
+	indexesAfterCleanup := tableIndexNamesByName(ctx, t, db, PersonTableName)
 	assert.Check(t, !indexesAfterCleanup[personStaleIndex])
 
 	var hiddenTableCount int
@@ -56,13 +58,13 @@ func TestGeneratedCRUD(t *testing.T) {
 	_, err = crud.Person.Insert(&Person{Name: "", Age: 1})
 	assert.Check(t, err != nil)
 
-	inserted, err := crud.Person.Insert(&Person{Name: "Ada", Age: 37})
+	inserted, err := crud.Person.Insert(&Person{Name: testPersonNameAda, Age: 37})
 	assert.NilError(t, err)
 	assert.Check(t, inserted.ID != "")
 	assert.Check(t, inserted.AtNs > 0)
 
 	customID := "018f4f3f-6f9f-7a1b-8f55-1234567890ab"
-	insertedWithID, err := crud.Person.InsertWithID(customID, &Person{Name: "Grace", Age: 30})
+	insertedWithID, err := crud.Person.InsertWithID(customID, &Person{Name: testPersonNameGrace, Age: 30})
 	assert.NilError(t, err)
 	assert.Check(t, is.Equal(insertedWithID.ID, customID))
 	assert.Check(t, insertedWithID.AtNs > 0)
@@ -73,7 +75,7 @@ func TestGeneratedCRUD(t *testing.T) {
 		data *Person
 	}{
 		{name: "empty ID", id: "", data: &Person{Name: "Empty ID", Age: 1}},
-		{name: "invalid UUID", id: "not-a-uuid", data: &Person{Name: "Bad ID", Age: 1}},
+		{name: "invalid UUID", id: testInvalidUUID, data: &Person{Name: "Bad ID", Age: 1}},
 		{name: "nil data", id: customID, data: nil},
 	}
 	for _, testCase := range insertWithIDCases {
@@ -83,7 +85,7 @@ func TestGeneratedCRUD(t *testing.T) {
 		})
 	}
 
-	selected, err := crud.Person.Select("name = ?", "Ada")
+	selected, err := crud.Person.Select("name = ?", testPersonNameAda)
 	assert.NilError(t, err)
 	assert.Check(t, is.Len(selected, 1))
 	assert.Check(t, is.Equal(selected[0].ID, inserted.ID))
@@ -103,7 +105,7 @@ func TestGeneratedCRUD(t *testing.T) {
 	assert.NilError(t, err)
 	assert.Check(t, is.Equal(tombstoneCount, 0))
 
-	_, err = crud.Person.UpdateByID("not-a-uuid", &Person{Name: "Nope", Age: 10})
+	_, err = crud.Person.UpdateByID(testInvalidUUID, &Person{Name: "Nope", Age: 10})
 	assert.Check(t, err != nil)
 
 	_, err = db.ExecContext(ctx, "UPDATE \""+PersonTableName+"\" SET \"age\" = 0 WHERE id = ?", inserted.ID)
@@ -179,7 +181,7 @@ func TestGeneratedCRUDTableDescriptors(t *testing.T) {
 	assert.Check(t, is.Equal(descriptorsSecondRead[0].TableName, PersonTableName))
 }
 
-func tableIndexNamesByName(t *testing.T, ctx context.Context, db *sql.DB, tableName string) map[string]bool {
+func tableIndexNamesByName(ctx context.Context, t *testing.T, db *sql.DB, tableName string) map[string]bool {
 	t.Helper()
 
 	rows, err := db.QueryContext(ctx, `SELECT name FROM pragma_index_list("`+tableName+`")`)

@@ -12,6 +12,8 @@
 BINARIES=protoc-gen-proprdb protoc-gen-proprdb-swift protoc-gen-proprdb-rust
 SWIFT_ENV=HOME=/tmp SWIFTPM_MODULECACHE_OVERRIDE=/tmp/swiftpm-module-cache CLANG_MODULE_CACHE_PATH=/tmp/clang-module-cache
 SWIFT_ARGS?=--disable-sandbox
+GOLANGCI_LINT=$(shell go tool -n golangci-lint)
+PROTOC_GEN_GO=$(shell go tool -n protoc-gen-go)
 PROTOC_GEN_SWIFT=test/swift/.build/checkouts/swift-protobuf/.build/debug/protoc-gen-swift
 
 .PHONY: all
@@ -34,24 +36,23 @@ protoc-gen-swift: test/swift/Package.resolved
 .PHONY: protoc-gen-proprdb protoc-gen-proprdb-swift protoc-gen-proprdb-rust build
 build: $(BINARIES) swift-build rust-build
 
-.PHONY: generate
-generate: $(BINARIES) protoc-gen-swift
-	protoc -I test/fixtures -I . --go_out=test/system --go_opt=paths=source_relative --plugin=protoc-gen-proprdb=./protoc-gen-proprdb --proprdb_out=paths=source_relative:test/system test/fixtures/system.proto
-	mkdir -p test/swift/Sources/GeneratedSystem
-	protoc -I test/fixtures -I . --plugin=protoc-gen-swift=$(PROTOC_GEN_SWIFT) --swift_out=Visibility=Public:test/swift/Sources/GeneratedSystem test/fixtures/system.proto
-	protoc -I test/fixtures -I . --plugin=protoc-gen-proprdb-swift=./protoc-gen-proprdb-swift --proprdb-swift_out=Visibility=Public,paths=source_relative:test/swift/Sources/GeneratedSystem test/fixtures/system.proto
-	$(MAKE) rust-fixtures
+.PHONY: generate go-fixtures
+generate: go-fixtures swift-fixtures rust-fixtures
 	go test ./test -update
+
+go-fixtures: protoc-gen-proprdb
+	protoc -I test/fixtures -I . --plugin=protoc-gen-go=$(PROTOC_GEN_GO) --go_out=test/system --go_opt=paths=source_relative --plugin=protoc-gen-proprdb=./protoc-gen-proprdb --proprdb_out=paths=source_relative:test/system test/fixtures/system.proto
 
 .PHONY: verify-generated
 verify-generated:
 	go test ./test -run 'TestProtoc(Plugin|SwiftPlugin|RustPlugin)Golden'
 
-.PHONY: swift-fixtures
-swift-fixtures: protoc-gen-swift
-	go build ./cmd/protoc-gen-proprdb-swift
-	mkdir -p test/swift/Sources/GeneratedSystem
+.PHONY: swift-fixtures swift-bindings
+swift-fixtures: protoc-gen-swift swift-bindings
 	protoc -I test/fixtures -I . --plugin=protoc-gen-swift=$(PROTOC_GEN_SWIFT) --swift_out=Visibility=Public:test/swift/Sources/GeneratedSystem test/fixtures/system.proto
+
+swift-bindings: protoc-gen-proprdb-swift
+	mkdir -p test/swift/Sources/GeneratedSystem
 	protoc -I test/fixtures -I . --plugin=protoc-gen-proprdb-swift=./protoc-gen-proprdb-swift --proprdb-swift_out=Visibility=Public,paths=source_relative:test/swift/Sources/GeneratedSystem test/fixtures/system.proto
 
 .PHONY: swift-test
@@ -95,6 +96,7 @@ check: lint verify-generated test build
 .PHONY: lint
 lint: rust-lint
 	go tool golangci-lint run
+	cd test/system && "$(GOLANGCI_LINT)" run
 
 .PHONY: release-minor release-patch
 release-minor:

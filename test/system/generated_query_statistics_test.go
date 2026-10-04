@@ -23,22 +23,22 @@ func TestGeneratedQueryStatistics(t *testing.T) {
 	crud := NewCRUD(adapter)
 	assert.NilError(t, crud.Init())
 
-	_, err = crud.Person.Insert(&Person{Name: "Ada", Age: 37})
+	_, err = crud.Person.Insert(&Person{Name: testPersonNameAda, Age: 37})
 	assert.NilError(t, err)
-	_, err = crud.Person.Insert(&Person{Name: "Grace", Age: 30})
+	_, err = crud.Person.Insert(&Person{Name: testPersonNameGrace, Age: 30})
 	assert.NilError(t, err)
 	_, err = crud.Note.Insert(&Note{Text: "not measured"})
 	assert.NilError(t, err)
 	assert.NilError(t, rt.ClearQueryStatistics(adapter))
 
-	_, err = crud.Person.Select("name = ?", "Ada")
+	_, err = crud.Person.Select("name = ?", testPersonNameAda)
 	assert.NilError(t, err)
 	initialStatistics, err := rt.QueryStatistics(adapter)
 	assert.NilError(t, err)
 	assert.Check(t, is.Len(initialStatistics, 1))
 	assert.Check(t, is.Equal(initialStatistics[0].Calls, int64(1)))
 	initialDurationSumNs := initialStatistics[0].DurationSumNs
-	_, err = crud.Person.Select("name = ?", "Grace")
+	_, err = crud.Person.Select("name = ?", testPersonNameGrace)
 	assert.NilError(t, err)
 	_, err = crud.Person.Select("")
 	assert.NilError(t, err)
@@ -64,8 +64,8 @@ func TestGeneratedQueryStatistics(t *testing.T) {
 		DurationSumNs: statistics[1].DurationSumNs,
 	})
 	assert.Check(t, statistics[1].DurationSumNs >= initialDurationSumNs)
-	assert.Check(t, !strings.Contains(statistics[1].Query, "Ada"))
-	assert.Check(t, !strings.Contains(statistics[1].Query, "Grace"))
+	assert.Check(t, !strings.Contains(statistics[1].Query, testPersonNameAda))
+	assert.Check(t, !strings.Contains(statistics[1].Query, testPersonNameGrace))
 
 	assert.NilError(t, rt.ClearQueryStatistics(adapter))
 	statistics, err = rt.QueryStatistics(adapter)

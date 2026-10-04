@@ -36,7 +36,7 @@ append-only history.
 
 Each object update has:
 
-- `id`: canonical lowercase RFC 9562 UUIDv7, unique within the protobuf type
+- `id`: canonical lowercase RFC 9562 UUID, unique within the protobuf type
   (`string`)
 - `deleted`: whether the object is deleted (optional, `bool`)
 - `atNs`: last update time as Unix epoch nanoseconds (`int64`)
@@ -53,6 +53,10 @@ Deletion marker example:
 ```json
 {"id":"018f4f3f-6f9f-7a1b-8f55-1234567890ab","deleted":true,"atNs":1761736599000000000,"data":{"@type":"type.googleapis.com/github.com.fingon.proprdb.v1.example.Person"}}
 ```
+
+Object IDs accept UUID versions 1 through 8 with the RFC variant and canonical
+lowercase formatting, including deterministic UUIDv5 IDs. Automatically generated
+IDs use UUIDv7. Synchronization compares `atNs`, not the UUID timestamp.
 
 ## Local storage (SQLite backend)
 

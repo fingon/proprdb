@@ -52,7 +52,7 @@ func WriteLocalObjectContext(ctx context.Context, q DBTX, binding GeneratedTable
 	if id == "" {
 		return 0, errors.New("empty id")
 	}
-	if err := ValidateUUIDv7(id); err != nil {
+	if err := ValidateUUID(id); err != nil {
 		return 0, err
 	}
 	if message == nil {
@@ -93,7 +93,7 @@ func DeleteLocalBoundObjectContext(ctx context.Context, q DBTX, binding Generate
 	if id == "" {
 		return errors.New("empty id")
 	}
-	if err := ValidateUUIDv7(id); err != nil {
+	if err := ValidateUUID(id); err != nil {
 		return err
 	}
 	return q.WithTransaction(ctx, func(tx DBTX) error {
@@ -113,7 +113,7 @@ func ApplyIncomingObjectContext(ctx context.Context, q DBTX, binding GeneratedTa
 	if err := validateBinding(binding); err != nil {
 		return err
 	}
-	if err := ValidateUUIDv7(record.ID); err != nil {
+	if err := ValidateUUID(record.ID); err != nil {
 		return err
 	}
 	if record.Deleted {
@@ -471,6 +471,12 @@ func DrainUnknownBindingsContext(ctx context.Context, q DBTX, bindings []Generat
 			record.Deleted = deleted != 0
 			record.Data = json.RawMessage(dataJSON)
 			records = append(records, record)
+		}
+		if err := rows.Err(); err != nil {
+			return fmt.Errorf("iterate unknown rows for %s: %w", binding.Descriptor.TypeName, err)
+		}
+		if err := CloseRows(rows, "unknown rows"); err != nil {
+			return err
 		}
 		for _, record := range records {
 			if err := q.WithTransaction(ctx, func(tx DBTX) error {

@@ -34,6 +34,36 @@ final class GeneratedCRUDTests: XCTestCase {
         XCTAssertNil(label)
     }
 
+    func testOtherUUIDVersionsCRUDAndSync() throws {
+        let ids = [
+            "018f4f3f-6f9f-4a1b-8f55-1234567890ab",
+            "21f7f8de-8051-5b89-8680-0195ef798b6a",
+        ]
+        for id in ids {
+            try validateUUID(id)
+            XCTAssertThrowsError(try validateUUIDV7(id))
+            let db = try SQLiteDatabase(path: ":memory:")
+            let crud = CRUD(db)
+            try crud.initialize()
+            let row = try crud.person.insertWithID(id, data: makePerson(name: "Ada", age: 37))
+            XCTAssertEqual(row.id, id)
+            try crud.initialize()
+            _ = try crud.person.updateByID(id, data: makePerson(name: "Grace", age: 38))
+            let targetDB = try SQLiteDatabase(path: ":memory:")
+            let target = CRUD(targetDB)
+            try target.initialize()
+            try target.readJSONL(remote: "source", text: crud.writeJSONL(remote: ""))
+            let imported = try target.person.select(where: "id = ?", arguments: [id])
+            XCTAssertEqual(imported.count, 1)
+            XCTAssertEqual(imported.first?.data.name, "Grace")
+            try crud.person.deleteByID(id)
+            try crud.initialize()
+            try target.readJSONL(remote: "source", text: crud.writeJSONL(remote: ""))
+            XCTAssertTrue(try target.person.select(where: "id = ?", arguments: [id]).isEmpty)
+            try target.initialize()
+        }
+    }
+
     func testGeneratedCRUD() throws {
         let db = try SQLiteDatabase(path: ":memory:")
         let crud = CRUD(db)

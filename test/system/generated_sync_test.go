@@ -49,7 +49,7 @@ func TestGeneratedJSONLSync(t *testing.T) {
 	target := NewCRUD(rt.WrapDB(targetDB))
 	assert.NilError(t, target.Init())
 
-	personRow, err := source.Person.Insert(&Person{Name: "Ada", Age: 37})
+	personRow, err := source.Person.Insert(&Person{Name: testPersonNameAda, Age: 37})
 	if err != nil {
 		t.Fatalf("insert source person: %v", err)
 	}
@@ -77,7 +77,7 @@ func TestGeneratedJSONLSync(t *testing.T) {
 		t.Fatalf("select target person: %v", err)
 	}
 	assert.Check(t, is.Len(targetPeople, 1))
-	assert.Check(t, is.Equal(targetPeople[0].Data.GetName(), "Ada"))
+	assert.Check(t, is.Equal(targetPeople[0].Data.GetName(), testPersonNameAda))
 
 	var remoteSyncCount int
 	if err := targetDB.QueryRowContext(ctx, "SELECT COUNT(*) FROM _sync WHERE remote = ?", testRemoteA).Scan(&remoteSyncCount); err != nil {

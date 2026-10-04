@@ -12,8 +12,7 @@ import (
 )
 
 const (
-	rustRuntime      = "::proprdb_runtime"
-	rustDataVariable = "data"
+	rustRuntime = "::proprdb_runtime"
 )
 
 type rustModel struct {
@@ -252,7 +251,7 @@ func (e rustEmitter) emitModel(model rustModel) {
 	if m.ValidateWrite {
 		g.P("fn validate(data: &Self::Data) -> ", rustRuntime, "::Result<()> { data.valid() }")
 	}
-	dataName := rustDataVariable
+	dataName := dataVariable
 	if len(m.ProjectedFields) == 0 {
 		dataName = "_data"
 	}

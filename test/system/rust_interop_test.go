@@ -30,7 +30,7 @@ func TestRustRuntimeInterop(t *testing.T) {
 	rows, err := crud.Person.Select("id = ?", rustInteropID)
 	assert.NilError(t, err)
 	assert.Equal(t, len(rows), 1)
-	assert.Equal(t, rows[0].Data.Name, "Ada")
+	assert.Equal(t, rows[0].Data.Name, testPersonNameAda)
 	assert.Equal(t, rows[0].Data.Age, int64(35))
 
 	checkpointBytes, err := os.ReadFile(filepath.Join(dir, "rust.checkpoint"))
@@ -58,7 +58,7 @@ func TestRustRuntimeInterop(t *testing.T) {
 	assert.NilError(t, targetCRUD.WriteJSONL("", &roundTrip))
 	assert.Equal(t, len(strings.Split(strings.TrimSpace(roundTrip.String()), "\n")), 4)
 
-	_, err = crud.Person.UpdateByID(rustInteropID, &Person{Name: "Grace", Age: 41})
+	_, err = crud.Person.UpdateByID(rustInteropID, &Person{Name: testPersonNameGrace, Age: 41})
 	assert.NilError(t, err)
 	var exported bytes.Buffer
 	goCheckpoint, err := crud.PrepareJSONL("rust", &exported)

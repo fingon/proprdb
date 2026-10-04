@@ -35,7 +35,7 @@ timestamps must describe semantically equal protobuf state (or the same
 tombstone); otherwise import returns a conflict.
 
 Every nonblank physical JSONL line contains exactly one object. Object IDs are
-canonical lowercase UUIDv7 values. `deleted` is absent or a JSON boolean,
+canonical lowercase UUID values. `deleted` is absent or a JSON boolean,
 `atNs` is a signed decimal `int64` number or decimal string, and `data` is an
 object with a nonempty string `@type`. Invalid scalar coercions are rejected
 with the physical line number.

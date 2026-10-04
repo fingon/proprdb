@@ -98,7 +98,7 @@ struct PersonTable {
 
 	func insert(_ data: Generatedtest_Example_Person) throws -> PersonRow {
 		let id = try uuidV7()
-		try validateUUIDV7(id)
+		try validateUUID(id)
 		return try insertWithIDInternal(id: id, data: data)
 	}
 
@@ -110,7 +110,7 @@ struct PersonTable {
 		if id.isEmpty {
 			throw ProprDBError("empty id")
 		}
-		try validateUUIDV7(id)
+		try validateUUID(id)
 		try validateForWrite(data)
 		let atNs = try writeLocalObject(q, binding: PersonGeneratedBinding, id: id, message: data, insert: true)
 		return PersonRow(id: id, atNs: atNs, data: data)
@@ -120,7 +120,7 @@ struct PersonTable {
 		if id.isEmpty {
 			throw ProprDBError("empty id")
 		}
-		try validateUUIDV7(id)
+		try validateUUID(id)
 		try validateForWrite(data)
 		let atNs = try writeLocalObject(q, binding: PersonGeneratedBinding, id: id, message: data, insert: false)
 		return PersonRow(id: id, atNs: atNs, data: data)
@@ -258,7 +258,7 @@ struct NoteTable {
 
 	func insert(_ data: Generatedtest_Example_Note) throws -> NoteRow {
 		let id = try uuidV7()
-		try validateUUIDV7(id)
+		try validateUUID(id)
 		return try insertWithIDInternal(id: id, data: data)
 	}
 
@@ -266,7 +266,7 @@ struct NoteTable {
 		if id.isEmpty {
 			throw ProprDBError("empty id")
 		}
-		try validateUUIDV7(id)
+		try validateUUID(id)
 		let atNs = try writeLocalObject(q, binding: NoteGeneratedBinding, id: id, message: data, insert: true)
 		return NoteRow(id: id, atNs: atNs, data: data)
 	}
@@ -275,7 +275,7 @@ struct NoteTable {
 		if id.isEmpty {
 			throw ProprDBError("empty id")
 		}
-		try validateUUIDV7(id)
+		try validateUUID(id)
 		let atNs = try writeLocalObject(q, binding: NoteGeneratedBinding, id: id, message: data, insert: false)
 		return NoteRow(id: id, atNs: atNs, data: data)
 	}
@@ -410,7 +410,7 @@ struct ChoiceTable {
 
 	func insert(_ data: Generatedtest_Example_Choice) throws -> ChoiceRow {
 		let id = try uuidV7()
-		try validateUUIDV7(id)
+		try validateUUID(id)
 		return try insertWithIDInternal(id: id, data: data)
 	}
 
@@ -418,7 +418,7 @@ struct ChoiceTable {
 		if id.isEmpty {
 			throw ProprDBError("empty id")
 		}
-		try validateUUIDV7(id)
+		try validateUUID(id)
 		let atNs = try writeLocalObject(q, binding: ChoiceGeneratedBinding, id: id, message: data, insert: true)
 		return ChoiceRow(id: id, atNs: atNs, data: data)
 	}
@@ -427,7 +427,7 @@ struct ChoiceTable {
 		if id.isEmpty {
 			throw ProprDBError("empty id")
 		}
-		try validateUUIDV7(id)
+		try validateUUID(id)
 		let atNs = try writeLocalObject(q, binding: ChoiceGeneratedBinding, id: id, message: data, insert: false)
 		return ChoiceRow(id: id, atNs: atNs, data: data)
 	}

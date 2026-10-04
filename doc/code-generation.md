@@ -42,7 +42,7 @@ message Person {
 - `proprdb.allow_custom_id_insert` (`bool`, message-level):
   - Generated table keeps `Insert(data)` and additionally gets
     `InsertWithID(id, data)`.
-  - `InsertWithID` requires a canonical lowercase UUIDv7.
+  - `InsertWithID` requires a canonical lowercase UUID.
 
 Existing protobuf field names, numbers, types, and presence semantics are
 immutable. Projection membership may be added or removed. Initialization adds
@@ -84,6 +84,15 @@ message InternalOnly {
   string data = 1;
 }
 ```
+
+## Go runtime
+
+The Go runtime and generated bindings require Go 1.27 or newer. Generated row
+names alias `rt.Row[*Message]`; table methods delegate to generic methods on
+`rt.Table`. Message bindings retain projection and index metadata and an
+optional write-validation callback. Shared selection, protobuf decoding,
+CRUD validation, deletion, initialization, and unknown-row draining live in
+the runtime. Custom-ID inserts and change listeners remain opt-in generated APIs.
 
 ## Generate from proto
 
@@ -136,7 +145,7 @@ let row = crud.person.insert(&person)?;
 let found = crud.person.select_by_id(&row.id)?;
 ```
 
-The Rust target supports typed CRUD, UUIDv7 IDs, scalar projections (including
+The Rust target supports typed CRUD, UUID IDs (generated as v7), scalar projections (including
 optional and oneof presence), generated indexes, projection reconciliation,
 write validation, custom ID insertion, change listeners, and query statistics.
 With `validate_write`, implement `valid(&self) -> proprdb_runtime::Result<()>`
@@ -154,7 +163,7 @@ and writes produce no notifications.
 
 Updates insert a row when its ID does not exist. Deleting an absent ID still
 records a tombstone, unless `omit_sync` is set. Write IDs must be canonical
-lowercase UUIDv7 values. Initialization audits stored IDs and reconciles all
+lowercase UUID values. Initialization audits stored IDs and reconciles all
 generated tables atomically.
 
 `Crud` exposes `read_jsonl`, `prepare_jsonl`, `acknowledge_jsonl`,

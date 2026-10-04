@@ -93,7 +93,7 @@ fn custom_ids_and_unsynced_deletes() -> Result<()> {
         "",
         "invalid",
         "01951D6E-A000-7000-8000-000000000001",
-        "01951d6e-a000-4000-8000-000000000001",
+        "01951d6e-a000-0000-8000-000000000001",
     ] {
         assert!(
             crud.person
@@ -323,5 +323,36 @@ fn protobuf_kind_changes_are_rejected() -> Result<()> {
         |row| row.get(0),
     )?;
     assert_eq!(schema, "name:string;age:int32");
+    Ok(())
+}
+
+#[test]
+fn other_uuid_versions_crud_and_sync() -> Result<()> {
+    for id in [
+        "018f4f3f-6f9f-4a1b-8f55-1234567890ab",
+        "21f7f8de-8051-5b89-8680-0195ef798b6a",
+    ] {
+        let connection = Connection::open_in_memory()?;
+        let crud = system::Crud::new(&connection);
+        crud.initialize()?;
+        let row = crud.person.insert_with_id(id, &person(PERSON_NAME, 35))?;
+        assert_eq!(row.id, id);
+        crud.initialize()?;
+        crud.person.update_by_id(id, &person(PERSON_NAME, 36))?;
+        let mut bytes = Vec::new();
+        crud.write_jsonl("", &mut bytes)?;
+        let target_connection = Connection::open_in_memory()?;
+        let target = system::Crud::new(&target_connection);
+        target.initialize()?;
+        target.read_jsonl("source", std::io::Cursor::new(bytes))?;
+        assert_eq!(target.person.select_by_id(id)?.unwrap().data.age, 36);
+        assert!(crud.person.delete_by_id(id)?);
+        crud.initialize()?;
+        let mut bytes = Vec::new();
+        crud.write_jsonl("", &mut bytes)?;
+        target.read_jsonl("source", std::io::Cursor::new(bytes))?;
+        assert!(target.person.select_by_id(id)?.is_none());
+        target.initialize()?;
+    }
     Ok(())
 }

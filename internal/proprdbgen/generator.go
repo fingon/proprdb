@@ -59,6 +59,8 @@ type generatorEmitter struct {
 }
 
 const (
+	dataVariable           = "data"
+	errorReturnType        = "error"
 	errNilDBTX             = "nil DBTX"
 	errNilData             = "nil data"
 	errEmptyID             = "empty id"
@@ -112,7 +114,6 @@ func GenerateFiles(plugin *protogen.Plugin, files []*protogen.File) error {
 	g.P(`"errors"`)
 	g.P(`"fmt"`)
 	g.P(`"io"`)
-	g.P(`"strings"`)
 	g.P()
 	g.P(`"google.golang.org/protobuf/proto"`)
 	if hasOptionalProjectedFields {
@@ -260,7 +261,7 @@ func (c modelCollector) buildModel(message *protogen.Message) (messageModel, err
 		}
 
 		switch strings.ToLower(projection.ColumnName) {
-		case "id", "at_ns", "data":
+		case "id", "at_ns", dataVariable:
 			return messageModel{}, fmt.Errorf("field %s projects to reserved column %s", field.Desc.FullName(), projection.ColumnName)
 		}
 		normalizedColumnName := strings.ToLower(projection.ColumnName)
@@ -558,11 +559,7 @@ func (e generatorEmitter) emitModel(model messageModel) {
 	}
 	g.P()
 
-	g.P("type ", model.RowTypeName, " struct {")
-	g.P("\tID string")
-	g.P("\tAtNs int64")
-	g.P("\tData *", model.GoName)
-	g.P("}")
+	g.P("type ", model.RowTypeName, " = rt.Row[*", model.GoName, "]")
 	g.P()
 	if model.ChangeListeners {
 		g.P("type ", model.GoName, "Change = rt.TableChange[*", model.GoName, "]")
@@ -592,16 +589,23 @@ func (e generatorEmitter) emitModel(model messageModel) {
 		g.P("\t\t{Name: ", strconv.Quote(indexModel.IndexName), ", CreateSQL: ", indexCreateConstPrefix, strconv.Itoa(indexPosition+1), "},")
 	}
 	g.P("\t},")
+	if model.ValidateWrite {
+		g.P("\tValidateMessage: func(message proto.Message) error {")
+		g.P("\t\tdata, ok := message.(*", model.GoName, ")")
+		g.P("\t\tif !ok { return fmt.Errorf(\"expected *", model.GoName, ", got %T\", message) }")
+		g.P("\t\treturn data.Valid()")
+		g.P("\t},")
+	}
 	g.P("\tProjectedValues: func(message proto.Message) ([]any, error) {")
 	dataName := "_"
 	if len(model.ProjectedFields) > 0 {
-		dataName = "data"
+		dataName = dataVariable
 	}
 	g.P("\t\t", dataName, ", ok := message.(*", model.GoName, ")")
 	g.P("\t\tif !ok { return nil, fmt.Errorf(\"expected *", model.GoName, ", got %T\", message) }")
 	g.P("\t\tvalues := []any{}")
 	for _, projectedField := range model.ProjectedFields {
-		e.emitProjectedFieldAppend("values", "data", projectedField, "\t\t")
+		e.emitProjectedFieldAppend("values", dataVariable, projectedField, "\t\t")
 	}
 	g.P("\t\treturn values, nil")
 	g.P("\t},")
@@ -616,287 +620,41 @@ func (e generatorEmitter) emitModel(model messageModel) {
 	g.P("}")
 	g.P()
 
-	e.emitInitMethod(model, tableNameConst, typeNameConst, schemaConst, createTableConst, indexPrefixConst, indexCreateConstPrefix)
-	e.emitSelectMethod(model, tableNameConst)
-	e.emitInsertMethod(model, tableNameConst, insertConst)
-	e.emitUpdateMethod(model, tableNameConst, upsertConst)
-	e.emitDeleteMethod(model)
-	if model.ChangeListeners {
-		e.emitChangesMethod(model, tableNameConst)
+	e.emitTableDelegates(model)
+}
+
+func (e generatorEmitter) emitTableDelegates(model messageModel) {
+	g := e.g
+	g.P("func (t *", model.TableTypeName, ") runtimeTable() rt.Table {")
+	g.P("\treturn rt.NewTable(t.q, ", model.GoName, "GeneratedBinding)")
+	g.P("}")
+	g.P()
+	methods := []struct{ name, parameters, returns, call string }{
+		{"Init", "", errorReturnType, "Init(true)"},
+		{"init", "ensureCore bool", errorReturnType, "Init(ensureCore)"},
+		{"Select", "where string, args ...any", "([]" + model.RowTypeName + ", error)", "Select[" + model.GoName + ", *" + model.GoName + "](where, args...)"},
+		{"Insert", "data *" + model.GoName, "(" + model.RowTypeName + ", error)", "Insert[" + model.GoName + ", *" + model.GoName + "](data)"},
+		{"insertWithID", "id string, data *" + model.GoName, "(" + model.RowTypeName + ", error)", "InsertWithID[" + model.GoName + ", *" + model.GoName + "](id, data)"},
+		{"UpdateByID", "id string, data *" + model.GoName, "(" + model.RowTypeName + ", error)", "UpdateByID[" + model.GoName + ", *" + model.GoName + "](id, data)"},
+		{"UpdateRow", "row " + model.RowTypeName, "(" + model.RowTypeName + ", error)", "UpdateRow[" + model.GoName + ", *" + model.GoName + "](row)"},
+		{"DeleteByID", "id string", errorReturnType, "DeleteByID(id)"},
+		{"DeleteRow", "row " + model.RowTypeName, errorReturnType, "DeleteRow(row)"},
+		{"upsertWithAtNs", "id string, atNs int64, data *" + model.GoName, errorReturnType, "UpsertWithAtNs[" + model.GoName + ", *" + model.GoName + "](id, atNs, data)"},
+		{"tombstoneWithAtNs", "id string, atNs int64", errorReturnType, "TombstoneWithAtNs(id, atNs)"},
+		{"DrainUnknownRows", "", errorReturnType, "DrainUnknownRows()"},
 	}
-	e.emitApplyWithAtNsMethods(model, tableNameConst, typeNameConst, upsertConst)
-	e.emitDrainUnknownMethod(model, tableNameConst, typeNameConst)
-}
-
-func (e generatorEmitter) emitInitMethod(model messageModel, tableNameConst, typeNameConst, schemaConst, createTableConst, indexPrefixConst, indexCreateConstPrefix string) {
-	g := e.g
-	g.P("func (t *", model.TableTypeName, ") Init() error {")
-	g.P("\treturn t.init(true)")
-	g.P("}")
-	g.P()
-	g.P("func (t *", model.TableTypeName, ") init(ensureCore bool) error {")
-	g.P("\tif t.q == nil {")
-	g.P("\t\treturn errors.New(\"" + errNilDBTX + "\")")
-	g.P("\t}")
-	g.P("\tif ensureCore {")
-	g.P("\t\tif err := rt.EnsureCoreTables(t.q); err != nil { return err }")
-	g.P("\t}")
-	g.P("\tif err := rt.AuditObjectIDsContext(context.Background(), t.q, []rt.GeneratedTableBinding{", model.GoName, "GeneratedBinding}); err != nil { return err }")
-	g.P("\tif err := rt.ReconcileGeneratedTableContext(context.Background(), t.q, ", model.GoName, "GeneratedBinding); err != nil { return err }")
-	g.P("\tif err := t.drainUnknownRows(", typeNameConst, "); err != nil {")
-	g.P("\t\treturn fmt.Errorf(\"drain unknown rows for %s: %w\", ", tableNameConst, ", err)")
-	g.P("\t}")
-	g.P("\treturn nil")
-	g.P("}")
-	g.P()
-	_ = tableNameConst
-	_ = schemaConst
-	_ = createTableConst
-	_ = indexPrefixConst
-	_ = indexCreateConstPrefix
-}
-
-func (e generatorEmitter) emitDrainUnknownMethod(model messageModel, _, typeNameConst string) {
-	g := e.g
-	g.P("func (t *", model.TableTypeName, ") drainUnknownRows(typeName string) error {")
-	g.P("\tif t.q == nil {")
-	g.P("\t\treturn errors.New(\"" + errNilDBTX + "\")")
-	g.P("\t}")
-	g.P("\tif typeName == \"\" {")
-	g.P("\t\treturn errors.New(\"empty type name\")")
-	g.P("\t}")
-	g.P("\treturn rt.DrainUnknownBindingsContext(context.Background(), t.q, []rt.GeneratedTableBinding{", model.GoName, "GeneratedBinding})")
-	g.P("}")
-	g.P()
-	g.P("func (t *", model.TableTypeName, ") DrainUnknownRows() error {")
-	g.P("\treturn t.drainUnknownRows(", typeNameConst, ")")
-	g.P("}")
-	g.P()
-}
-
-func (e generatorEmitter) emitSelectMethod(model messageModel, tableNameConst string) {
-	g := e.g
-	g.P("func (t *", model.TableTypeName, ") Select(where string, args ...any) ([]", model.RowTypeName, ", error) {")
-	g.P("\tif t.q == nil {")
-	g.P("\t\treturn nil, errors.New(\"" + errNilDBTX + "\")")
-	g.P("\t}")
-	g.P("\tctx := context.Background()")
-	g.P("\tquery := `SELECT id, at_ns, data FROM \"`+", tableNameConst, "+`\"`")
-	g.P("\tif strings.TrimSpace(where) != \"\" {")
-	g.P("\t\tquery += \" WHERE \" + where")
-	g.P("\t}")
-	if model.QueryStatistics {
-		g.P("\treturn rt.MeasureQueryContext(ctx, t.q, ", tableNameConst, ", query, func() ([]", model.RowTypeName, ", error) {")
-	}
-	g.P("\trows, err := t.q.QueryContext(ctx, query, args...)")
-	g.P("\tif err != nil {")
-	g.P("\t\treturn nil, fmt.Errorf(\"select from %s: %w\", ", tableNameConst, ", err)")
-	g.P("\t}")
-	g.P("\tresult := make([]", model.RowTypeName, ", 0)")
-	g.P("\tfor rows.Next() {")
-	g.P("\t\tvar id string")
-	g.P("\t\tvar atNs int64")
-	g.P("\t\tvar dataBytes []byte")
-	g.P("\t\tif err := rows.Scan(&id, &atNs, &dataBytes); err != nil {")
-	g.P("\t\t\tif closeErr := rt.CloseRows(rows, \"select\"); closeErr != nil {")
-	g.P("\t\t\t\treturn nil, fmt.Errorf(\"scan row from %s: %w (additionally, %v)\", ", tableNameConst, ", err, closeErr)")
-	g.P("\t\t\t}")
-	g.P("\t\t\treturn nil, fmt.Errorf(\"scan row from %s: %w\", ", tableNameConst, ", err)")
-	g.P("\t\t}")
-	g.P("\t\tdata := &", model.GoName, "{}")
-	g.P("\t\tif err := proto.Unmarshal(dataBytes, data); err != nil {")
-	g.P("\t\t\tif closeErr := rt.CloseRows(rows, \"select\"); closeErr != nil {")
-	g.P("\t\t\t\treturn nil, fmt.Errorf(\"unmarshal ", model.GoName, " row: %w (additionally, %v)\", err, closeErr)")
-	g.P("\t\t\t}")
-	g.P("\t\t\treturn nil, fmt.Errorf(\"unmarshal ", model.GoName, " row: %w\", err)")
-	g.P("\t\t}")
-	g.P("\t\tresult = append(result, ", model.RowTypeName, "{ID: id, AtNs: atNs, Data: data})")
-	g.P("\t}")
-	g.P("\tif err := rows.Err(); err != nil {")
-	g.P("\t\tif closeErr := rt.CloseRows(rows, \"select\"); closeErr != nil {")
-	g.P("\t\t\treturn nil, fmt.Errorf(\"iterate rows from %s: %w (additionally, %v)\", ", tableNameConst, ", err, closeErr)")
-	g.P("\t\t}")
-	g.P("\t\treturn nil, fmt.Errorf(\"iterate rows from %s: %w\", ", tableNameConst, ", err)")
-	g.P("\t}")
-	g.P("\tif err := rt.CloseRows(rows, \"select\"); err != nil {")
-	g.P("\t\treturn nil, err")
-	g.P("\t}")
-	g.P("\treturn result, nil")
-	if model.QueryStatistics {
-		g.P("\t})")
-	}
-	g.P("}")
-	g.P()
-}
-
-func (e generatorEmitter) emitInsertMethod(model messageModel, _, _ string) {
-	g := e.g
-	g.P("func (t *", model.TableTypeName, ") Insert(data *", model.GoName, ") (", model.RowTypeName, ", error) {")
-	g.P("\tif t.q == nil {")
-	g.P("\t\treturn ", model.RowTypeName, "{}, errors.New(\""+errNilDBTX+"\")")
-	g.P("\t}")
-	g.P("\tif data == nil {")
-	g.P("\t\treturn ", model.RowTypeName, "{}, errors.New(\""+errNilData+"\")")
-	g.P("\t}")
-	g.P("\tid, err := rt.UUIDv7()")
-	g.P("\tif err != nil {")
-	g.P("\t\treturn ", model.RowTypeName, "{}, fmt.Errorf(\"generate uuidv7: %w\", err)")
-	g.P("\t}")
-	g.P("\tif err := rt.ValidateUUIDv7(id); err != nil {")
-	g.P("\t\treturn ", model.RowTypeName, "{}, fmt.Errorf(\"validate generated id %s: %w\", id, err)")
-	g.P("\t}")
-	g.P("\treturn t.insertWithID(id, data)")
-	g.P("}")
-	g.P()
-
 	if model.AllowCustomIDInsert {
-		g.P("func (t *", model.TableTypeName, ") InsertWithID(id string, data *", model.GoName, ") (", model.RowTypeName, ", error) {")
-		g.P("\tif t.q == nil {")
-		g.P("\t\treturn ", model.RowTypeName, "{}, errors.New(\""+errNilDBTX+"\")")
-		g.P("\t}")
-		g.P("\tif data == nil {")
-		g.P("\t\treturn ", model.RowTypeName, "{}, errors.New(\""+errNilData+"\")")
-		g.P("\t}")
-		g.P("\treturn t.insertWithID(id, data)")
+		methods = append(methods, struct{ name, parameters, returns, call string }{"InsertWithID", "id string, data *" + model.GoName, "(" + model.RowTypeName + ", error)", "InsertWithID[" + model.GoName + ", *" + model.GoName + "](id, data)"})
+	}
+	if model.ChangeListeners {
+		methods = append(methods, struct{ name, parameters, returns, call string }{"Changes", "ctx context.Context", "(<-chan " + model.GoName + "Change, error)", "Changes[*" + model.GoName + "](ctx)"})
+	}
+	for _, method := range methods {
+		g.P("func (t *", model.TableTypeName, ") ", method.name, "(", method.parameters, ") ", method.returns, " {")
+		g.P("\treturn t.runtimeTable().", method.call)
 		g.P("}")
 		g.P()
 	}
-
-	g.P("func (t *", model.TableTypeName, ") insertWithID(id string, data *", model.GoName, ") (", model.RowTypeName, ", error) {")
-	g.P("\tif t.q == nil {")
-	g.P("\t\treturn ", model.RowTypeName, "{}, errors.New(\""+errNilDBTX+"\")")
-	g.P("\t}")
-	g.P("\tif data == nil {")
-	g.P("\t\treturn ", model.RowTypeName, "{}, errors.New(\""+errNilData+"\")")
-	g.P("\t}")
-	g.P("\tif id == \"\" {")
-	g.P("\t\treturn ", model.RowTypeName, "{}, errors.New(\""+errEmptyID+"\")")
-	g.P("\t}")
-	g.P("\tif err := rt.ValidateUUIDv7(id); err != nil {")
-	g.P("\t\treturn ", model.RowTypeName, "{}, fmt.Errorf(\"validate id %s: %w\", id, err)")
-	g.P("\t}")
-	if model.ValidateWrite {
-		g.P("\tif err := data.Valid(); err != nil {")
-		g.P("\t\treturn ", model.RowTypeName, "{}, fmt.Errorf(\"validate ", model.GoName, ": %w\", err)")
-		g.P("\t}")
-	}
-	g.P("\tatNs, err := rt.WriteLocalObjectContext(context.Background(), t.q, ", model.GoName, "GeneratedBinding, id, data, true)")
-	g.P("\tif err != nil { return ", model.RowTypeName, "{}, err }")
-	g.P("\treturn ", model.RowTypeName, "{ID: id, AtNs: atNs, Data: data}, nil")
-	g.P("}")
-	g.P()
-}
-
-func (e generatorEmitter) emitUpdateMethod(model messageModel, _, _ string) {
-	g := e.g
-	g.P("func (t *", model.TableTypeName, ") UpdateByID(id string, data *", model.GoName, ") (", model.RowTypeName, ", error) {")
-	g.P("\tif t.q == nil {")
-	g.P("\t\treturn ", model.RowTypeName, "{}, errors.New(\""+errNilDBTX+"\")")
-	g.P("\t}")
-	g.P("\tif id == \"\" {")
-	g.P("\t\treturn ", model.RowTypeName, "{}, errors.New(\""+errEmptyID+"\")")
-	g.P("\t}")
-	g.P("\tif err := rt.ValidateUUIDv7(id); err != nil {")
-	g.P("\t\treturn ", model.RowTypeName, "{}, fmt.Errorf(\"validate id %s: %w\", id, err)")
-	g.P("\t}")
-	g.P("\tif data == nil {")
-	g.P("\t\treturn ", model.RowTypeName, "{}, errors.New(\""+errNilData+"\")")
-	g.P("\t}")
-	if model.ValidateWrite {
-		g.P("\tif err := data.Valid(); err != nil {")
-		g.P("\t\treturn ", model.RowTypeName, "{}, fmt.Errorf(\"validate ", model.GoName, ": %w\", err)")
-		g.P("\t}")
-	}
-	g.P("\tatNs, err := rt.WriteLocalObjectContext(context.Background(), t.q, ", model.GoName, "GeneratedBinding, id, data, false)")
-	g.P("\tif err != nil { return ", model.RowTypeName, "{}, err }")
-	g.P("\treturn ", model.RowTypeName, "{ID: id, AtNs: atNs, Data: data}, nil")
-	g.P("}")
-	g.P()
-
-	g.P("func (t *", model.TableTypeName, ") UpdateRow(row ", model.RowTypeName, ") (", model.RowTypeName, ", error) {")
-	g.P("\tif t.q == nil {")
-	g.P("\t\treturn ", model.RowTypeName, "{}, errors.New(\""+errNilDBTX+"\")")
-	g.P("\t}")
-	g.P("\tif row.ID == \"\" {")
-	g.P("\t\treturn ", model.RowTypeName, "{}, errors.New(\""+errEmptyID+"\")")
-	g.P("\t}")
-	g.P("\tif row.Data == nil {")
-	g.P("\t\treturn ", model.RowTypeName, "{}, errors.New(\""+errNilData+"\")")
-	g.P("\t}")
-	g.P("\treturn t.UpdateByID(row.ID, row.Data)")
-	g.P("}")
-	g.P()
-}
-
-func (e generatorEmitter) emitDeleteMethod(model messageModel) {
-	g := e.g
-	g.P("func (t *", model.TableTypeName, ") DeleteByID(id string) error {")
-	g.P("\tif t.q == nil {")
-	g.P("\t\treturn errors.New(\"" + errNilDBTX + "\")")
-	g.P("\t}")
-	g.P("\tif id == \"\" {")
-	g.P("\t\treturn errors.New(\"" + errEmptyID + "\")")
-	g.P("\t}")
-	g.P("\treturn rt.DeleteLocalBoundObjectContext(context.Background(), t.q, ", model.GoName, "GeneratedBinding, id)")
-	g.P("}")
-	g.P()
-
-	g.P("func (t *", model.TableTypeName, ") DeleteRow(row ", model.RowTypeName, ") error {")
-	g.P("\tif t.q == nil {")
-	g.P("\t\treturn errors.New(\"" + errNilDBTX + "\")")
-	g.P("\t}")
-	g.P("\tif row.ID == \"\" {")
-	g.P("\t\treturn errors.New(\"" + errEmptyID + "\")")
-	g.P("\t}")
-	g.P("\treturn t.DeleteByID(row.ID)")
-	g.P("}")
-	g.P()
-}
-
-func (e generatorEmitter) emitChangesMethod(model messageModel, tableNameConst string) {
-	g := e.g
-	g.P("func (t *", model.TableTypeName, ") Changes(ctx context.Context) (<-chan ", model.GoName, "Change, error) {")
-	g.P("\tif t.q == nil {")
-	g.P("\t\treturn nil, errors.New(\"" + errNilDBTX + "\")")
-	g.P("\t}")
-	g.P("\treturn rt.TableChanges[*", model.GoName, "](ctx, t.q, ", tableNameConst, ")")
-	g.P("}")
-	g.P()
-}
-
-func (e generatorEmitter) emitApplyWithAtNsMethods(model messageModel, _, typeNameConst, _ string) {
-	g := e.g
-	g.P("func (t *", model.TableTypeName, ") upsertWithAtNs(id string, atNs int64, data *", model.GoName, ") error {")
-	g.P("\tif t.q == nil {")
-	g.P("\t\treturn errors.New(\"" + errNilDBTX + "\")")
-	g.P("\t}")
-	g.P("\tif id == \"\" {")
-	g.P("\t\treturn errors.New(\"" + errEmptyID + "\")")
-	g.P("\t}")
-	g.P("\tif data == nil {")
-	g.P("\t\treturn errors.New(\"" + errNilData + "\")")
-	g.P("\t}")
-	g.P("\tdataJSON, err := rt.MarshalAnyJSON(data)")
-	g.P("\tif err != nil { return err }")
-	g.P("\treturn t.q.WithTransaction(context.Background(), func(tx rt.DBTX) error {")
-	g.P("\t\treturn rt.ApplyIncomingObjectContext(context.Background(), tx, ", model.GoName, "GeneratedBinding, rt.JSONLRecord{ID: id, AtNs: atNs, Data: dataJSON})")
-	g.P("\t})")
-	g.P("}")
-	g.P()
-	g.P("func (t *", model.TableTypeName, ") tombstoneWithAtNs(id string, atNs int64) error {")
-	g.P("\tif t.q == nil {")
-	g.P("\t\treturn errors.New(\"" + errNilDBTX + "\")")
-	g.P("\t}")
-	g.P("\tif id == \"\" {")
-	g.P("\t\treturn errors.New(\"" + errEmptyID + "\")")
-	g.P("\t}")
-	g.P("\tdataJSON, err := rt.MarshalTypeOnlyAnyJSON(", typeNameConst, ")")
-	g.P("\tif err != nil { return err }")
-	g.P("\treturn t.q.WithTransaction(context.Background(), func(tx rt.DBTX) error {")
-	g.P("\t\treturn rt.ApplyIncomingObjectContext(context.Background(), tx, ", model.GoName, "GeneratedBinding, rt.JSONLRecord{ID: id, Deleted: true, AtNs: atNs, Data: dataJSON})")
-	g.P("\t})")
-	g.P("}")
-	g.P()
 }
 
 func (e generatorEmitter) emitWrapper(models []messageModel) {

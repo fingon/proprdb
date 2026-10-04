@@ -12,8 +12,9 @@ import (
 )
 
 const (
-	swiftRuntimeModuleName = "ProprDBSwiftRuntime"
-	swiftPublicVisibility  = "public"
+	swiftPublicVisibilityOption = "Public"
+	swiftRuntimeModuleName      = "ProprDBSwiftRuntime"
+	swiftPublicVisibility       = "public"
 )
 
 type SwiftGeneratorOptions struct {
@@ -252,7 +253,7 @@ func (e swiftEmitter) emitSwiftInsertMethod(model messageModel, swiftTypeName, _
 	g := e.g
 	g.P("\t", e.visibilityPrefix(), "func insert(_ data: ", swiftTypeName, ") throws -> ", model.RowTypeName, " {")
 	g.P("\t\tlet id = try uuidV7()")
-	g.P("\t\ttry validateUUIDV7(id)")
+	g.P("\t\ttry validateUUID(id)")
 	g.P("\t\treturn try insertWithIDInternal(id: id, data: data)")
 	g.P("\t}")
 	g.P()
@@ -266,7 +267,7 @@ func (e swiftEmitter) emitSwiftInsertMethod(model messageModel, swiftTypeName, _
 	g.P("\t\tif id.isEmpty {")
 	g.P("\t\t\tthrow ProprDBError(\"empty id\")")
 	g.P("\t\t}")
-	g.P("\t\ttry validateUUIDV7(id)")
+	g.P("\t\ttry validateUUID(id)")
 	if model.ValidateWrite {
 		g.P("\t\ttry validateForWrite(data)")
 	}
@@ -282,7 +283,7 @@ func (e swiftEmitter) emitSwiftUpdateMethod(model messageModel, swiftTypeName, _
 	g.P("\t\tif id.isEmpty {")
 	g.P("\t\t\tthrow ProprDBError(\"empty id\")")
 	g.P("\t\t}")
-	g.P("\t\ttry validateUUIDV7(id)")
+	g.P("\t\ttry validateUUID(id)")
 	if model.ValidateWrite {
 		g.P("\t\ttry validateForWrite(data)")
 	}
@@ -779,7 +780,7 @@ func (e swiftEmitter) sharedVisibilityPrefix() string {
 }
 
 func ParseSwiftGeneratorOptions(rawOptions map[string]string) (SwiftGeneratorOptions, error) {
-	options := SwiftGeneratorOptions{Visibility: "Public"}
+	options := SwiftGeneratorOptions{Visibility: swiftPublicVisibilityOption}
 	for name, value := range rawOptions {
 		switch name {
 		case "Visibility":
@@ -802,7 +803,7 @@ func ParseSwiftGeneratorOptions(rawOptions map[string]string) (SwiftGeneratorOpt
 
 func validateSwiftVisibility(value string) error {
 	switch value {
-	case "Public", "Internal", "Package":
+	case swiftPublicVisibilityOption, "Internal", "Package":
 		return nil
 	default:
 		return fmt.Errorf("unsupported Visibility %q", value)
@@ -811,7 +812,7 @@ func validateSwiftVisibility(value string) error {
 
 func swiftVisibilityKeyword(value string) string {
 	switch value {
-	case "Public":
+	case swiftPublicVisibilityOption:
 		return swiftPublicVisibility
 	case "Internal":
 		return "internal"

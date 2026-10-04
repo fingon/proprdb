@@ -30,13 +30,13 @@ func TestGeneratedChangeListenersLocalWrites(t *testing.T) {
 	noteChanges, err := crud.Note.Changes(ctx)
 	assert.NilError(t, err)
 
-	inserted, err := crud.Person.Insert(&Person{Name: "Ada", Age: 37})
+	inserted, err := crud.Person.Insert(&Person{Name: testPersonNameAda, Age: 37})
 	assert.NilError(t, err)
 	insertChange := receivePersonChange(t, changes)
 	assert.Check(t, !insertChange.Deleted)
 	assert.Check(t, is.Equal(insertChange.ID, inserted.ID))
 	assert.Check(t, is.Equal(insertChange.AtNs, inserted.AtNs))
-	assert.Check(t, is.Equal(insertChange.Data.GetName(), "Ada"))
+	assert.Check(t, is.Equal(insertChange.Data.GetName(), testPersonNameAda))
 
 	updated, err := crud.Person.UpdateByID(inserted.ID, &Person{Name: "Ada Updated", Age: 38})
 	assert.NilError(t, err)

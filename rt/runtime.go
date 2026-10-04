@@ -402,7 +402,7 @@ func (r *JSONLRecord) UnmarshalJSON(data []byte) error {
 		}
 		deleted = string(wire.Deleted) == "true"
 	}
-	if err := ValidateUUIDv7(wire.ID); err != nil {
+	if err := ValidateUUID(wire.ID); err != nil {
 		return fmt.Errorf("decode id: %w", err)
 	}
 	if len(wire.Data) == 0 || wire.Data[0] != '{' {
@@ -438,6 +438,7 @@ type GeneratedTableBinding struct {
 	GeneratedIndexes  []GeneratedIndexDescriptor
 	GeneratedIndexKey string
 	ProjectedValues   func(proto.Message) ([]any, error)
+	ValidateMessage   func(proto.Message) error
 }
 
 type ProjectedColumnDescriptor struct {
@@ -757,7 +758,7 @@ func auditObjectIDTableContext(ctx context.Context, q DBTX, tableName, columnNam
 		if err := rows.Scan(&id); err != nil {
 			return fmt.Errorf("scan object ID from %s: %w", tableName, err)
 		}
-		if err := ValidateUUIDv7(id); err != nil {
+		if err := ValidateUUID(id); err != nil {
 			return fmt.Errorf("invalid stored object ID table=%s id=%s: %w", tableName, id, err)
 		}
 	}
@@ -941,32 +942,38 @@ func UUIDv7() (string, error) {
 	return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x", segment1, segment2, segment3, segment4, segment5), nil
 }
 
-func ValidateUUIDv7(id string) error {
+func ValidateUUID(id string) error {
 	if len(id) != 36 {
-		return fmt.Errorf("invalid uuidv7 %q: expected 36 characters", id)
+		return fmt.Errorf("invalid uuid %q: expected 36 characters", id)
 	}
 	for index, character := range id {
 		if index == 8 || index == 13 || index == 18 || index == 23 {
 			if character != '-' {
-				return fmt.Errorf("invalid uuidv7 %q: expected hyphen at character %d", id, index+1)
+				return fmt.Errorf("invalid uuid %q: expected hyphen at character %d", id, index+1)
 			}
 			continue
 		}
 		if (character < '0' || character > '9') && (character < 'a' || character > 'f') {
-			return fmt.Errorf("invalid uuidv7 %q: expected canonical lowercase hexadecimal", id)
+			return fmt.Errorf("invalid uuid %q: expected canonical lowercase hexadecimal", id)
 		}
 	}
-	if id[14] != '7' {
-		return fmt.Errorf("invalid uuidv7 %q: version is not 7", id)
+	if id[14] < '1' || id[14] > '8' {
+		return fmt.Errorf("invalid uuid %q: unsupported version", id)
 	}
 	if !strings.ContainsRune("89ab", rune(id[19])) {
-		return fmt.Errorf("invalid uuidv7 %q: invalid RFC variant", id)
+		return fmt.Errorf("invalid uuid %q: invalid RFC variant", id)
 	}
 	return nil
 }
 
-func ValidateUUID(id string) error {
-	return ValidateUUIDv7(id)
+func ValidateUUIDv7(id string) error {
+	if err := ValidateUUID(id); err != nil {
+		return err
+	}
+	if id[14] != '7' {
+		return fmt.Errorf("invalid uuidv7 %q: version is not 7", id)
+	}
+	return nil
 }
 
 func TypeURL(typeName string) string {

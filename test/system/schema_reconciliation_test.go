@@ -8,9 +8,9 @@ import (
 
 	rt "github.com/fingon/proprdb/rt"
 	_ "github.com/mattn/go-sqlite3"
+	"google.golang.org/protobuf/proto"
 	"gotest.tools/v3/assert"
 	is "gotest.tools/v3/assert/cmp"
-	"google.golang.org/protobuf/proto"
 )
 
 func TestProjectionReconciliationRemovesObsoleteColumns(t *testing.T) {
