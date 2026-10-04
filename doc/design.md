@@ -88,3 +88,14 @@ Implementations may also project selected typed fields from `data` into
 additional columns for queryability. Initialization owns only ProprDB core
 tables and generated tables for message types supported by the current
 application. Other SQLite tables are ignored.
+
+Scalar `external` fields and message-level `external_paths` declarations project
+selected values into SQL columns. Nested paths flatten dots to underscores;
+index declarations retain protobuf paths. Projections preserve presence: absent
+messages or optional/oneof leaves become NULL, while present ordinary scalar
+leaves retain their default values.
+
+Projections are derived from the stored payload. Schema reconciliation backfills
+new columns transactionally without rewriting payload bytes or advancing object
+or sync timestamps. Schema signatures retain nested source paths and reject
+incompatible reuse of a SQL column for a different protobuf field.

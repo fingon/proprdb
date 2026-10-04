@@ -71,3 +71,18 @@ the statistics update.
 Go exposes `rt.QueryStatistics` and `rt.ClearQueryStatistics`. Swift exposes
 `queryStatistics(_:)` and `clearQueryStatistics(_:)`; actor users can call
 them through `withDatabase`. Statistics persist until cleared.
+
+## Nested projection reconciliation
+
+Message-level `external_paths` declarations select scalar fields through
+singular nested messages. Generated indexes reference the protobuf paths, while
+SQL predicates use flattened column names (for example, `location_lon`). Missing
+messages or optional/oneof leaves produce NULL; present ordinary scalar leaves
+produce their default value, including zero.
+
+Adding projections triggers transactional backfill from stored protobuf payloads.
+Reconciliation changes only projection columns and managed schema/index state;
+it preserves payload bytes, unknown fields, IDs, object timestamps, tombstones,
+and sync checkpoints. Decode or SQL failures roll back reconciliation. Subsequent
+CRUD writes, JSONL imports, and unknown-type draining use the same projection
+logic. Repeated initialization with an unchanged schema needs no backfill.

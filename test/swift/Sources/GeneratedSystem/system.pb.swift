@@ -92,6 +92,159 @@ public struct Generatedtest_Example_Hidden: Sendable {
   public init() {}
 }
 
+public struct Generatedtest_Example_Photo: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var location: Generatedtest_Example_Location {
+    get {_location ?? Generatedtest_Example_Location()}
+    set {_location = newValue}
+  }
+  /// Returns true if `location` has been explicitly set.
+  public var hasLocation: Bool {self._location != nil}
+  /// Clears the value of `location`. Subsequent reads from it will return its default value.
+  public mutating func clearLocation() {self._location = nil}
+
+  public var exifCreate: Generatedtest_Example_ZonedTimestamp {
+    get {_exifCreate ?? Generatedtest_Example_ZonedTimestamp()}
+    set {_exifCreate = newValue}
+  }
+  /// Returns true if `exifCreate` has been explicitly set.
+  public var hasExifCreate: Bool {self._exifCreate != nil}
+  /// Clears the value of `exifCreate`. Subsequent reads from it will return its default value.
+  public mutating func clearExifCreate() {self._exifCreate = nil}
+
+  public var exifModify: Generatedtest_Example_ZonedTimestamp {
+    get {_exifModify ?? Generatedtest_Example_ZonedTimestamp()}
+    set {_exifModify = newValue}
+  }
+  /// Returns true if `exifModify` has been explicitly set.
+  public var hasExifModify: Bool {self._exifModify != nil}
+  /// Clears the value of `exifModify`. Subsequent reads from it will return its default value.
+  public mutating func clearExifModify() {self._exifModify = nil}
+
+  public var selection: Generatedtest_Example_Photo.OneOf_Selection? = nil
+
+  public var selectedLocation: Generatedtest_Example_Location {
+    get {
+      if case .selectedLocation(let v)? = selection {return v}
+      return Generatedtest_Example_Location()
+    }
+    set {selection = .selectedLocation(newValue)}
+  }
+
+  public var other: String {
+    get {
+      if case .other(let v)? = selection {return v}
+      return String()
+    }
+    set {selection = .other(newValue)}
+  }
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public enum OneOf_Selection: Equatable, Sendable {
+    case selectedLocation(Generatedtest_Example_Location)
+    case other(String)
+
+  }
+
+  public init() {}
+
+  fileprivate var _location: Generatedtest_Example_Location? = nil
+  fileprivate var _exifCreate: Generatedtest_Example_ZonedTimestamp? = nil
+  fileprivate var _exifModify: Generatedtest_Example_ZonedTimestamp? = nil
+}
+
+public struct Generatedtest_Example_Location: @unchecked Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var lon: Double {
+    get {_storage._lon}
+    set {_uniqueStorage()._lon = newValue}
+  }
+
+  public var lat: Double {
+    get {_storage._lat}
+    set {_uniqueStorage()._lat = newValue}
+  }
+
+  public var altitude: Int64 {
+    get {_storage._altitude ?? 0}
+    set {_uniqueStorage()._altitude = newValue}
+  }
+  /// Returns true if `altitude` has been explicitly set.
+  public var hasAltitude: Bool {_storage._altitude != nil}
+  /// Clears the value of `altitude`. Subsequent reads from it will return its default value.
+  public mutating func clearAltitude() {_uniqueStorage()._altitude = nil}
+
+  public var description_p: OneOf_Description? {
+    get {return _storage._description_p}
+    set {_uniqueStorage()._description_p = newValue}
+  }
+
+  public var label: String {
+    get {
+      if case .label(let v)? = _storage._description_p {return v}
+      return String()
+    }
+    set {_uniqueStorage()._description_p = .label(newValue)}
+  }
+
+  public var code: Int64 {
+    get {
+      if case .code(let v)? = _storage._description_p {return v}
+      return 0
+    }
+    set {_uniqueStorage()._description_p = .code(newValue)}
+  }
+
+  public var next: Generatedtest_Example_Location {
+    get {_storage._next ?? Generatedtest_Example_Location()}
+    set {_uniqueStorage()._next = newValue}
+  }
+  /// Returns true if `next` has been explicitly set.
+  public var hasNext: Bool {_storage._next != nil}
+  /// Clears the value of `next`. Subsequent reads from it will return its default value.
+  public mutating func clearNext() {_uniqueStorage()._next = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public enum OneOf_Description: Equatable, Sendable {
+    case label(String)
+    case code(Int64)
+
+  }
+
+  public init() {}
+
+  fileprivate var _storage = _StorageClass.defaultInstance
+}
+
+public struct Generatedtest_Example_ZonedTimestamp: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var utcTime: SwiftProtobuf.Google_Protobuf_Timestamp {
+    get {_utcTime ?? SwiftProtobuf.Google_Protobuf_Timestamp()}
+    set {_utcTime = newValue}
+  }
+  /// Returns true if `utcTime` has been explicitly set.
+  public var hasUtcTime: Bool {self._utcTime != nil}
+  /// Clears the value of `utcTime`. Subsequent reads from it will return its default value.
+  public mutating func clearUtcTime() {self._utcTime = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _utcTime: SwiftProtobuf.Google_Protobuf_Timestamp? = nil
+}
+
 // MARK: - Code below here is support for the SwiftProtobuf runtime.
 
 fileprivate let _protobuf_package = "generatedtest.example"
@@ -243,6 +396,238 @@ extension Generatedtest_Example_Hidden: SwiftProtobuf.Message, SwiftProtobuf._Me
 
   public static func ==(lhs: Generatedtest_Example_Hidden, rhs: Generatedtest_Example_Hidden) -> Bool {
     if lhs.text != rhs.text {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension Generatedtest_Example_Photo: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".Photo"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}location\0\u{3}exif_create\0\u{3}exif_modify\0\u{3}selected_location\0\u{1}other\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularMessageField(value: &self._location) }()
+      case 2: try { try decoder.decodeSingularMessageField(value: &self._exifCreate) }()
+      case 3: try { try decoder.decodeSingularMessageField(value: &self._exifModify) }()
+      case 4: try {
+        var v: Generatedtest_Example_Location?
+        var hadOneofValue = false
+        if let current = self.selection {
+          hadOneofValue = true
+          if case .selectedLocation(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.selection = .selectedLocation(v)
+        }
+      }()
+      case 5: try {
+        var v: String?
+        try decoder.decodeSingularStringField(value: &v)
+        if let v = v {
+          if self.selection != nil {try decoder.handleConflictingOneOf()}
+          self.selection = .other(v)
+        }
+      }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    try { if let v = self._location {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
+    } }()
+    try { if let v = self._exifCreate {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 2)
+    } }()
+    try { if let v = self._exifModify {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 3)
+    } }()
+    switch self.selection {
+    case .selectedLocation?: try {
+      guard case .selectedLocation(let v)? = self.selection else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 4)
+    }()
+    case .other?: try {
+      guard case .other(let v)? = self.selection else { preconditionFailure() }
+      try visitor.visitSingularStringField(value: v, fieldNumber: 5)
+    }()
+    case nil: break
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Generatedtest_Example_Photo, rhs: Generatedtest_Example_Photo) -> Bool {
+    if lhs._location != rhs._location {return false}
+    if lhs._exifCreate != rhs._exifCreate {return false}
+    if lhs._exifModify != rhs._exifModify {return false}
+    if lhs.selection != rhs.selection {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension Generatedtest_Example_Location: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".Location"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}lon\0\u{1}lat\0\u{1}altitude\0\u{1}label\0\u{1}code\0\u{1}next\0")
+
+  fileprivate class _StorageClass {
+    var _lon: Double = 0
+    var _lat: Double = 0
+    var _altitude: Int64? = nil
+    var _description_p: Generatedtest_Example_Location.OneOf_Description?
+    var _next: Generatedtest_Example_Location? = nil
+
+      // This property is used as the initial default value for new instances of the type.
+      // The type itself is protecting the reference to its storage via CoW semantics.
+      // This will force a copy to be made of this reference when the first mutation occurs;
+      // hence, it is safe to mark this as `nonisolated(unsafe)`.
+      static nonisolated(unsafe) let defaultInstance = _StorageClass()
+
+    private init() {}
+
+    init(copying source: _StorageClass) {
+      _lon = source._lon
+      _lat = source._lat
+      _altitude = source._altitude
+      _description_p = source._description_p
+      _next = source._next
+    }
+  }
+
+  fileprivate mutating func _uniqueStorage() -> _StorageClass {
+    if !isKnownUniquelyReferenced(&_storage) {
+      _storage = _StorageClass(copying: _storage)
+    }
+    return _storage
+  }
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    _ = _uniqueStorage()
+    try withExtendedLifetime(_storage) { (_storage: _StorageClass) in
+      while let fieldNumber = try decoder.nextFieldNumber() {
+        // The use of inline closures is to circumvent an issue where the compiler
+        // allocates stack space for every case branch when no optimizations are
+        // enabled. https://github.com/apple/swift-protobuf/issues/1034
+        switch fieldNumber {
+        case 1: try { try decoder.decodeSingularDoubleField(value: &_storage._lon) }()
+        case 2: try { try decoder.decodeSingularDoubleField(value: &_storage._lat) }()
+        case 3: try { try decoder.decodeSingularInt64Field(value: &_storage._altitude) }()
+        case 4: try {
+          var v: String?
+          try decoder.decodeSingularStringField(value: &v)
+          if let v = v {
+            if _storage._description_p != nil {try decoder.handleConflictingOneOf()}
+            _storage._description_p = .label(v)
+          }
+        }()
+        case 5: try {
+          var v: Int64?
+          try decoder.decodeSingularInt64Field(value: &v)
+          if let v = v {
+            if _storage._description_p != nil {try decoder.handleConflictingOneOf()}
+            _storage._description_p = .code(v)
+          }
+        }()
+        case 6: try { try decoder.decodeSingularMessageField(value: &_storage._next) }()
+        default: break
+        }
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    try withExtendedLifetime(_storage) { (_storage: _StorageClass) in
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every if/case branch local when no optimizations
+      // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+      // https://github.com/apple/swift-protobuf/issues/1182
+      if _storage._lon.bitPattern != 0 {
+        try visitor.visitSingularDoubleField(value: _storage._lon, fieldNumber: 1)
+      }
+      if _storage._lat.bitPattern != 0 {
+        try visitor.visitSingularDoubleField(value: _storage._lat, fieldNumber: 2)
+      }
+      try { if let v = _storage._altitude {
+        try visitor.visitSingularInt64Field(value: v, fieldNumber: 3)
+      } }()
+      switch _storage._description_p {
+      case .label?: try {
+        guard case .label(let v)? = _storage._description_p else { preconditionFailure() }
+        try visitor.visitSingularStringField(value: v, fieldNumber: 4)
+      }()
+      case .code?: try {
+        guard case .code(let v)? = _storage._description_p else { preconditionFailure() }
+        try visitor.visitSingularInt64Field(value: v, fieldNumber: 5)
+      }()
+      case nil: break
+      }
+      try { if let v = _storage._next {
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 6)
+      } }()
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Generatedtest_Example_Location, rhs: Generatedtest_Example_Location) -> Bool {
+    if lhs._storage !== rhs._storage {
+      let storagesAreEqual: Bool = withExtendedLifetime((lhs._storage, rhs._storage)) { (_args: (_StorageClass, _StorageClass)) in
+        let _storage = _args.0
+        let rhs_storage = _args.1
+        if _storage._lon != rhs_storage._lon {return false}
+        if _storage._lat != rhs_storage._lat {return false}
+        if _storage._altitude != rhs_storage._altitude {return false}
+        if _storage._description_p != rhs_storage._description_p {return false}
+        if _storage._next != rhs_storage._next {return false}
+        return true
+      }
+      if !storagesAreEqual {return false}
+    }
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension Generatedtest_Example_ZonedTimestamp: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".ZonedTimestamp"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}utc_time\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularMessageField(value: &self._utcTime) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    try { if let v = self._utcTime {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
+    } }()
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Generatedtest_Example_ZonedTimestamp, rhs: Generatedtest_Example_ZonedTimestamp) -> Bool {
+    if lhs._utcTime != rhs._utcTime {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

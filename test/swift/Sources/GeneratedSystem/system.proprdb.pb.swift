@@ -474,21 +474,190 @@ struct ChoiceTable {
 
 }
 
+let PhotoTableName = "generatedtest_example_photo"
+private let PhotoTableNameQuoted = quoteSQLiteIdentifier(PhotoTableName)
+let PhotoTypeName = "generatedtest.example.Photo"
+let PhotoProjectionSchema = "exif_create_utc_time_seconds:int64:optional:path=exif_create.utc_time.seconds;exif_modify_utc_time_seconds:int64:optional:path=exif_modify.utc_time.seconds;location_altitude:int64:optional:path=location.altitude;location_label:string:optional:path=location.label;location_lat:double:optional:path=location.lat;location_lon:double:optional:path=location.lon;location_next_lon:double:optional:path=location.next.lon;selected_location_lon:double:optional:path=selected_location.lon"
+private let PhotoCreateTableSQL = "CREATE TABLE IF NOT EXISTS \"generatedtest_example_photo\" (\"id\" TEXT PRIMARY KEY, \"at_ns\" INTEGER NOT NULL, \"data\" BLOB NOT NULL, \"exif_create_utc_time_seconds\" INTEGER, \"exif_modify_utc_time_seconds\" INTEGER, \"location_altitude\" INTEGER, \"location_label\" TEXT, \"location_lat\" REAL, \"location_lon\" REAL, \"location_next_lon\" REAL, \"selected_location_lon\" REAL)"
+private let PhotoInsertSQL = "INSERT INTO \"generatedtest_example_photo\" (\"id\", \"at_ns\", \"data\", \"exif_create_utc_time_seconds\", \"exif_modify_utc_time_seconds\", \"location_altitude\", \"location_label\", \"location_lat\", \"location_lon\", \"location_next_lon\", \"selected_location_lon\") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+private let PhotoUpsertSQL = "INSERT INTO \"generatedtest_example_photo\" (\"id\", \"at_ns\", \"data\", \"exif_create_utc_time_seconds\", \"exif_modify_utc_time_seconds\", \"location_altitude\", \"location_label\", \"location_lat\", \"location_lon\", \"location_next_lon\", \"selected_location_lon\") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET \"at_ns\" = excluded.\"at_ns\", \"data\" = excluded.\"data\", \"exif_create_utc_time_seconds\" = excluded.\"exif_create_utc_time_seconds\", \"exif_modify_utc_time_seconds\" = excluded.\"exif_modify_utc_time_seconds\", \"location_altitude\" = excluded.\"location_altitude\", \"location_label\" = excluded.\"location_label\", \"location_lat\" = excluded.\"location_lat\", \"location_lon\" = excluded.\"location_lon\", \"location_next_lon\" = excluded.\"location_next_lon\", \"selected_location_lon\" = excluded.\"selected_location_lon\""
+private let PhotoGeneratedIndexPrefix = "idx_generatedtest_example_photo__"
+private let PhotoCreateIndexSQL1 = "CREATE INDEX IF NOT EXISTS \"idx_generatedtest_example_photo__location_lon_location_lat\" ON \"generatedtest_example_photo\" (\"location_lon\", \"location_lat\")"
+private let PhotoCreateIndexSQL2 = "CREATE INDEX IF NOT EXISTS \"idx_generatedtest_example_photo__exif_create_utc_time_seconds\" ON \"generatedtest_example_photo\" (\"exif_create_utc_time_seconds\")"
+
+private let PhotoGeneratedBinding = GeneratedTableBinding(
+	descriptor: GeneratedTableDescriptor(tableName: PhotoTableName, typeName: PhotoTypeName, isCore: false, syncEnabled: true, changeListenersEnabled: false, queryStatisticsEnabled: false),
+	messageType: Generatedtest_Example_Photo.self,
+	insertSQL: PhotoInsertSQL,
+	upsertSQL: PhotoUpsertSQL,
+	createTableSQL: PhotoCreateTableSQL,
+	projectionSchema: PhotoProjectionSchema,
+	projectedColumns: [
+		ProjectedColumnDescriptor(name: "exif_create_utc_time_seconds", protoKind: "int64", sqliteType: "INTEGER", defaultSQL: "0", nullable: true, legacyOneofPresenceRepair: false),
+		ProjectedColumnDescriptor(name: "exif_modify_utc_time_seconds", protoKind: "int64", sqliteType: "INTEGER", defaultSQL: "0", nullable: true, legacyOneofPresenceRepair: false),
+		ProjectedColumnDescriptor(name: "location_altitude", protoKind: "int64", sqliteType: "INTEGER", defaultSQL: "0", nullable: true, legacyOneofPresenceRepair: false),
+		ProjectedColumnDescriptor(name: "location_label", protoKind: "string", sqliteType: "TEXT", defaultSQL: "''", nullable: true, legacyOneofPresenceRepair: false),
+		ProjectedColumnDescriptor(name: "location_lat", protoKind: "double", sqliteType: "REAL", defaultSQL: "0", nullable: true, legacyOneofPresenceRepair: false),
+		ProjectedColumnDescriptor(name: "location_lon", protoKind: "double", sqliteType: "REAL", defaultSQL: "0", nullable: true, legacyOneofPresenceRepair: false),
+		ProjectedColumnDescriptor(name: "location_next_lon", protoKind: "double", sqliteType: "REAL", defaultSQL: "0", nullable: true, legacyOneofPresenceRepair: false),
+		ProjectedColumnDescriptor(name: "selected_location_lon", protoKind: "double", sqliteType: "REAL", defaultSQL: "0", nullable: true, legacyOneofPresenceRepair: false),
+	],
+	generatedIndexes: [
+		GeneratedIndexDescriptor(name: "idx_generatedtest_example_photo__location_lon_location_lat", createSQL: PhotoCreateIndexSQL1),
+		GeneratedIndexDescriptor(name: "idx_generatedtest_example_photo__exif_create_utc_time_seconds", createSQL: PhotoCreateIndexSQL2),
+	],
+	generatedIndexPrefix: PhotoGeneratedIndexPrefix,
+	decodeAnyJSON: { try decodeAnyJSON($0, as: Generatedtest_Example_Photo.self) },
+	decodeBinary: { try Generatedtest_Example_Photo(serializedBytes: $0) },
+	encodeAnyJSON: { message in
+		guard let data = message as? Generatedtest_Example_Photo else { throw ProprDBError("expected Generatedtest_Example_Photo") }
+		return try marshalAnyJSON(data, typeName: PhotoTypeName)
+	},
+	messagesEqual: { left, right in
+		guard let left = left as? Generatedtest_Example_Photo, let right = right as? Generatedtest_Example_Photo else { return false }
+		return left == right
+	},
+	projectedValues: { message in
+		guard let data = message as? Generatedtest_Example_Photo else { throw ProprDBError("expected Generatedtest_Example_Photo") }
+		var values: [SQLiteBindValue] = []
+		if data.hasExifCreate, data.exifCreate.hasUtcTime { values.append(sqliteBindValue(data.exifCreate.utcTime.seconds)) } else { values.append(.null) }
+		if data.hasExifModify, data.exifModify.hasUtcTime { values.append(sqliteBindValue(data.exifModify.utcTime.seconds)) } else { values.append(.null) }
+		if data.hasLocation, data.location.hasAltitude { values.append(sqliteBindValue(data.location.altitude)) } else { values.append(.null) }
+		if data.hasLocation, case .label = data.location.description_p { values.append(sqliteBindValue(data.location.label)) } else { values.append(.null) }
+		if data.hasLocation { values.append(sqliteBindValue(data.location.lat)) } else { values.append(.null) }
+		if data.hasLocation { values.append(sqliteBindValue(data.location.lon)) } else { values.append(.null) }
+		if data.hasLocation, data.location.hasNext { values.append(sqliteBindValue(data.location.next.lon)) } else { values.append(.null) }
+		if case .selectedLocation = data.selection { values.append(sqliteBindValue(data.selectedLocation.lon)) } else { values.append(.null) }
+		return values
+	}
+)
+
+public struct PhotoRow: Equatable, Sendable {
+	public var id: String
+	public var atNs: Int64
+	public var data: Generatedtest_Example_Photo
+	public init(id: String, atNs: Int64, data: Generatedtest_Example_Photo) {
+		self.id = id
+		self.atNs = atNs
+		self.data = data
+	}
+}
+
+struct PhotoTable {
+	fileprivate let q: any DBTX
+	init(_ q: any DBTX) {
+		self.q = q
+	}
+
+	func initialize() throws {
+		try ensureCoreTables(q)
+		try auditObjectIDs(q, bindings: [PhotoGeneratedBinding])
+		try reconcileGeneratedTable(q, binding: PhotoGeneratedBinding)
+		try drainUnknownRows(PhotoTypeName)
+	}
+
+	func select(where whereClause: String = "", arguments: [SQLiteBindValue] = []) throws -> [PhotoRow] {
+		var query = "SELECT id, at_ns, data FROM " + PhotoTableNameQuoted
+		if !whereClause.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+			query += " WHERE " + whereClause
+		}
+		return try q.withRows(query, bindValues: arguments) { rows in
+			var result: [PhotoRow] = []
+			while let row = try rows.next() {
+				let id = try row.string(at: 0)
+				let atNs = try row.int64(at: 1)
+				let dataBytes = try row.data(at: 2)
+				let data = try Generatedtest_Example_Photo(serializedBytes: dataBytes)
+				result.append(PhotoRow(id: id, atNs: atNs, data: data))
+			}
+			return result
+		}
+	}
+
+	func insert(_ data: Generatedtest_Example_Photo) throws -> PhotoRow {
+		let id = try uuidV7()
+		try validateUUID(id)
+		return try insertWithIDInternal(id: id, data: data)
+	}
+
+	private func insertWithIDInternal(id: String, data: Generatedtest_Example_Photo) throws -> PhotoRow {
+		if id.isEmpty {
+			throw ProprDBError("empty id")
+		}
+		try validateUUID(id)
+		let atNs = try writeLocalObject(q, binding: PhotoGeneratedBinding, id: id, message: data, insert: true)
+		return PhotoRow(id: id, atNs: atNs, data: data)
+	}
+
+	func updateByID(_ id: String, data: Generatedtest_Example_Photo) throws -> PhotoRow {
+		if id.isEmpty {
+			throw ProprDBError("empty id")
+		}
+		try validateUUID(id)
+		let atNs = try writeLocalObject(q, binding: PhotoGeneratedBinding, id: id, message: data, insert: false)
+		return PhotoRow(id: id, atNs: atNs, data: data)
+	}
+
+	func updateRow(_ row: PhotoRow) throws -> PhotoRow {
+		return try updateByID(row.id, data: row.data)
+	}
+
+	func deleteByID(_ id: String) throws {
+		if id.isEmpty {
+			throw ProprDBError("empty id")
+		}
+		try deleteLocalObject(q, binding: PhotoGeneratedBinding, id: id)
+	}
+
+	func deleteRow(_ row: PhotoRow) throws {
+		try deleteByID(row.id)
+	}
+
+	fileprivate func upsertWithAtNs(id: String, atNs: Int64, data: Generatedtest_Example_Photo) throws {
+		if id.isEmpty {
+			throw ProprDBError("empty id")
+		}
+		let dataJSON = try marshalAnyJSON(data, typeName: PhotoTypeName)
+		try applyIncomingObject(q, binding: PhotoGeneratedBinding, record: JSONLRecord(id: id, deleted: false, atNs: atNs, data: dataJSON))
+	}
+
+	fileprivate func tombstoneWithAtNs(id: String, atNs: Int64) throws {
+		if id.isEmpty {
+			throw ProprDBError("empty id")
+		}
+		let dataJSON = try marshalTypeOnlyAnyJSON(typeName: PhotoTypeName)
+		try applyIncomingObject(q, binding: PhotoGeneratedBinding, record: JSONLRecord(id: id, deleted: true, atNs: atNs, data: dataJSON))
+	}
+
+	fileprivate func drainUnknownRows(_ typeName: String) throws {
+		guard typeName == PhotoTypeName else { throw ProprDBError("unexpected type name \(typeName)") }
+		try drainBoundUnknown(q, bindings: [PhotoGeneratedBinding])
+	}
+
+	func drainUnknownRows() throws {
+		try drainUnknownRows(PhotoTypeName)
+	}
+
+}
+
 private let crudGeneratedBindings = [
 	PersonGeneratedBinding,
 	NoteGeneratedBinding,
 	ChoiceGeneratedBinding,
+	PhotoGeneratedBinding,
 ]
 
 struct CRUD {
 	let person: PersonTable
 	let note: NoteTable
 	let choice: ChoiceTable
+	let photo: PhotoTable
 	init(_ q: any DBTX) {
 		let tracked = withChangeListeners(q)
 		self.person = PersonTable(tracked)
 		self.note = NoteTable(tracked)
 		self.choice = ChoiceTable(tracked)
+		self.photo = PhotoTable(tracked)
 	}
 	private func dbtx() -> any DBTX { person.q }
 	func tableDescriptors() -> [GeneratedTableDescriptor] { crudGeneratedBindings.map(\.descriptor) + coreTableDescriptors() }
@@ -496,6 +665,7 @@ struct CRUD {
 		try person.initialize()
 		try note.initialize()
 		try choice.initialize()
+		try photo.initialize()
 	}
 	func prepareJSONL(remote: String) throws -> PreparedJSONLExport { try prepareBoundJSONL(dbtx(), bindings: crudGeneratedBindings, remote: remote) }
 	func acknowledgeJSONL(_ checkpoint: JSONLCheckpoint) throws { try acknowledgeBoundJSONL(dbtx(), checkpoint: checkpoint) }
@@ -550,6 +720,19 @@ public struct ChoiceTableProxy: Sendable {
 	public func drainUnknownRows() async throws { try await actor._choiceDrainUnknownRows() }
 }
 
+public struct PhotoTableProxy: Sendable {
+	fileprivate let actor: ProprDBActor
+
+	public func initialize() async throws { try await actor._photoInitialize() }
+	public func select(where whereClause: String = "", arguments: [SQLiteBindValue] = []) async throws -> [PhotoRow] { try await actor._photoSelect(where: whereClause, arguments: arguments) }
+	public func insert(_ data: Generatedtest_Example_Photo) async throws -> PhotoRow { try await actor._photoInsert(data) }
+	public func updateByID(_ id: String, data: Generatedtest_Example_Photo) async throws -> PhotoRow { try await actor._photoUpdateByID(id, data: data) }
+	public func updateRow(_ row: PhotoRow) async throws -> PhotoRow { try await actor._photoUpdateRow(row) }
+	public func deleteByID(_ id: String) async throws { try await actor._photoDeleteByID(id) }
+	public func deleteRow(_ row: PhotoRow) async throws { try await actor._photoDeleteRow(row) }
+	public func drainUnknownRows() async throws { try await actor._photoDrainUnknownRows() }
+}
+
 extension ProprDBActor {
 	public func initialize() throws { try withDatabase { try CRUD($0).initialize() } }
 	public func tableDescriptors() throws -> [GeneratedTableDescriptor] { try withDatabase { CRUD($0).tableDescriptors() } }
@@ -583,6 +766,15 @@ extension ProprDBActor {
 	fileprivate func _choiceDeleteByID(_ id: String) throws { try withDatabase { try CRUD($0).choice.deleteByID(id) } }
 	fileprivate func _choiceDeleteRow(_ row: ChoiceRow) throws { try withDatabase { try CRUD($0).choice.deleteRow(row) } }
 	fileprivate func _choiceDrainUnknownRows() throws { try withDatabase { try CRUD($0).choice.drainUnknownRows() } }
+	public nonisolated var photo: PhotoTableProxy { PhotoTableProxy(actor: self) }
+	fileprivate func _photoInitialize() throws { try withDatabase { try CRUD($0).photo.initialize() } }
+	fileprivate func _photoSelect(where whereClause: String, arguments: [SQLiteBindValue]) throws -> [PhotoRow] { try withDatabase { try CRUD($0).photo.select(where: whereClause, arguments: arguments) } }
+	fileprivate func _photoInsert(_ data: Generatedtest_Example_Photo) throws -> PhotoRow { try withDatabase { try CRUD($0).photo.insert(data) } }
+	fileprivate func _photoUpdateByID(_ id: String, data: Generatedtest_Example_Photo) throws -> PhotoRow { try withDatabase { try CRUD($0).photo.updateByID(id, data: data) } }
+	fileprivate func _photoUpdateRow(_ row: PhotoRow) throws -> PhotoRow { try withDatabase { try CRUD($0).photo.updateRow(row) } }
+	fileprivate func _photoDeleteByID(_ id: String) throws { try withDatabase { try CRUD($0).photo.deleteByID(id) } }
+	fileprivate func _photoDeleteRow(_ row: PhotoRow) throws { try withDatabase { try CRUD($0).photo.deleteRow(row) } }
+	fileprivate func _photoDrainUnknownRows() throws { try withDatabase { try CRUD($0).photo.drainUnknownRows() } }
 	public func prepareJSONL(remote: String) throws -> PreparedJSONLExport { try withDatabase { try CRUD($0).prepareJSONL(remote: remote) } }
 	public func acknowledgeJSONL(_ checkpoint: JSONLCheckpoint) throws { try withDatabase { try CRUD($0).acknowledgeJSONL(checkpoint) } }
 	public func discardJSONL(_ checkpoint: JSONLCheckpoint) throws { try withDatabase { try CRUD($0).discardJSONL(checkpoint) } }

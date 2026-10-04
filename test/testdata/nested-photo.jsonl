@@ -1,0 +1,1 @@
+{"id":"01951d6e-a000-7000-8000-000000000003","atNs":"7","data":{"@type":"type.googleapis.com/generatedtest.example.Photo","location":{"lon":0,"lat":0,"altitude":"0","label":"","next":{}},"selectedLocation":{},"exifCreate":{"utcTime":"1970-01-01T00:00:00Z"},"exifModify":{"utcTime":"1970-01-01T00:00:42Z"}}}

@@ -10,6 +10,7 @@ import (
 	_ "github.com/fingon/proprdb/proto/proprdb"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
+	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
 	reflect "reflect"
 	sync "sync"
 	unsafe "unsafe"
@@ -244,11 +245,275 @@ func (x *Hidden) GetText() string {
 	return ""
 }
 
+type Photo struct {
+	state      protoimpl.MessageState `protogen:"open.v1"`
+	Location   *Location              `protobuf:"bytes,1,opt,name=location,proto3" json:"location,omitempty"`
+	ExifCreate *ZonedTimestamp        `protobuf:"bytes,2,opt,name=exif_create,json=exifCreate,proto3" json:"exif_create,omitempty"`
+	ExifModify *ZonedTimestamp        `protobuf:"bytes,3,opt,name=exif_modify,json=exifModify,proto3" json:"exif_modify,omitempty"`
+	// Types that are valid to be assigned to Selection:
+	//
+	//	*Photo_SelectedLocation
+	//	*Photo_Other
+	Selection     isPhoto_Selection `protobuf_oneof:"selection"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *Photo) Reset() {
+	*x = Photo{}
+	mi := &file_system_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Photo) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Photo) ProtoMessage() {}
+
+func (x *Photo) ProtoReflect() protoreflect.Message {
+	mi := &file_system_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Photo.ProtoReflect.Descriptor instead.
+func (*Photo) Descriptor() ([]byte, []int) {
+	return file_system_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *Photo) GetLocation() *Location {
+	if x != nil {
+		return x.Location
+	}
+	return nil
+}
+
+func (x *Photo) GetExifCreate() *ZonedTimestamp {
+	if x != nil {
+		return x.ExifCreate
+	}
+	return nil
+}
+
+func (x *Photo) GetExifModify() *ZonedTimestamp {
+	if x != nil {
+		return x.ExifModify
+	}
+	return nil
+}
+
+func (x *Photo) GetSelection() isPhoto_Selection {
+	if x != nil {
+		return x.Selection
+	}
+	return nil
+}
+
+func (x *Photo) GetSelectedLocation() *Location {
+	if x != nil {
+		if x, ok := x.Selection.(*Photo_SelectedLocation); ok {
+			return x.SelectedLocation
+		}
+	}
+	return nil
+}
+
+func (x *Photo) GetOther() string {
+	if x != nil {
+		if x, ok := x.Selection.(*Photo_Other); ok {
+			return x.Other
+		}
+	}
+	return ""
+}
+
+type isPhoto_Selection interface {
+	isPhoto_Selection()
+}
+
+type Photo_SelectedLocation struct {
+	SelectedLocation *Location `protobuf:"bytes,4,opt,name=selected_location,json=selectedLocation,proto3,oneof"`
+}
+
+type Photo_Other struct {
+	Other string `protobuf:"bytes,5,opt,name=other,proto3,oneof"`
+}
+
+func (*Photo_SelectedLocation) isPhoto_Selection() {}
+
+func (*Photo_Other) isPhoto_Selection() {}
+
+type Location struct {
+	state    protoimpl.MessageState `protogen:"open.v1"`
+	Lon      float64                `protobuf:"fixed64,1,opt,name=lon,proto3" json:"lon,omitempty"`
+	Lat      float64                `protobuf:"fixed64,2,opt,name=lat,proto3" json:"lat,omitempty"`
+	Altitude *int64                 `protobuf:"varint,3,opt,name=altitude,proto3,oneof" json:"altitude,omitempty"`
+	// Types that are valid to be assigned to Description:
+	//
+	//	*Location_Label
+	//	*Location_Code
+	Description   isLocation_Description `protobuf_oneof:"description"`
+	Next          *Location              `protobuf:"bytes,6,opt,name=next,proto3" json:"next,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *Location) Reset() {
+	*x = Location{}
+	mi := &file_system_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Location) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Location) ProtoMessage() {}
+
+func (x *Location) ProtoReflect() protoreflect.Message {
+	mi := &file_system_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Location.ProtoReflect.Descriptor instead.
+func (*Location) Descriptor() ([]byte, []int) {
+	return file_system_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *Location) GetLon() float64 {
+	if x != nil {
+		return x.Lon
+	}
+	return 0
+}
+
+func (x *Location) GetLat() float64 {
+	if x != nil {
+		return x.Lat
+	}
+	return 0
+}
+
+func (x *Location) GetAltitude() int64 {
+	if x != nil && x.Altitude != nil {
+		return *x.Altitude
+	}
+	return 0
+}
+
+func (x *Location) GetDescription() isLocation_Description {
+	if x != nil {
+		return x.Description
+	}
+	return nil
+}
+
+func (x *Location) GetLabel() string {
+	if x != nil {
+		if x, ok := x.Description.(*Location_Label); ok {
+			return x.Label
+		}
+	}
+	return ""
+}
+
+func (x *Location) GetCode() int64 {
+	if x != nil {
+		if x, ok := x.Description.(*Location_Code); ok {
+			return x.Code
+		}
+	}
+	return 0
+}
+
+func (x *Location) GetNext() *Location {
+	if x != nil {
+		return x.Next
+	}
+	return nil
+}
+
+type isLocation_Description interface {
+	isLocation_Description()
+}
+
+type Location_Label struct {
+	Label string `protobuf:"bytes,4,opt,name=label,proto3,oneof"`
+}
+
+type Location_Code struct {
+	Code int64 `protobuf:"varint,5,opt,name=code,proto3,oneof"`
+}
+
+func (*Location_Label) isLocation_Description() {}
+
+func (*Location_Code) isLocation_Description() {}
+
+type ZonedTimestamp struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	UtcTime       *timestamppb.Timestamp `protobuf:"bytes,1,opt,name=utc_time,json=utcTime,proto3" json:"utc_time,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ZonedTimestamp) Reset() {
+	*x = ZonedTimestamp{}
+	mi := &file_system_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ZonedTimestamp) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ZonedTimestamp) ProtoMessage() {}
+
+func (x *ZonedTimestamp) ProtoReflect() protoreflect.Message {
+	mi := &file_system_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ZonedTimestamp.ProtoReflect.Descriptor instead.
+func (*ZonedTimestamp) Descriptor() ([]byte, []int) {
+	return file_system_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *ZonedTimestamp) GetUtcTime() *timestamppb.Timestamp {
+	if x != nil {
+		return x.UtcTime
+	}
+	return nil
+}
+
 var File_system_proto protoreflect.FileDescriptor
 
 const file_system_proto_rawDesc = "" +
 	"\n" +
-	"\fsystem.proto\x12\x15generatedtest.example\x1a\x1bproto/proprdb/options.proto\"e\n" +
+	"\fsystem.proto\x12\x15generatedtest.example\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1bproto/proprdb/options.proto\"e\n" +
 	"\x06Person\x12\x18\n" +
 	"\x04name\x18\x01 \x01(\tB\x04\x88\xb5\x18\x01R\x04name\x12\x16\n" +
 	"\x03age\x18\x02 \x01(\x03B\x04\x88\xb5\x18\x01R\x03age:)\xa0\xb5\x18\x01\xa8\xb5\x18\x01\xb2\xb5\x18\x06\n" +
@@ -262,7 +527,30 @@ const file_system_proto_rawDesc = "" +
 	"\x05count\x18\x02 \x01(\x03H\x00R\x05countB\v\n" +
 	"\tselection\"(\n" +
 	"\x06Hidden\x12\x18\n" +
-	"\x04text\x18\x01 \x01(\tB\x04\x88\xb5\x18\x01R\x04text:\x04\x90\xb5\x18\x01B\x1eZ\x1cgeneratedtest/gen;genexampleb\x06proto3"
+	"\x04text\x18\x01 \x01(\tB\x04\x88\xb5\x18\x01R\x04text:\x04\x90\xb5\x18\x01\"\xc3\x04\n" +
+	"\x05Photo\x12;\n" +
+	"\blocation\x18\x01 \x01(\v2\x1f.generatedtest.example.LocationR\blocation\x12F\n" +
+	"\vexif_create\x18\x02 \x01(\v2%.generatedtest.example.ZonedTimestampR\n" +
+	"exifCreate\x12F\n" +
+	"\vexif_modify\x18\x03 \x01(\v2%.generatedtest.example.ZonedTimestampR\n" +
+	"exifModify\x12N\n" +
+	"\x11selected_location\x18\x04 \x01(\v2\x1f.generatedtest.example.LocationH\x00R\x10selectedLocation\x12\x16\n" +
+	"\x05other\x18\x05 \x01(\tH\x00R\x05other:\xf7\x01\xb2\xb5\x18\x1c\n" +
+	"\flocation.lon\n" +
+	"\flocation.lat\xb2\xb5\x18\x1e\n" +
+	"\x1cexif_create.utc_time.secondsʵ\x18\flocation.lonʵ\x18\flocation.latʵ\x18\x1cexif_create.utc_time.secondsʵ\x18\x1cexif_modify.utc_time.secondsʵ\x18\x11location.altitudeʵ\x18\x0elocation.labelʵ\x18\x15selected_location.lonʵ\x18\x11location.next.lonB\v\n" +
+	"\tselection\"\xd4\x01\n" +
+	"\bLocation\x12\x10\n" +
+	"\x03lon\x18\x01 \x01(\x01R\x03lon\x12\x10\n" +
+	"\x03lat\x18\x02 \x01(\x01R\x03lat\x12\x1f\n" +
+	"\baltitude\x18\x03 \x01(\x03H\x01R\baltitude\x88\x01\x01\x12\x16\n" +
+	"\x05label\x18\x04 \x01(\tH\x00R\x05label\x12\x14\n" +
+	"\x04code\x18\x05 \x01(\x03H\x00R\x04code\x123\n" +
+	"\x04next\x18\x06 \x01(\v2\x1f.generatedtest.example.LocationR\x04next:\x04\x90\xb5\x18\x01B\r\n" +
+	"\vdescriptionB\v\n" +
+	"\t_altitude\"M\n" +
+	"\x0eZonedTimestamp\x125\n" +
+	"\butc_time\x18\x01 \x01(\v2\x1a.google.protobuf.TimestampR\autcTime:\x04\x90\xb5\x18\x01B\x1eZ\x1cgeneratedtest/gen;genexampleb\x06proto3"
 
 var (
 	file_system_proto_rawDescOnce sync.Once
@@ -276,19 +564,29 @@ func file_system_proto_rawDescGZIP() []byte {
 	return file_system_proto_rawDescData
 }
 
-var file_system_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
+var file_system_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
 var file_system_proto_goTypes = []any{
-	(*Person)(nil), // 0: generatedtest.example.Person
-	(*Note)(nil),   // 1: generatedtest.example.Note
-	(*Choice)(nil), // 2: generatedtest.example.Choice
-	(*Hidden)(nil), // 3: generatedtest.example.Hidden
+	(*Person)(nil),                // 0: generatedtest.example.Person
+	(*Note)(nil),                  // 1: generatedtest.example.Note
+	(*Choice)(nil),                // 2: generatedtest.example.Choice
+	(*Hidden)(nil),                // 3: generatedtest.example.Hidden
+	(*Photo)(nil),                 // 4: generatedtest.example.Photo
+	(*Location)(nil),              // 5: generatedtest.example.Location
+	(*ZonedTimestamp)(nil),        // 6: generatedtest.example.ZonedTimestamp
+	(*timestamppb.Timestamp)(nil), // 7: google.protobuf.Timestamp
 }
 var file_system_proto_depIdxs = []int32{
-	0, // [0:0] is the sub-list for method output_type
-	0, // [0:0] is the sub-list for method input_type
-	0, // [0:0] is the sub-list for extension type_name
-	0, // [0:0] is the sub-list for extension extendee
-	0, // [0:0] is the sub-list for field type_name
+	5, // 0: generatedtest.example.Photo.location:type_name -> generatedtest.example.Location
+	6, // 1: generatedtest.example.Photo.exif_create:type_name -> generatedtest.example.ZonedTimestamp
+	6, // 2: generatedtest.example.Photo.exif_modify:type_name -> generatedtest.example.ZonedTimestamp
+	5, // 3: generatedtest.example.Photo.selected_location:type_name -> generatedtest.example.Location
+	5, // 4: generatedtest.example.Location.next:type_name -> generatedtest.example.Location
+	7, // 5: generatedtest.example.ZonedTimestamp.utc_time:type_name -> google.protobuf.Timestamp
+	6, // [6:6] is the sub-list for method output_type
+	6, // [6:6] is the sub-list for method input_type
+	6, // [6:6] is the sub-list for extension type_name
+	6, // [6:6] is the sub-list for extension extendee
+	0, // [0:6] is the sub-list for field type_name
 }
 
 func init() { file_system_proto_init() }
@@ -300,13 +598,21 @@ func file_system_proto_init() {
 		(*Choice_Label)(nil),
 		(*Choice_Count)(nil),
 	}
+	file_system_proto_msgTypes[4].OneofWrappers = []any{
+		(*Photo_SelectedLocation)(nil),
+		(*Photo_Other)(nil),
+	}
+	file_system_proto_msgTypes[5].OneofWrappers = []any{
+		(*Location_Label)(nil),
+		(*Location_Code)(nil),
+	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_system_proto_rawDesc), len(file_system_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   4,
+			NumMessages:   7,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

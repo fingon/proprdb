@@ -2,6 +2,7 @@ syntax = "proto3";
 
 package generatedtest.example;
 
+import "google/protobuf/timestamp.proto";
 import "proto/proprdb/options.proto";
 
 option go_package = "generatedtest/gen;genexample";
@@ -36,4 +37,42 @@ message Choice {
 message Hidden {
   option (com.github.fingon.proprdb.omit_table) = true;
   string text = 1 [(com.github.fingon.proprdb.external) = true];
+}
+
+message Photo {
+  option (com.github.fingon.proprdb.external_paths) = "location.lon";
+  option (com.github.fingon.proprdb.external_paths) = "location.lat";
+  option (com.github.fingon.proprdb.external_paths) = "exif_create.utc_time.seconds";
+  option (com.github.fingon.proprdb.external_paths) = "exif_modify.utc_time.seconds";
+  option (com.github.fingon.proprdb.external_paths) = "location.altitude";
+  option (com.github.fingon.proprdb.external_paths) = "location.label";
+  option (com.github.fingon.proprdb.external_paths) = "selected_location.lon";
+  option (com.github.fingon.proprdb.external_paths) = "location.next.lon";
+  option (com.github.fingon.proprdb.indexes) = {
+    fields: "location.lon"
+    fields: "location.lat"
+  };
+  option (com.github.fingon.proprdb.indexes) = {fields: "exif_create.utc_time.seconds"};
+  Location location = 1;
+  ZonedTimestamp exif_create = 2;
+  ZonedTimestamp exif_modify = 3;
+  oneof selection {
+    Location selected_location = 4;
+    string other = 5;
+  }
+}
+message Location {
+  option (com.github.fingon.proprdb.omit_table) = true;
+  double lon = 1;
+  double lat = 2;
+  optional int64 altitude = 3;
+  oneof description {
+    string label = 4;
+    int64 code = 5;
+  }
+  Location next = 6;
+}
+message ZonedTimestamp {
+  option (com.github.fingon.proprdb.omit_table) = true;
+  google.protobuf.Timestamp utc_time = 1;
 }

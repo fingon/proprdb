@@ -222,6 +222,34 @@ func (e rustEmitter) emitProjection(message *protogen.Message, field *protogen.F
 	}
 }
 
+func (e rustEmitter) emitPathProjection(message *protogen.Message, path []*protogen.Field, expression string) {
+	field := path[0]
+	name := rustIdent(rustSnake(string(field.Desc.Name())))
+	leaf := len(path) == 1
+	switch {
+	case field.Oneof != nil && !field.Oneof.Desc.IsSynthetic():
+		messagePath := rustMessagePath(message)
+		modulePath := messagePath[:strings.LastIndex(messagePath, "::")] + "::" + rustIdent(rustSnake(string(message.Desc.Name())))
+		variant := modulePath + "::" + rustCamel(string(field.Oneof.Desc.Name())) + "::" + rustCamel(string(field.Desc.Name()))
+		e.g.P("match &", expression, ".", rustIdent(rustSnake(string(field.Oneof.Desc.Name()))), " { Some(", variant, "(value)) => {")
+	case field.Desc.HasPresence():
+		e.g.P(expression, ".", name, ".as_ref().map_or(", rustRuntime, "::Value::Null, |value| {")
+	default:
+		e.g.P(rustValue(field, expression+"."+name))
+		return
+	}
+	if leaf {
+		e.g.P(rustBorrowedValue(field))
+	} else {
+		e.emitPathProjection(field.Message, path[1:], "value")
+	}
+	if field.Oneof != nil && !field.Oneof.Desc.IsSynthetic() {
+		e.g.P("}, _ => ", rustRuntime, "::Value::Null }")
+	} else {
+		e.g.P("})")
+	}
+}
+
 func (e rustEmitter) emitModel(model rustModel) {
 	g := e.g
 	m := model.model
@@ -257,6 +285,11 @@ func (e rustEmitter) emitModel(model rustModel) {
 	}
 	g.P("fn projected_values(", dataName, ": &Self::Data) -> Vec<", rustRuntime, "::Value> { vec![")
 	for _, projection := range m.ProjectedFields {
+		if len(projection.Path) > 0 {
+			e.emitPathProjection(model.message, projection.Path, "data")
+			g.P(",")
+			continue
+		}
 		for _, field := range model.message.Fields {
 			if string(field.Desc.Name()) == projection.ProtoFieldName {
 				e.emitProjection(model.message, field)

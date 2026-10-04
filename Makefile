@@ -19,13 +19,13 @@ PROTOC_GEN_SWIFT=test/swift/.build/checkouts/swift-protobuf/.build/debug/protoc-
 .PHONY: all
 all: lint verify-generated test build
 
-protoc-gen-proprdb: $(wildcard **/*.go)
+protoc-gen-proprdb: options $(wildcard **/*.go)
 	go build ./cmd/protoc-gen-proprdb
 
-protoc-gen-proprdb-swift: $(wildcard **/*.go)
+protoc-gen-proprdb-swift: options $(wildcard **/*.go)
 	go build ./cmd/protoc-gen-proprdb-swift
 
-protoc-gen-proprdb-rust: $(wildcard **/*.go)
+protoc-gen-proprdb-rust: options $(wildcard **/*.go)
 	go build ./cmd/protoc-gen-proprdb-rust
 
 .PHONY: protoc-gen-swift
@@ -37,10 +37,10 @@ protoc-gen-swift: test/swift/Package.resolved
 build: $(BINARIES) swift-build rust-build
 
 .PHONY: generate go-fixtures
-generate: go-fixtures swift-fixtures rust-fixtures
+generate: options go-fixtures swift-fixtures rust-fixtures
 	go test ./test -update
 
-go-fixtures: protoc-gen-proprdb
+go-fixtures: options protoc-gen-proprdb
 	protoc -I test/fixtures -I . --plugin=protoc-gen-go=$(PROTOC_GEN_GO) --go_out=test/system --go_opt=paths=source_relative --plugin=protoc-gen-proprdb=./protoc-gen-proprdb --proprdb_out=paths=source_relative:test/system test/fixtures/system.proto
 
 .PHONY: verify-generated
@@ -104,3 +104,7 @@ release-minor:
 
 release-patch:
 	./scripts/release patch
+
+.PHONY: options
+options:
+	protoc -I . --plugin=protoc-gen-go=$(PROTOC_GEN_GO) --go_out=paths=source_relative:. proto/proprdb/options.proto

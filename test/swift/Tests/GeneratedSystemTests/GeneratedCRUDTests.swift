@@ -53,13 +53,13 @@ final class GeneratedCRUDTests: XCTestCase {
             let target = CRUD(targetDB)
             try target.initialize()
             try target.readJSONL(remote: "source", text: crud.writeJSONL(remote: ""))
-            let imported = try target.person.select(where: "id = ?", arguments: [id])
+            let imported = try target.person.select(where: "id = ?", arguments: [.string(id)])
             XCTAssertEqual(imported.count, 1)
             XCTAssertEqual(imported.first?.data.name, "Grace")
             try crud.person.deleteByID(id)
             try crud.initialize()
             try target.readJSONL(remote: "source", text: crud.writeJSONL(remote: ""))
-            XCTAssertTrue(try target.person.select(where: "id = ?", arguments: [id]).isEmpty)
+            XCTAssertTrue(try target.person.select(where: "id = ?", arguments: [.string(id)]).isEmpty)
             try target.initialize()
         }
     }
@@ -154,6 +154,7 @@ final class GeneratedCRUDTests: XCTestCase {
                 GeneratedTableDescriptor(tableName: PersonTableName, typeName: PersonTypeName, isCore: false, syncEnabled: true, changeListenersEnabled: true, queryStatisticsEnabled: true),
                 GeneratedTableDescriptor(tableName: NoteTableName, typeName: NoteTypeName, isCore: false, syncEnabled: false, changeListenersEnabled: true),
                 GeneratedTableDescriptor(tableName: ChoiceTableName, typeName: ChoiceTypeName, isCore: false, syncEnabled: true),
+                GeneratedTableDescriptor(tableName: PhotoTableName, typeName: PhotoTypeName, isCore: false, syncEnabled: true),
                 GeneratedTableDescriptor(tableName: coreTableDeletedName, typeName: "", isCore: true, syncEnabled: false),
                 GeneratedTableDescriptor(tableName: coreTableSyncName, typeName: "", isCore: true, syncEnabled: false),
                 GeneratedTableDescriptor(tableName: coreTableSchemaStateName, typeName: "", isCore: true, syncEnabled: false),

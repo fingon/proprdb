@@ -310,6 +310,16 @@ impl<'a, M: Model> Table<'a, M> {
             }
         }
         if changed {
+            let assignments = M::COLUMNS
+                .iter()
+                .map(|column| format!("\"{}\" = ?", column.name))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let update_sql = format!(
+                "UPDATE \"{}\" SET {} WHERE id = ?",
+                M::TABLE_NAME,
+                assignments
+            );
             let mut cursor = String::new();
             loop {
                 let mut statement = self.connection.prepare(&format!(
@@ -325,13 +335,17 @@ impl<'a, M: Model> Table<'a, M> {
                         ))
                     })
                     .optional()?;
-                let Some((id, at_ns, bytes)) = row else { break };
+                let Some((id, _at_ns, bytes)) = row else {
+                    break;
+                };
                 validate_id(&id)?;
                 let data = M::Data::decode(bytes.as_slice())?;
-                let mut values = self.values(&id, at_ns, &data);
-                values[DATA_COLUMN_INDEX] = Value::Blob(bytes);
-                self.connection
-                    .execute(M::UPSERT_SQL, params_from_iter(values))?;
+                let mut values = M::projected_values(&data);
+                if !M::COLUMNS.is_empty() {
+                    values.push(Value::Text(id.clone()));
+                    self.connection
+                        .execute(&update_sql, params_from_iter(values))?;
+                }
                 cursor = id;
             }
         }

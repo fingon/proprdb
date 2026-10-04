@@ -21,6 +21,11 @@ of mine don't roll that way.
 - [Runtime behavior](doc/runtime.md)
 - [Protobuf options and code generation](doc/code-generation.md)
 
+Scalar fields and explicitly selected nested message paths can be projected
+into indexed SQL columns in Go, Swift, and Rust. Missing parents remain SQL NULL;
+initialization backfills existing objects without changing their protobuf
+payloads or sync timestamps. See [projection options](doc/code-generation.md).
+
 ## Getting started
 
 Prerequisites:

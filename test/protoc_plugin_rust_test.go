@@ -49,7 +49,7 @@ func TestProtocRustPluginRejectsInvalidSchemas(t *testing.T) {
 		{"index", `option (com.github.fingon.proprdb.indexes) = {fields: "name"}; string name = 1;`, "must be marked"},
 		{"uint64", `uint64 count = 1 [(com.github.fingon.proprdb.external) = true];`, "cannot be projected"},
 		{"repeated", `repeated string name = 1 [(com.github.fingon.proprdb.external) = true];`, "must be scalar"},
-		{"reserved", `string id = 1 [(com.github.fingon.proprdb.external) = true];`, "reserved column"},
+		{"reserved", `string id = 1 [(com.github.fingon.proprdb.external) = true];`, reservedColumnError},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			protoPath := filepath.Join(tempDir, tc.name+".proto")

@@ -695,7 +695,7 @@ func ReconcileGeneratedTableContext(ctx context.Context, q DBTX, binding Generat
 			return fmt.Errorf("read projection schema for %s: %w", binding.Descriptor.TableName, schemaErr)
 		}
 		if schemaErr == nil {
-			if err := validateProjectionEvolution(binding.Descriptor.TableName, currentSchema, binding.ProjectedColumns); err != nil {
+			if err := validateProjectionEvolution(binding.Descriptor.TableName, currentSchema, binding.ProjectionSchema, binding.ProjectedColumns); err != nil {
 				return err
 			}
 		}
@@ -768,24 +768,40 @@ func auditObjectIDTableContext(ctx context.Context, q DBTX, tableName, columnNam
 	return nil
 }
 
+const projectionPathPrefix = "path="
+
 type projectionSignatureField struct {
 	kind     string
 	nullable bool
+	path     string
 }
 
-func validateProjectionEvolution(tableName, previousSchema string, currentColumns []ProjectedColumnDescriptor) error {
-	previous := make(map[string]projectionSignatureField)
-	for entry := range strings.SplitSeq(previousSchema, ";") {
+func parseProjectionSignatures(schema string) map[string]projectionSignatureField {
+	fields := make(map[string]projectionSignatureField)
+	for entry := range strings.SplitSeq(schema, ";") {
 		parts := strings.Split(entry, ":")
 		if len(parts) < 2 {
 			continue
 		}
-		previous[parts[0]] = projectionSignatureField{kind: parts[1], nullable: len(parts) == 3 && parts[2] == "optional"}
+		field := projectionSignatureField{kind: parts[1], nullable: len(parts) >= 3 && parts[2] == "optional", path: parts[0]}
+		if strings.HasPrefix(parts[len(parts)-1], projectionPathPrefix) {
+			field.path = strings.TrimPrefix(parts[len(parts)-1], projectionPathPrefix)
+		}
+		fields[parts[0]] = field
 	}
+	return fields
+}
+
+func validateProjectionEvolution(tableName, previousSchema, currentSchema string, currentColumns []ProjectedColumnDescriptor) error {
+	previous := parseProjectionSignatures(previousSchema)
+	currentFields := parseProjectionSignatures(currentSchema)
 	for _, current := range currentColumns {
 		old, ok := previous[current.Name]
 		if !ok {
 			continue
+		}
+		if old.path != currentFields[current.Name].path {
+			return fmt.Errorf("projection column %s.%s changed protobuf path from %s to %s", tableName, current.Name, old.path, currentFields[current.Name].path)
 		}
 		if old.kind != current.ProtoKind {
 			return fmt.Errorf("projection column %s.%s changed protobuf kind from %s to %s", tableName, current.Name, old.kind, current.ProtoKind)

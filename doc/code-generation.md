@@ -27,6 +27,40 @@ message Person {
 
 ### Message options
 
+- `proprdb.external_paths` (`repeated string`, message-level):
+  - Projects explicitly selected scalar paths, such as `location.lon` or
+    `exif_create.utc_time.seconds`, without annotating the nested types.
+  - Paths use protobuf field names and can traverse imported messages, including
+    `google.protobuf.Timestamp`, and messages declaring `omit_table`.
+  - SQL column names replace dots with underscores: `location.lon` becomes
+    `location_lon`. Queries use the flattened SQL name; indexes use the path.
+  - Missing parent messages, absent optional leaves, and inactive oneof branches
+    project as SQL NULL. Present ordinary scalar leaves retain their defaults,
+    including zero coordinates and epoch timestamps.
+  - Repeated/map segments, message leaves, unsupported scalar kinds, duplicate
+    projections, reserved columns, and naming collisions fail generation.
+  - Existing scalar `external` projections retain their names and behavior.
+
+```proto
+message Photo {
+  option (proprdb.external_paths) = "location.lon";
+  option (proprdb.external_paths) = "location.lat";
+  option (proprdb.external_paths) = "exif_create.utc_time.seconds";
+  option (proprdb.external_paths) = "exif_modify.utc_time.seconds";
+  option (proprdb.indexes) = { fields: "location.lon" fields: "location.lat" };
+  Location location = 1;
+  ZonedTimestamp exif_create = 2;
+  ZonedTimestamp exif_modify = 3;
+}
+```
+
+Initialization backfills added projections from existing stored protobuf bytes
+inside schema reconciliation's transaction. It updates only projection columns:
+IDs, payload bytes (including unknown fields), sync timestamps, and checkpoints
+remain unchanged. CRUD writes and JSONL imports maintain the same projections in
+Go, Swift, and Rust. Applications do not need to reimport existing objects or
+create migrations or indexes manually.
+
 - `proprdb.omit_table` (`bool`, message-level):
   - Do not generate table/CRUD code for this message.
 
@@ -48,7 +82,9 @@ Existing protobuf field names, numbers, types, and presence semantics are
 immutable. Projection membership may be added or removed. Initialization adds
 new projection columns, removes obsolete ones, and recomputes projection values
 from the protobuf payload. Removing columns requires SQLite 3.35 or newer.
-Incompatible existing projection definitions fail initialization.
+Incompatible existing projection definitions fail initialization. Nested source
+paths are recorded in schema signatures; changing which protobuf field feeds
+an existing SQL column fails initialization, even if its scalar kind matches.
 
 - `proprdb.change_listeners` (`bool`, message-level):
   - Generates a typed change stream for the table.
@@ -58,7 +94,7 @@ Incompatible existing projection definitions fail initialization.
 
 - `proprdb.indexes` (`repeated proprdb.Index`, message-level):
   - Declares non-unique SQLite indexes for projected fields
-    (`(proprdb.external)=true`).
+    (`(proprdb.external)=true` or `external_paths`).
   - Supports both single-field and multi-field indexes.
 
 Example:
@@ -145,7 +181,7 @@ let row = crud.person.insert(&person)?;
 let found = crud.person.select_by_id(&row.id)?;
 ```
 
-The Rust target supports typed CRUD, UUID IDs (generated as v7), scalar projections (including
+The Rust target supports typed CRUD, UUID IDs (generated as v7), scalar and nested-path projections (including
 optional and oneof presence), generated indexes, projection reconciliation,
 write validation, custom ID insertion, change listeners, and query statistics.
 With `validate_write`, implement `valid(&self) -> proprdb_runtime::Result<()>`

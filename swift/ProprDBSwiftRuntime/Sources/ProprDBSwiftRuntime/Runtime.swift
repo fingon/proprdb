@@ -1014,7 +1014,7 @@ public func reconcileGeneratedTable(_ q: any DBTX, binding: GeneratedTableBindin
             try rows.next()?.string(at: 0)
         }
         if let currentSchema {
-            try validateProjectionEvolution(tableName: binding.descriptor.tableName, previousSchema: currentSchema, columns: binding.projectedColumns)
+            try validateProjectionEvolution(tableName: binding.descriptor.tableName, previousSchema: currentSchema, currentSchema: binding.projectionSchema, columns: binding.projectedColumns)
         }
         try ensureManagedIndexes(transaction, tableName: binding.descriptor.tableName, generatedIndexPrefix: binding.generatedIndexPrefix, createIndexSQL: [], desiredIndexNames: [])
         let columnsToDrop = columns.filter { !expectedNames.contains($0.name) || repairNames.contains($0.name) }
@@ -1091,18 +1091,29 @@ private func normalizeSQLiteDefault(_ value: String?) -> String {
     value?.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() ?? ""
 }
 
-private func validateProjectionEvolution(tableName: String, previousSchema: String, columns: [ProjectedColumnDescriptor]) throws {
-    var previous: [String: (kind: String, nullable: Bool)] = [:]
-    for entry in previousSchema.split(separator: ";") {
+private let projectionPathPrefix = "path="
+
+private func projectionSignatures(_ schema: String) -> [String: (kind: String, nullable: Bool, path: String)] {
+    var fields: [String: (kind: String, nullable: Bool, path: String)] = [:]
+    for entry in schema.split(separator: ";") {
         let parts = entry.split(separator: ":", omittingEmptySubsequences: false).map(String.init)
-        guard parts.count >= 2 else {
-            continue
-        }
-        previous[parts[0]] = (parts[1], parts.count == 3 && parts[2] == "optional")
+        guard parts.count >= 2 else { continue }
+        let last = parts[parts.count - 1]
+        let path = last.hasPrefix(projectionPathPrefix) ? String(last.dropFirst(projectionPathPrefix.count)) : parts[0]
+        fields[parts[0]] = (parts[1], parts.count >= 3 && parts[2] == "optional", path)
     }
+    return fields
+}
+
+private func validateProjectionEvolution(tableName: String, previousSchema: String, currentSchema: String, columns: [ProjectedColumnDescriptor]) throws {
+    let previous = projectionSignatures(previousSchema)
+    let current = projectionSignatures(currentSchema)
     for column in columns {
         guard let old = previous[column.name] else {
             continue
+        }
+        guard old.path == current[column.name]?.path else {
+            throw ProprDBError("projection column \(tableName).\(column.name) changed protobuf path")
         }
         guard old.kind == column.protoKind else {
             throw ProprDBError("projection column \(tableName).\(column.name) changed protobuf kind from \(old.kind) to \(column.protoKind)")

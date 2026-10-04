@@ -164,6 +164,7 @@ func TestGeneratedCRUDTableDescriptors(t *testing.T) {
 		{TableName: PersonTableName, TypeName: PersonTypeName, IsCore: false, SyncEnabled: true, ChangeListenersEnabled: true, QueryStatisticsEnabled: true},
 		{TableName: NoteTableName, TypeName: NoteTypeName, IsCore: false, SyncEnabled: false, ChangeListenersEnabled: true},
 		{TableName: ChoiceTableName, TypeName: ChoiceTypeName, IsCore: false, SyncEnabled: true},
+		{TableName: PhotoTableName, TypeName: PhotoTypeName, SyncEnabled: true},
 		{TableName: rt.CoreTableDeletedName, TypeName: "", IsCore: true, SyncEnabled: false},
 		{TableName: rt.CoreTableSyncName, TypeName: "", IsCore: true, SyncEnabled: false},
 		{TableName: rt.CoreTableSchemaStateName, TypeName: "", IsCore: true, SyncEnabled: false},

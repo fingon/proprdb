@@ -410,7 +410,7 @@ fn introspection_counts_payload_and_core_tables() -> Result<()> {
     crud.initialize()?;
     let row = crud.person.insert(&person())?;
     let tables = crud.introspect_tables()?;
-    assert_eq!(tables.len(), 12);
+    assert_eq!(tables.len(), 13);
     assert_eq!(
         tables
             .iter()

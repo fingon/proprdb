@@ -332,16 +332,178 @@ func (t *ChoiceTable) DrainUnknownRows() error {
 	return t.runtimeTable().DrainUnknownRows()
 }
 
+const PhotoTableName = "generatedtest_example_photo"
+const PhotoTypeName = "generatedtest.example.Photo"
+const PhotoProjectionSchema = "exif_create_utc_time_seconds:int64:optional:path=exif_create.utc_time.seconds;exif_modify_utc_time_seconds:int64:optional:path=exif_modify.utc_time.seconds;location_altitude:int64:optional:path=location.altitude;location_label:string:optional:path=location.label;location_lat:double:optional:path=location.lat;location_lon:double:optional:path=location.lon;location_next_lon:double:optional:path=location.next.lon;selected_location_lon:double:optional:path=selected_location.lon"
+const PhotoCreateTableSQL = "CREATE TABLE IF NOT EXISTS \"generatedtest_example_photo\" (\"id\" TEXT PRIMARY KEY, \"at_ns\" INTEGER NOT NULL, \"data\" BLOB NOT NULL, \"exif_create_utc_time_seconds\" INTEGER, \"exif_modify_utc_time_seconds\" INTEGER, \"location_altitude\" INTEGER, \"location_label\" TEXT, \"location_lat\" REAL, \"location_lon\" REAL, \"location_next_lon\" REAL, \"selected_location_lon\" REAL)"
+const PhotoInsertSQL = "INSERT INTO \"generatedtest_example_photo\" (\"id\", \"at_ns\", \"data\", \"exif_create_utc_time_seconds\", \"exif_modify_utc_time_seconds\", \"location_altitude\", \"location_label\", \"location_lat\", \"location_lon\", \"location_next_lon\", \"selected_location_lon\") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+const PhotoUpsertSQL = "INSERT INTO \"generatedtest_example_photo\" (\"id\", \"at_ns\", \"data\", \"exif_create_utc_time_seconds\", \"exif_modify_utc_time_seconds\", \"location_altitude\", \"location_label\", \"location_lat\", \"location_lon\", \"location_next_lon\", \"selected_location_lon\") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET \"at_ns\" = excluded.\"at_ns\", \"data\" = excluded.\"data\", \"exif_create_utc_time_seconds\" = excluded.\"exif_create_utc_time_seconds\", \"exif_modify_utc_time_seconds\" = excluded.\"exif_modify_utc_time_seconds\", \"location_altitude\" = excluded.\"location_altitude\", \"location_label\" = excluded.\"location_label\", \"location_lat\" = excluded.\"location_lat\", \"location_lon\" = excluded.\"location_lon\", \"location_next_lon\" = excluded.\"location_next_lon\", \"selected_location_lon\" = excluded.\"selected_location_lon\""
+const PhotoGeneratedIndexPrefix = "idx_generatedtest_example_photo__"
+const PhotoCreateIndexSQL1 = "CREATE INDEX IF NOT EXISTS \"idx_generatedtest_example_photo__location_lon_location_lat\" ON \"generatedtest_example_photo\" (\"location_lon\", \"location_lat\")"
+const PhotoCreateIndexSQL2 = "CREATE INDEX IF NOT EXISTS \"idx_generatedtest_example_photo__exif_create_utc_time_seconds\" ON \"generatedtest_example_photo\" (\"exif_create_utc_time_seconds\")"
+
+type PhotoRow = rt.Row[*Photo]
+
+type PhotoTable struct {
+	q DBTX
+}
+
+var PhotoGeneratedBinding = rt.GeneratedTableBinding{
+	Descriptor:        rt.GeneratedTableDescriptor{TableName: PhotoTableName, TypeName: PhotoTypeName, SyncEnabled: true, ChangeListenersEnabled: false, QueryStatisticsEnabled: false},
+	NewMessage:        func() proto.Message { return &Photo{} },
+	InsertSQL:         PhotoInsertSQL,
+	UpsertSQL:         PhotoUpsertSQL,
+	CreateTableSQL:    PhotoCreateTableSQL,
+	ProjectionSchema:  PhotoProjectionSchema,
+	GeneratedIndexKey: PhotoGeneratedIndexPrefix,
+	ProjectedColumns: []rt.ProjectedColumnDescriptor{
+		{Name: "exif_create_utc_time_seconds", ProtoKind: "int64", SQLiteType: "INTEGER", DefaultSQL: "0", Nullable: true, LegacyOneofPresenceRepair: false},
+		{Name: "exif_modify_utc_time_seconds", ProtoKind: "int64", SQLiteType: "INTEGER", DefaultSQL: "0", Nullable: true, LegacyOneofPresenceRepair: false},
+		{Name: "location_altitude", ProtoKind: "int64", SQLiteType: "INTEGER", DefaultSQL: "0", Nullable: true, LegacyOneofPresenceRepair: false},
+		{Name: "location_label", ProtoKind: "string", SQLiteType: "TEXT", DefaultSQL: "''", Nullable: true, LegacyOneofPresenceRepair: false},
+		{Name: "location_lat", ProtoKind: "double", SQLiteType: "REAL", DefaultSQL: "0", Nullable: true, LegacyOneofPresenceRepair: false},
+		{Name: "location_lon", ProtoKind: "double", SQLiteType: "REAL", DefaultSQL: "0", Nullable: true, LegacyOneofPresenceRepair: false},
+		{Name: "location_next_lon", ProtoKind: "double", SQLiteType: "REAL", DefaultSQL: "0", Nullable: true, LegacyOneofPresenceRepair: false},
+		{Name: "selected_location_lon", ProtoKind: "double", SQLiteType: "REAL", DefaultSQL: "0", Nullable: true, LegacyOneofPresenceRepair: false},
+	},
+	GeneratedIndexes: []rt.GeneratedIndexDescriptor{
+		{Name: "idx_generatedtest_example_photo__location_lon_location_lat", CreateSQL: PhotoCreateIndexSQL1},
+		{Name: "idx_generatedtest_example_photo__exif_create_utc_time_seconds", CreateSQL: PhotoCreateIndexSQL2},
+	},
+	ProjectedValues: func(message proto.Message) ([]any, error) {
+		data, ok := message.(*Photo)
+		if !ok {
+			return nil, fmt.Errorf("expected *Photo, got %T", message)
+		}
+		values := []any{}
+		{
+			value, err := rt.ProjectScalarPath(data, []protoreflect.FieldNumber{2, 1, 1})
+			if err != nil {
+				return nil, err
+			}
+			values = append(values, value)
+		}
+		{
+			value, err := rt.ProjectScalarPath(data, []protoreflect.FieldNumber{3, 1, 1})
+			if err != nil {
+				return nil, err
+			}
+			values = append(values, value)
+		}
+		{
+			value, err := rt.ProjectScalarPath(data, []protoreflect.FieldNumber{1, 3})
+			if err != nil {
+				return nil, err
+			}
+			values = append(values, value)
+		}
+		{
+			value, err := rt.ProjectScalarPath(data, []protoreflect.FieldNumber{1, 4})
+			if err != nil {
+				return nil, err
+			}
+			values = append(values, value)
+		}
+		{
+			value, err := rt.ProjectScalarPath(data, []protoreflect.FieldNumber{1, 2})
+			if err != nil {
+				return nil, err
+			}
+			values = append(values, value)
+		}
+		{
+			value, err := rt.ProjectScalarPath(data, []protoreflect.FieldNumber{1, 1})
+			if err != nil {
+				return nil, err
+			}
+			values = append(values, value)
+		}
+		{
+			value, err := rt.ProjectScalarPath(data, []protoreflect.FieldNumber{1, 6, 1})
+			if err != nil {
+				return nil, err
+			}
+			values = append(values, value)
+		}
+		{
+			value, err := rt.ProjectScalarPath(data, []protoreflect.FieldNumber{4, 1})
+			if err != nil {
+				return nil, err
+			}
+			values = append(values, value)
+		}
+		return values, nil
+	},
+}
+
+func NewPhotoTable(q DBTX) *PhotoTable {
+	return &PhotoTable{q: q}
+}
+
+func (t *PhotoTable) runtimeTable() rt.Table {
+	return rt.NewTable(t.q, PhotoGeneratedBinding)
+}
+
+func (t *PhotoTable) Init() error {
+	return t.runtimeTable().Init(true)
+}
+
+func (t *PhotoTable) init(ensureCore bool) error {
+	return t.runtimeTable().Init(ensureCore)
+}
+
+func (t *PhotoTable) Select(where string, args ...any) ([]PhotoRow, error) {
+	return t.runtimeTable().Select[Photo, *Photo](where, args...)
+}
+
+func (t *PhotoTable) Insert(data *Photo) (PhotoRow, error) {
+	return t.runtimeTable().Insert[Photo, *Photo](data)
+}
+
+func (t *PhotoTable) insertWithID(id string, data *Photo) (PhotoRow, error) {
+	return t.runtimeTable().InsertWithID[Photo, *Photo](id, data)
+}
+
+func (t *PhotoTable) UpdateByID(id string, data *Photo) (PhotoRow, error) {
+	return t.runtimeTable().UpdateByID[Photo, *Photo](id, data)
+}
+
+func (t *PhotoTable) UpdateRow(row PhotoRow) (PhotoRow, error) {
+	return t.runtimeTable().UpdateRow[Photo, *Photo](row)
+}
+
+func (t *PhotoTable) DeleteByID(id string) error {
+	return t.runtimeTable().DeleteByID(id)
+}
+
+func (t *PhotoTable) DeleteRow(row PhotoRow) error {
+	return t.runtimeTable().DeleteRow(row)
+}
+
+func (t *PhotoTable) upsertWithAtNs(id string, atNs int64, data *Photo) error {
+	return t.runtimeTable().UpsertWithAtNs[Photo, *Photo](id, atNs, data)
+}
+
+func (t *PhotoTable) tombstoneWithAtNs(id string, atNs int64) error {
+	return t.runtimeTable().TombstoneWithAtNs(id, atNs)
+}
+
+func (t *PhotoTable) DrainUnknownRows() error {
+	return t.runtimeTable().DrainUnknownRows()
+}
+
 type CRUD struct {
 	Person *PersonTable
 	Note   *NoteTable
 	Choice *ChoiceTable
+	Photo  *PhotoTable
 }
 
 var crudGeneratedBindings = []rt.GeneratedTableBinding{
 	PersonGeneratedBinding,
 	NoteGeneratedBinding,
 	ChoiceGeneratedBinding,
+	PhotoGeneratedBinding,
 }
 
 func NewCRUD(q DBTX) *CRUD {
@@ -350,6 +512,7 @@ func NewCRUD(q DBTX) *CRUD {
 		Person: NewPersonTable(q),
 		Note:   NewNoteTable(q),
 		Choice: NewChoiceTable(q),
+		Photo:  NewPhotoTable(q),
 	}
 }
 
@@ -374,6 +537,9 @@ func (c *CRUD) dbtx() (DBTX, error) {
 	if c.Choice != nil && c.Choice.q != nil {
 		return c.Choice.q, nil
 	}
+	if c.Photo != nil && c.Photo.q != nil {
+		return c.Photo.q, nil
+	}
 	return nil, errors.New("nil DBTX")
 }
 
@@ -393,6 +559,9 @@ func (c *CRUD) Init() error {
 	}
 	if err := c.Choice.init(false); err != nil {
 		return fmt.Errorf("init Choice table: %w", err)
+	}
+	if err := c.Photo.init(false); err != nil {
+		return fmt.Errorf("init Photo table: %w", err)
 	}
 	return rt.DrainUnknownBindingsContext(context.Background(), q, crudGeneratedBindings)
 }

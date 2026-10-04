@@ -145,6 +145,25 @@ func (e swiftEmitter) emitModel(file *protogen.File, model messageModel) {
 	g.P("\t\tguard let data = message as? ", swiftTypeName, " else { throw ProprDBError(\"expected ", swiftTypeName, "\") }")
 	g.P("\t\tvar values: [SQLiteBindValue] = []")
 	for _, projectedField := range model.ProjectedFields {
+		if len(projectedField.Path) > 0 {
+			expression := "data"
+			conditions := make([]string, 0)
+			for _, field := range projectedField.Path {
+				property := swiftFieldName(string(field.Desc.Name()))
+				if field.Oneof != nil && !field.Oneof.Desc.IsSynthetic() {
+					conditions = append(conditions, "case ."+property+" = "+expression+"."+swiftFieldName(string(field.Oneof.Desc.Name())))
+				} else if field.Desc.HasPresence() {
+					conditions = append(conditions, expression+"."+swiftPresenceName(string(field.Desc.Name())))
+				}
+				expression += "." + property
+			}
+			if len(conditions) > 0 {
+				g.P("\t\tif ", strings.Join(conditions, ", "), " { values.append(sqliteBindValue(", expression, ")) } else { values.append(.null) }")
+			} else {
+				g.P("\t\tvalues.append(sqliteBindValue(", expression, "))")
+			}
+			continue
+		}
 		propertyName := projectedField.SwiftPropertyName
 		if projectedField.IsOptional {
 			if projectedField.LegacyOneofPresenceRepair {
