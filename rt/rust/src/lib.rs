@@ -1,4 +1,5 @@
 use std::{
+    collections::HashSet,
     marker::PhantomData,
     time::{Instant, SystemTime, UNIX_EPOCH},
 };
@@ -166,6 +167,18 @@ pub fn validate_id(id: &str) -> Result<()> {
     Ok(())
 }
 
+fn generated_index_name(sql: &str) -> Result<&str> {
+    let quoted = sql
+        .strip_prefix("CREATE INDEX IF NOT EXISTS ")
+        .or_else(|| sql.strip_prefix("CREATE INDEX "))
+        .and_then(|rest| rest.strip_prefix('"'))
+        .ok_or_else(|| Error::Invalid(format!("invalid generated index SQL: {sql}")))?;
+    let end = quoted
+        .find("\" ON ")
+        .ok_or_else(|| Error::Invalid(format!("invalid generated index SQL: {sql}")))?;
+    Ok(&quoted[..end])
+}
+
 impl<'a, M: Model> Table<'a, M> {
     pub fn new(connection: &'a Connection) -> Self {
         Self {
@@ -178,28 +191,64 @@ impl<'a, M: Model> Table<'a, M> {
         atomic(self.connection, || {
             sync::ensure_core_tables(self.connection)?;
             self.connection.execute_batch(M::CREATE_TABLE_SQL)?;
-            let mut statement = self.connection.prepare("SELECT name FROM sqlite_schema WHERE type = 'index' AND tbl_name = ? AND substr(name, 1, ?) = ?")?;
-            let names = statement
-                .query_map(
-                    params![
-                        M::TABLE_NAME,
-                        i64::try_from(M::INDEX_PREFIX.len())?,
-                        M::INDEX_PREFIX
-                    ],
-                    |row| row.get::<_, String>(0),
-                )?
-                .collect::<std::result::Result<Vec<_>, _>>()?;
-            for name in names {
-                self.connection
-                    .execute_batch(&format!("DROP INDEX \"{}\"", name.replace('"', "\"\"")))?;
-            }
+            self.remove_stale_indexes()?;
             self.reconcile_columns()?;
             for sql in M::INDEXES {
-                self.connection.execute_batch(sql)?;
+                let name = generated_index_name(sql)?;
+                let exists: bool = self.connection.query_row(
+                    "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE type = 'index' AND tbl_name = ? AND name = ?)",
+                    params![M::TABLE_NAME, name],
+                    |row| row.get(0),
+                )?;
+                if !exists {
+                    self.connection.execute_batch(sql)?;
+                }
             }
             self.audit_ids()?;
             self.drain_unknown_rows()
         })
+    }
+
+    fn remove_stale_indexes(&self) -> Result<()> {
+        let desired = M::INDEXES
+            .iter()
+            .map(|sql| generated_index_name(sql))
+            .collect::<Result<HashSet<_>>>()?;
+        let mut statement = self
+            .connection
+            .prepare("SELECT name FROM pragma_index_list(?)")?;
+        let names = statement
+            .query_map([M::TABLE_NAME], |row| row.get::<_, String>(0))?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        drop(statement);
+        for name in names {
+            if name.starts_with(M::INDEX_PREFIX) && !desired.contains(name.as_str()) {
+                self.drop_generated_index(&name)?;
+            }
+        }
+        Ok(())
+    }
+
+    fn drop_generated_index(&self, name: &str) -> Result<()> {
+        self.connection
+            .execute_batch(&format!("DROP INDEX \"{}\"", name.replace('"', "\"\"")))?;
+        Ok(())
+    }
+
+    fn drop_indexes_for_column(&self, column_name: &str) -> Result<()> {
+        let mut statement = self.connection.prepare("SELECT DISTINCT indexes.name FROM pragma_index_list(?) AS indexes JOIN pragma_index_info(indexes.name) AS columns ON columns.name = ?")?;
+        let names = statement
+            .query_map(params![M::TABLE_NAME, column_name], |row| {
+                row.get::<_, String>(0)
+            })?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        drop(statement);
+        for name in names {
+            if name.starts_with(M::INDEX_PREFIX) {
+                self.drop_generated_index(&name)?;
+            }
+        }
+        Ok(())
     }
 
     fn reconcile_columns(&self) -> Result<()> {
@@ -279,6 +328,7 @@ impl<'a, M: Model> Table<'a, M> {
                             column.name
                         )));
                     }
+                    self.drop_indexes_for_column(column.name)?;
                     self.connection.execute_batch(&format!(
                         "ALTER TABLE \"{}\" DROP COLUMN \"{}\"; ALTER TABLE \"{}\" ADD COLUMN {}",
                         M::TABLE_NAME,
@@ -301,6 +351,7 @@ impl<'a, M: Model> Table<'a, M> {
             if !BASE_COLUMNS.contains(&name.as_str())
                 && !M::COLUMNS.iter().any(|column| column.name == name)
             {
+                self.drop_indexes_for_column(&name)?;
                 self.connection.execute_batch(&format!(
                     "ALTER TABLE \"{}\" DROP COLUMN \"{}\"",
                     M::TABLE_NAME,

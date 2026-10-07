@@ -369,6 +369,7 @@ dependencies = [
  "prost",
  "prost-build",
  "prost-types",
+ "rusqlite",
  "serde_json",
  "tempfile",
 ]

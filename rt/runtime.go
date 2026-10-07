@@ -619,6 +619,61 @@ func EnsureManagedIndexes(q DBTX, tableName, generatedIndexPrefix string, create
 	return nil
 }
 
+func generatedIndexColumnsContext(ctx context.Context, q DBTX, tableName string) (indexes map[string][]string, err error) {
+	rows, err := q.QueryContext(ctx, `SELECT indexes.name, columns.name FROM pragma_index_list(?) AS indexes LEFT JOIN pragma_index_info(indexes.name) AS columns ON TRUE`, tableName)
+	if err != nil {
+		return nil, fmt.Errorf("read indexes for %s: %w", tableName, err)
+	}
+	defer func() {
+		if closeErr := rows.Close(); closeErr != nil {
+			err = errors.Join(err, fmt.Errorf("close indexes for %s: %w", tableName, closeErr))
+		}
+	}()
+	indexes = make(map[string][]string)
+	for rows.Next() {
+		var indexName string
+		var columnName sql.NullString
+		if err := rows.Scan(&indexName, &columnName); err != nil {
+			return nil, fmt.Errorf("scan indexes for %s: %w", tableName, err)
+		}
+		indexes[indexName] = append(indexes[indexName], columnName.String)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate indexes for %s: %w", tableName, err)
+	}
+	return indexes, nil
+}
+
+func prepareGeneratedIndexesContext(ctx context.Context, q DBTX, binding GeneratedTableBinding, dropColumns map[string]bool) (existingIndexes map[string]bool, err error) {
+	indexes, err := generatedIndexColumnsContext(ctx, q, binding.Descriptor.TableName)
+	if err != nil {
+		return nil, err
+	}
+	desiredIndexes := make(map[string]bool, len(binding.GeneratedIndexes))
+	for _, index := range binding.GeneratedIndexes {
+		desiredIndexes[index.Name] = true
+	}
+	existingIndexes = make(map[string]bool, len(indexes))
+	for indexName, columnNames := range indexes {
+		existingIndexes[indexName] = true
+		if !strings.HasPrefix(indexName, binding.GeneratedIndexKey) {
+			continue
+		}
+		drop := !desiredIndexes[indexName]
+		for _, columnName := range columnNames {
+			drop = drop || dropColumns[columnName]
+		}
+		if !drop {
+			continue
+		}
+		if _, err := q.ExecContext(ctx, `DROP INDEX `+quoteSQLiteIdentifier(indexName)); err != nil {
+			return nil, fmt.Errorf("drop index %s for %s: %w", indexName, binding.Descriptor.TableName, err)
+		}
+		delete(existingIndexes, indexName)
+	}
+	return existingIndexes, nil
+}
+
 func ReconcileGeneratedTableContext(ctx context.Context, q DBTX, binding GeneratedTableBinding) error {
 	if q == nil {
 		return errors.New("nil DBTX")
@@ -661,13 +716,14 @@ func ReconcileGeneratedTableContext(ctx context.Context, q DBTX, binding Generat
 				return fmt.Errorf("projection column %s.%s has default %v, expected %s", binding.Descriptor.TableName, projected.Name, column.defaultValue, projected.DefaultSQL)
 			}
 		}
-		createIndexSQL := make([]string, 0, len(binding.GeneratedIndexes))
-		desiredIndexNames := make([]string, 0, len(binding.GeneratedIndexes))
-		for _, index := range binding.GeneratedIndexes {
-			createIndexSQL = append(createIndexSQL, index.CreateSQL)
-			desiredIndexNames = append(desiredIndexNames, index.Name)
+		dropColumns := make(map[string]bool)
+		for _, column := range columns {
+			if !expectedNames[column.name] || repairNames[column.name] {
+				dropColumns[column.name] = true
+			}
 		}
-		if err := EnsureManagedIndexes(tx, binding.Descriptor.TableName, binding.GeneratedIndexKey, nil, nil); err != nil {
+		existingIndexes, err := prepareGeneratedIndexesContext(ctx, tx, binding, dropColumns)
+		if err != nil {
 			return err
 		}
 		changed := false
@@ -704,8 +760,13 @@ func ReconcileGeneratedTableContext(ctx context.Context, q DBTX, binding Generat
 				return err
 			}
 		}
-		if err := EnsureManagedIndexes(tx, binding.Descriptor.TableName, binding.GeneratedIndexKey, createIndexSQL, desiredIndexNames); err != nil {
-			return err
+		for _, index := range binding.GeneratedIndexes {
+			if existingIndexes[index.Name] {
+				continue
+			}
+			if _, err := tx.ExecContext(ctx, index.CreateSQL); err != nil {
+				return fmt.Errorf("create index %s for %s: %w", index.Name, binding.Descriptor.TableName, err)
+			}
 		}
 		if _, err := tx.ExecContext(ctx, `INSERT INTO `+CoreTableSchemaStateName+` (table_name, schema_hash) VALUES (?, ?) ON CONFLICT(table_name) DO UPDATE SET schema_hash = excluded.schema_hash`, binding.Descriptor.TableName, binding.ProjectionSchema); err != nil {
 			return fmt.Errorf("write projection schema for %s: %w", binding.Descriptor.TableName, err)

@@ -59,7 +59,9 @@ inside schema reconciliation's transaction. It updates only projection columns:
 IDs, payload bytes (including unknown fields), sync timestamps, and checkpoints
 remain unchanged. CRUD writes and JSONL imports maintain the same projections in
 Go, Swift, and Rust. Applications do not need to reimport existing objects or
-create migrations or indexes manually.
+create migrations or indexes manually. Initialization preserves existing
+generated indexes on unchanged schemas, creates missing indexes, and drops only
+stale generated indexes or those affected by projection-column removal or repair.
 
 - `proprdb.omit_table` (`bool`, message-level):
   - Do not generate table/CRUD code for this message.

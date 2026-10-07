@@ -965,6 +965,26 @@ public func ensureManagedIndexes(_ q: any DBTX, tableName: String, generatedInde
     }
 }
 
+private func prepareGeneratedIndexes(_ q: any DBTX, binding: GeneratedTableBinding, dropColumns: Set<String>) throws -> Set<String> {
+    let indexes = try q.withRows("SELECT indexes.name, columns.name FROM pragma_index_list(?) AS indexes LEFT JOIN pragma_index_info(indexes.name) AS columns ON TRUE", arguments: [binding.descriptor.tableName]) { rows in
+        var result: [String: Set<String>] = [:]
+        while let row = try rows.next() {
+            let indexName = try row.string(at: 0)
+            result[indexName, default: []].formUnion(try row.optionalString(at: 1).map { [$0] } ?? [])
+        }
+        return result
+    }
+    let desiredIndexes = Set(binding.generatedIndexes.map(\.name))
+    var existingIndexes = Set(indexes.keys)
+    for (indexName, columnNames) in indexes where indexName.hasPrefix(binding.generatedIndexPrefix) {
+        if !desiredIndexes.contains(indexName) || !columnNames.isDisjoint(with: dropColumns) {
+            try q.execute("DROP INDEX \(quoteSQLiteIdentifier(indexName))")
+            existingIndexes.remove(indexName)
+        }
+    }
+    return existingIndexes
+}
+
 private struct GeneratedTableColumn {
     let name: String
     let sqliteType: String
@@ -1016,8 +1036,8 @@ public func reconcileGeneratedTable(_ q: any DBTX, binding: GeneratedTableBindin
         if let currentSchema {
             try validateProjectionEvolution(tableName: binding.descriptor.tableName, previousSchema: currentSchema, currentSchema: binding.projectionSchema, columns: binding.projectedColumns)
         }
-        try ensureManagedIndexes(transaction, tableName: binding.descriptor.tableName, generatedIndexPrefix: binding.generatedIndexPrefix, createIndexSQL: [], desiredIndexNames: [])
         let columnsToDrop = columns.filter { !expectedNames.contains($0.name) || repairNames.contains($0.name) }
+        let existingIndexes = try prepareGeneratedIndexes(transaction, binding: binding, dropColumns: Set(columnsToDrop.map(\.name)))
         if !columnsToDrop.isEmpty {
             try requireDropColumnSQLite(transaction)
         }
@@ -1037,13 +1057,9 @@ public func reconcileGeneratedTable(_ q: any DBTX, binding: GeneratedTableBindin
         if changed || currentSchema != binding.projectionSchema {
             try reprojectGeneratedTable(transaction, binding: binding)
         }
-        try ensureManagedIndexes(
-            transaction,
-            tableName: binding.descriptor.tableName,
-            generatedIndexPrefix: binding.generatedIndexPrefix,
-            createIndexSQL: binding.generatedIndexes.map(\.createSQL),
-            desiredIndexNames: binding.generatedIndexes.map(\.name)
-        )
+        for index in binding.generatedIndexes where !existingIndexes.contains(index.name) {
+            try transaction.execute(index.createSQL)
+        }
         try transaction.execute(
             "INSERT INTO \(_proprdbSchemaTableName) (table_name, schema_hash) VALUES (?, ?) ON CONFLICT(table_name) DO UPDATE SET schema_hash = excluded.schema_hash",
             arguments: [binding.descriptor.tableName, binding.projectionSchema]
