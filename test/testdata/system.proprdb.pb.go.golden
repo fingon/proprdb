@@ -563,7 +563,7 @@ func (c *CRUD) Init() error {
 	if err := c.Photo.init(false); err != nil {
 		return fmt.Errorf("init Photo table: %w", err)
 	}
-	return rt.DrainUnknownBindingsContext(context.Background(), q, crudGeneratedBindings)
+	return nil
 }
 
 func (c *CRUD) WriteJSONL(remote string, w io.Writer) error {

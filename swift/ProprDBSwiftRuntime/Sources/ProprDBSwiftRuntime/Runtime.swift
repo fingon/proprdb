@@ -992,6 +992,15 @@ private struct GeneratedTableColumn {
     let defaultSQL: String?
 }
 
+public func initializeGeneratedTables(_ q: any DBTX, bindings: [GeneratedTableBinding]) throws {
+    logger.debug("Initialize generated tables", metadata: ["table_count": .stringConvertible(bindings.count)])
+    try ensureCoreTables(q)
+    for binding in bindings {
+        try reconcileGeneratedTable(q, binding: binding)
+        try drainBoundUnknown(q, bindings: [binding])
+    }
+}
+
 public func reconcileGeneratedTable(_ q: any DBTX, binding: GeneratedTableBinding) throws {
     try q.withTransaction { transaction in
         try transaction.execute(binding.createTableSQL)
@@ -1060,10 +1069,12 @@ public func reconcileGeneratedTable(_ q: any DBTX, binding: GeneratedTableBindin
         for index in binding.generatedIndexes where !existingIndexes.contains(index.name) {
             try transaction.execute(index.createSQL)
         }
-        try transaction.execute(
-            "INSERT INTO \(_proprdbSchemaTableName) (table_name, schema_hash) VALUES (?, ?) ON CONFLICT(table_name) DO UPDATE SET schema_hash = excluded.schema_hash",
-            arguments: [binding.descriptor.tableName, binding.projectionSchema]
-        )
+        if currentSchema != binding.projectionSchema {
+            try transaction.execute(
+                "INSERT INTO \(_proprdbSchemaTableName) (table_name, schema_hash) VALUES (?, ?) ON CONFLICT(table_name) DO UPDATE SET schema_hash = excluded.schema_hash",
+                arguments: [binding.descriptor.tableName, binding.projectionSchema]
+            )
+        }
     }
 }
 

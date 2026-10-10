@@ -188,8 +188,22 @@ impl<'a, M: Model> Table<'a, M> {
     }
 
     pub fn initialize(&self) -> Result<()> {
+        self.initialize_with_core(true)
+    }
+
+    fn initialize_without_core(&self) -> Result<()> {
+        self.initialize_with_core(false)
+    }
+
+    fn initialize_with_core(&self, ensure_core: bool) -> Result<()> {
+        log::debug!(
+            "initialize generated table table={} ensure_core={ensure_core}",
+            M::TABLE_NAME
+        );
         atomic(self.connection, || {
-            sync::ensure_core_tables(self.connection)?;
+            if ensure_core {
+                sync::ensure_core_tables(self.connection)?;
+            }
             self.connection.execute_batch(M::CREATE_TABLE_SQL)?;
             self.remove_stale_indexes()?;
             self.reconcile_columns()?;
@@ -204,7 +218,6 @@ impl<'a, M: Model> Table<'a, M> {
                     self.connection.execute_batch(sql)?;
                 }
             }
-            self.audit_ids()?;
             self.drain_unknown_rows()
         })
     }
@@ -389,7 +402,6 @@ impl<'a, M: Model> Table<'a, M> {
                 let Some((id, _at_ns, bytes)) = row else {
                     break;
                 };
-                validate_id(&id)?;
                 let data = M::Data::decode(bytes.as_slice())?;
                 let mut values = M::projected_values(&data);
                 if !M::COLUMNS.is_empty() {
@@ -400,7 +412,9 @@ impl<'a, M: Model> Table<'a, M> {
                 cursor = id;
             }
         }
-        self.connection.execute("INSERT INTO _proprdb_schema (table_name, schema_hash) VALUES (?, ?) ON CONFLICT(table_name) DO UPDATE SET schema_hash = excluded.schema_hash", [M::TABLE_NAME, M::PROJECTION_SCHEMA])?;
+        if previous.as_deref() != Some(M::PROJECTION_SCHEMA) {
+            self.connection.execute("INSERT INTO _proprdb_schema (table_name, schema_hash) VALUES (?, ?) ON CONFLICT(table_name) DO UPDATE SET schema_hash = excluded.schema_hash", [M::TABLE_NAME, M::PROJECTION_SCHEMA])?;
+        }
         Ok(())
     }
 
@@ -547,26 +561,6 @@ impl<'a, M: Model> Table<'a, M> {
 
     pub fn delete_row(&self, row: &Row<M::Data>) -> Result<bool> {
         self.delete_by_id(&row.id)
-    }
-
-    fn audit_ids(&self) -> Result<()> {
-        for (table, column) in [
-            (M::TABLE_NAME, "id"),
-            ("_deleted", "id"),
-            ("_sync", "object_id"),
-            ("_unknown_types", "id"),
-            ("_unknown_sync", "id"),
-            ("_export_batch_entries", "object_id"),
-        ] {
-            let mut statement = self.connection.prepare(&format!(
-                "SELECT {column} FROM \"{table}\" ORDER BY {column}"
-            ))?;
-            let mut rows = statement.query([])?;
-            while let Some(row) = rows.next()? {
-                validate_id(&row.get::<_, String>(0)?)?;
-            }
-        }
-        Ok(())
     }
 
     pub fn query_statistics(&self, where_sql: &str) -> Result<QueryStatistics> {

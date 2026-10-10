@@ -768,8 +768,10 @@ func ReconcileGeneratedTableContext(ctx context.Context, q DBTX, binding Generat
 				return fmt.Errorf("create index %s for %s: %w", index.Name, binding.Descriptor.TableName, err)
 			}
 		}
-		if _, err := tx.ExecContext(ctx, `INSERT INTO `+CoreTableSchemaStateName+` (table_name, schema_hash) VALUES (?, ?) ON CONFLICT(table_name) DO UPDATE SET schema_hash = excluded.schema_hash`, binding.Descriptor.TableName, binding.ProjectionSchema); err != nil {
-			return fmt.Errorf("write projection schema for %s: %w", binding.Descriptor.TableName, err)
+		if errors.Is(schemaErr, sql.ErrNoRows) || currentSchema != binding.ProjectionSchema {
+			if _, err := tx.ExecContext(ctx, `INSERT INTO `+CoreTableSchemaStateName+` (table_name, schema_hash) VALUES (?, ?) ON CONFLICT(table_name) DO UPDATE SET schema_hash = excluded.schema_hash`, binding.Descriptor.TableName, binding.ProjectionSchema); err != nil {
+				return fmt.Errorf("write projection schema for %s: %w", binding.Descriptor.TableName, err)
+			}
 		}
 		return nil
 	})

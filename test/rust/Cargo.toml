@@ -16,3 +16,7 @@ prost-build = "0.14"
 [dev-dependencies]
 rusqlite = { workspace = true, features = ["trace"] }
 tempfile = "3"
+
+[[bench]]
+name = "initialization"
+harness = false

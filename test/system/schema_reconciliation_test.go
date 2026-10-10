@@ -101,7 +101,7 @@ func TestKnownOmitSyncUnknownRecordDoesNotExport(t *testing.T) {
 	assert.Check(t, is.Equal(parkedCount, 1))
 }
 
-func TestStoredInvalidObjectIDFailsInitialization(t *testing.T) {
+func TestStoredInvalidObjectIDDoesNotFailInitialization(t *testing.T) {
 	db, err := sql.Open("sqlite3", "file:invalid-stored-id?mode=memory&cache=shared")
 	assert.NilError(t, err)
 	t.Cleanup(func() { assert.NilError(t, db.Close()) })
@@ -110,7 +110,6 @@ func TestStoredInvalidObjectIDFailsInitialization(t *testing.T) {
 	_, err = db.Exec(`INSERT INTO _deleted (table_name, id, at_ns) VALUES (?, ?, ?)`, PersonTableName, "legacy-id", int64(1))
 	assert.NilError(t, err)
 
-	err = NewPersonTable(q).Init()
-	assert.Check(t, err != nil)
-	assert.Check(t, strings.Contains(err.Error(), "invalid stored object ID"))
+	assert.NilError(t, NewPersonTable(q).Init())
+	assert.NilError(t, NewCRUD(q).Init())
 }

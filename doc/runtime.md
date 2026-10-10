@@ -86,3 +86,30 @@ it preserves payload bytes, unknown fields, IDs, object timestamps, tombstones,
 and sync checkpoints. Decode or SQL failures roll back reconciliation. Subsequent
 CRUD writes, JSONL imports, and unknown-type draining use the same projection
 logic. Repeated initialization with an unchanged schema needs no backfill.
+
+Initialization and ordinary queries trust stored IDs and do not run write
+validators over stored payloads. IDs are validated at write boundaries instead.
+Unchanged initialization inspects schema and index metadata without scanning
+object IDs or decoding payloads. Schema changes can still require a projection
+backfill, and initialization applies parked sync records for supported types.
+
+Run `make benchmark-init SWIFT_ARGS=--disable-sandbox` to measure repeated CRUD
+initialization in Go, Swift, and Rust. The benchmarks use the same fixture with
+0, 1,000, or 10,000 objects in both memory and file-backed databases, including
+shared tombstone, sync, unknown-type, and export-entry rows. Timings exclude
+fixture setup and report SQL statement counts; Go counts exclude transaction
+control statements, while Swift and Rust count them through SQLite tracing.
+
+A local Apple M1 Pro run with 10 initialization iterations and 10,000 rows in
+each populated fixture table measured the following elapsed times. Swift uses
+the debug test build. Rust measurements were blocked by Cargo cache permissions.
+
+| Runtime | Storage | Before | After |
+| --- | --- | ---: | ---: |
+| Go | Memory | 62.4 ms | 0.17 ms |
+| Go | File | 64.8 ms | 0.25 ms |
+| Swift | Memory | 134.0 ms | 0.40 ms |
+| Swift | File | 133.2 ms | 0.50 ms |
+
+After the change, SQL counts stayed constant at 29 statements for Go and 51 for
+Swift across all three fixture sizes.

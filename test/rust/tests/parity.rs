@@ -434,7 +434,7 @@ fn introspection_counts_payload_and_core_tables() -> Result<()> {
 }
 
 #[test]
-fn initialization_audits_ids_even_when_schema_is_unchanged() -> Result<()> {
+fn initialization_and_reads_trust_stored_ids() -> Result<()> {
     let connection = Connection::open_in_memory()?;
     let crud = system::Crud::new(&connection);
     crud.initialize()?;
@@ -443,7 +443,10 @@ fn initialization_audits_ids_even_when_schema_is_unchanged() -> Result<()> {
         "UPDATE generatedtest_example_person SET id = ? WHERE id = ?",
         ("invalid", row.id),
     )?;
-    assert!(crud.initialize().is_err());
+    crud.person.initialize()?;
+    crud.initialize()?;
+    assert_eq!(crud.person.select_by_id("invalid")?.unwrap().id, "invalid");
+    assert!(crud.person.insert_with_id("invalid", &person()).is_err());
     Ok(())
 }
 

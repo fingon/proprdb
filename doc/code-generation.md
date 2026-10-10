@@ -201,7 +201,7 @@ and writes produce no notifications.
 
 Updates insert a row when its ID does not exist. Deleting an absent ID still
 records a tombstone, unless `omit_sync` is set. Write IDs must be canonical
-lowercase UUID values. Initialization audits stored IDs and reconciles all
+lowercase UUID values. Initialization trusts stored IDs and reconciles all
 generated tables atomically.
 
 `Crud` exposes `read_jsonl`, `prepare_jsonl`, `acknowledge_jsonl`,

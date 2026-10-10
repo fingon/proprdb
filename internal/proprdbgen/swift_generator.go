@@ -207,7 +207,7 @@ func (e swiftEmitter) emitModel(file *protogen.File, model messageModel) {
 	g.P("\t}")
 	g.P()
 
-	e.emitSwiftInitMethod(file, model, swiftTypeName, tableNameConst, typeNameConst, schemaConst, createTableConst, indexPrefixConst)
+	e.emitSwiftInitMethod(model)
 	e.emitSwiftSelectMethod(model, swiftTypeName, tableNameConst)
 	e.emitSwiftInsertMethod(model, swiftTypeName, tableNameConst, insertConst)
 	e.emitSwiftUpdateMethod(model, swiftTypeName, tableNameConst, upsertConst)
@@ -224,20 +224,12 @@ func (e swiftEmitter) emitModel(file *protogen.File, model messageModel) {
 	g.P()
 }
 
-func (e swiftEmitter) emitSwiftInitMethod(file *protogen.File, model messageModel, swiftTypeName, _, typeNameConst, schemaConst, createTableConst, indexPrefixConst string) {
+func (e swiftEmitter) emitSwiftInitMethod(model messageModel) {
 	g := e.g
 	g.P("\t", e.visibilityPrefix(), "func initialize() throws {")
-	g.P("\t\ttry ensureCoreTables(q)")
-	g.P("\t\ttry auditObjectIDs(q, bindings: [", model.GoName, "GeneratedBinding])")
-	g.P("\t\ttry reconcileGeneratedTable(q, binding: ", model.GoName, "GeneratedBinding)")
-	g.P("\t\ttry drainUnknownRows(", typeNameConst, ")")
+	g.P("\t\ttry initializeGeneratedTables(q, bindings: [", model.GoName, "GeneratedBinding])")
 	g.P("\t}")
 	g.P()
-	_ = swiftTypeName
-	_ = file
-	_ = schemaConst
-	_ = createTableConst
-	_ = indexPrefixConst
 }
 
 func (e swiftEmitter) emitSwiftSelectMethod(model messageModel, swiftTypeName, tableNameConst string) {
@@ -394,9 +386,7 @@ func (e swiftEmitter) emitWrapper(_ map[string]*protogen.File, models []messageM
 	g.P("\tprivate func dbtx() -> any DBTX { ", models[0].SwiftPropertyName, ".q }")
 	g.P("\t", visibility, "func tableDescriptors() -> [GeneratedTableDescriptor] { crudGeneratedBindings.map(\\.descriptor) + coreTableDescriptors() }")
 	g.P("\t", visibility, "func initialize() throws {")
-	for _, model := range models {
-		g.P("\t\ttry ", model.SwiftPropertyName, ".initialize()")
-	}
+	g.P("\t\ttry initializeGeneratedTables(dbtx(), bindings: crudGeneratedBindings)")
 	g.P("\t}")
 	g.P("\t", visibility, "func prepareJSONL(remote: String) throws -> PreparedJSONLExport { try prepareBoundJSONL(dbtx(), bindings: crudGeneratedBindings, remote: remote) }")
 	g.P("\t", visibility, "func acknowledgeJSONL(_ checkpoint: JSONLCheckpoint) throws { try acknowledgeBoundJSONL(dbtx(), checkpoint: checkpoint) }")

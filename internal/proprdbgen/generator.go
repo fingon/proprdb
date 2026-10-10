@@ -812,7 +812,7 @@ func (e generatorEmitter) emitWrapper(models []messageModel) {
 	for _, model := range models {
 		g.P("\tif err := c.", model.GoName, ".init(false); err != nil { return fmt.Errorf(\"init ", model.GoName, " table: %w\", err) }")
 	}
-	g.P("\treturn rt.DrainUnknownBindingsContext(context.Background(), q, crudGeneratedBindings)")
+	g.P("\treturn nil")
 	g.P("}")
 	g.P()
 	g.P("func (c *CRUD) WriteJSONL(remote string, w io.Writer) error {")

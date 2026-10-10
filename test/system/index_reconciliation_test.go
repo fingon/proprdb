@@ -38,6 +38,16 @@ func (q recordingDBTX) ExecContext(ctx context.Context, query string, args ...an
 	return q.DBTX.ExecContext(ctx, query, args...)
 }
 
+func (q recordingDBTX) QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
+	*q.statements = append(*q.statements, query)
+	return q.DBTX.QueryContext(ctx, query, args...)
+}
+
+func (q recordingDBTX) QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row {
+	*q.statements = append(*q.statements, query)
+	return q.DBTX.QueryRowContext(ctx, query, args...)
+}
+
 func (q recordingDBTX) WithTransaction(ctx context.Context, body func(rt.DBTX) error) error {
 	return q.DBTX.WithTransaction(ctx, func(tx rt.DBTX) error {
 		return body(recordingDBTX{DBTX: tx, statements: q.statements})

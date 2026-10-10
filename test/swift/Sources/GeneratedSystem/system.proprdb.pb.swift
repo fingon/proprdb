@@ -70,10 +70,7 @@ struct PersonTable {
 	}
 
 	func initialize() throws {
-		try ensureCoreTables(q)
-		try auditObjectIDs(q, bindings: [PersonGeneratedBinding])
-		try reconcileGeneratedTable(q, binding: PersonGeneratedBinding)
-		try drainUnknownRows(PersonTypeName)
+		try initializeGeneratedTables(q, bindings: [PersonGeneratedBinding])
 	}
 
 	func select(where whereClause: String = "", arguments: [SQLiteBindValue] = []) throws -> [PersonRow] {
@@ -232,10 +229,7 @@ struct NoteTable {
 	}
 
 	func initialize() throws {
-		try ensureCoreTables(q)
-		try auditObjectIDs(q, bindings: [NoteGeneratedBinding])
-		try reconcileGeneratedTable(q, binding: NoteGeneratedBinding)
-		try drainUnknownRows(NoteTypeName)
+		try initializeGeneratedTables(q, bindings: [NoteGeneratedBinding])
 	}
 
 	func select(where whereClause: String = "", arguments: [SQLiteBindValue] = []) throws -> [NoteRow] {
@@ -384,10 +378,7 @@ struct ChoiceTable {
 	}
 
 	func initialize() throws {
-		try ensureCoreTables(q)
-		try auditObjectIDs(q, bindings: [ChoiceGeneratedBinding])
-		try reconcileGeneratedTable(q, binding: ChoiceGeneratedBinding)
-		try drainUnknownRows(ChoiceTypeName)
+		try initializeGeneratedTables(q, bindings: [ChoiceGeneratedBinding])
 	}
 
 	func select(where whereClause: String = "", arguments: [SQLiteBindValue] = []) throws -> [ChoiceRow] {
@@ -550,10 +541,7 @@ struct PhotoTable {
 	}
 
 	func initialize() throws {
-		try ensureCoreTables(q)
-		try auditObjectIDs(q, bindings: [PhotoGeneratedBinding])
-		try reconcileGeneratedTable(q, binding: PhotoGeneratedBinding)
-		try drainUnknownRows(PhotoTypeName)
+		try initializeGeneratedTables(q, bindings: [PhotoGeneratedBinding])
 	}
 
 	func select(where whereClause: String = "", arguments: [SQLiteBindValue] = []) throws -> [PhotoRow] {
@@ -662,10 +650,7 @@ struct CRUD {
 	private func dbtx() -> any DBTX { person.q }
 	func tableDescriptors() -> [GeneratedTableDescriptor] { crudGeneratedBindings.map(\.descriptor) + coreTableDescriptors() }
 	func initialize() throws {
-		try person.initialize()
-		try note.initialize()
-		try choice.initialize()
-		try photo.initialize()
+		try initializeGeneratedTables(dbtx(), bindings: crudGeneratedBindings)
 	}
 	func prepareJSONL(remote: String) throws -> PreparedJSONLExport { try prepareBoundJSONL(dbtx(), bindings: crudGeneratedBindings, remote: remote) }
 	func acknowledgeJSONL(_ checkpoint: JSONLCheckpoint) throws { try acknowledgeBoundJSONL(dbtx(), checkpoint: checkpoint) }

@@ -90,6 +90,18 @@ race:
 	go test -race ./...
 	cd test/system && go test -race ./...
 
+.PHONY: benchmark-init benchmark-init-go benchmark-init-swift benchmark-init-rust
+benchmark-init: benchmark-init-go benchmark-init-swift benchmark-init-rust
+
+benchmark-init-go: go-fixtures
+	cd test/system && go test -run '^$$' -bench '^BenchmarkInitialization$$' -benchtime=10x -count=1
+
+benchmark-init-swift: swift-fixtures
+	cd test/swift && PROPRDB_INIT_BENCHMARK=1 $(SWIFT_ENV) swift test $(SWIFT_ARGS) --filter InitializationBenchmarkTests
+
+benchmark-init-rust: rust-fixtures
+	cargo bench -p proprdb-rust-tests --bench initialization --locked
+
 .PHONY: check
 check: lint verify-generated test build
 

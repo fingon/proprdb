@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 
 	"google.golang.org/protobuf/proto"
@@ -42,15 +43,13 @@ func (t Table) Init(ensureCore bool) (err error) {
 	if t.q == nil {
 		return errors.New(errNilDBTX)
 	}
+	slog.Debug("initialize generated table", "table", t.binding.Descriptor.TableName, "ensure_core", ensureCore)
 	if ensureCore {
 		if err := EnsureCoreTables(t.q); err != nil {
 			return err
 		}
 	}
 	ctx := context.Background()
-	if err := AuditObjectIDsContext(ctx, t.q, []GeneratedTableBinding{t.binding}); err != nil {
-		return err
-	}
 	if err := ReconcileGeneratedTableContext(ctx, t.q, t.binding); err != nil {
 		return err
 	}

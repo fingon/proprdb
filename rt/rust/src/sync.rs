@@ -97,6 +97,10 @@ pub trait SyncTable {
     fn connection(&self) -> &Connection;
     fn descriptor(&self) -> TableDescriptor;
     fn initialize(&self) -> Result<()>;
+    /// Bulk initialization calls this after ensuring the core tables exist.
+    fn initialize_without_core(&self) -> Result<()> {
+        self.initialize()
+    }
     fn apply_record(&self, record: &JsonlRecord) -> Result<()>;
     fn export_records(&self, remote: &str) -> Result<Vec<JsonlRecord>>;
     fn introspect_all(&self, tables: &[&dyn SyncTable]) -> Result<Vec<TableIntrospection>> {
@@ -170,6 +174,9 @@ impl<M: Model> SyncTable for Table<'_, M> {
     }
     fn initialize(&self) -> Result<()> {
         Table::initialize(self)
+    }
+    fn initialize_without_core(&self) -> Result<()> {
+        Table::initialize_without_core(self)
     }
 
     fn apply_record(&self, record: &JsonlRecord) -> Result<()> {
@@ -321,10 +328,19 @@ pub(crate) fn ensure_core_tables(connection: &Connection) -> Result<()> {
     } else {
         connection.execute_batch(UNKNOWN_SQL)?;
     }
-    connection.execute(
-        "INSERT INTO _proprdb_metadata (key, value) VALUES (?, ?) ON CONFLICT(key) DO NOTHING",
-        params![DATABASE_ID_KEY, Uuid::now_v7().to_string()],
-    )?;
+    let database_id: Option<String> = connection
+        .query_row(
+            "SELECT value FROM _proprdb_metadata WHERE key = ?",
+            [DATABASE_ID_KEY],
+            |row| row.get(0),
+        )
+        .optional()?;
+    if database_id.is_none() {
+        connection.execute(
+            "INSERT INTO _proprdb_metadata (key, value) VALUES (?, ?)",
+            params![DATABASE_ID_KEY, Uuid::now_v7().to_string()],
+        )?;
+    }
     Ok(())
 }
 
@@ -352,8 +368,9 @@ fn tables_connection<'a>(tables: &[&'a dyn SyncTable]) -> Result<&'a Connection>
 pub fn initialize_tables(tables: &[&dyn SyncTable]) -> Result<()> {
     let connection = tables_connection(tables)?;
     atomic(connection, || {
+        ensure_core_tables(connection)?;
         for table in tables {
-            table.initialize()?;
+            table.initialize_without_core()?;
         }
         Ok(())
     })
