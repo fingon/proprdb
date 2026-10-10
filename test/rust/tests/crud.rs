@@ -62,7 +62,7 @@ fn crud_validation_indexes_listeners_and_statistics() -> Result<()> {
         [system::PersonModel::TABLE_NAME, "idx_%"],
         |row| row.get(0),
     )?;
-    assert_eq!(indexes, 2);
+    assert_eq!(indexes, 5);
     assert!(crud.person.delete_by_id(&row.id)?);
     assert!(
         matches!(changes.recv().unwrap(), Change::Delete { id, at_ns } if id == row.id && at_ns > row.at_ns)
