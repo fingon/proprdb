@@ -12,6 +12,9 @@ import (
 )
 
 const (
+	personTimeIndex           = "idx_generatedtest_example_person__at_ns"
+	personNameTimeIndex       = "idx_generatedtest_example_person__name_at_ns"
+	personTimeIDIndex         = "idx_generatedtest_example_person__at_ns_id"
 	testProjectedAge          = int64(37)
 	projectionColumnCountSQL  = `SELECT COUNT(*) FROM pragma_table_info(?) WHERE name = ?`
 	corruptPersonAgeSQL       = `UPDATE "generatedtest_example_person" SET age = 0 WHERE name = 'Ada'`
@@ -73,6 +76,7 @@ func TestGeneratedIndexReconciliation(t *testing.T) {
 	}{
 		{name: "unchanged table"},
 		{name: "unchanged CRUD", fullInit: true},
+		{name: "missing timestamp index", setupSQL: []string{`DROP INDEX "` + personTimeIndex + `"`}, expectedDDL: []string{PersonCreateIndexSQL3}},
 		{name: "missing index", setupSQL: []string{`DROP INDEX "` + personNameIndex + `"`}, expectedDDL: []string{PersonCreateIndexSQL1}},
 		{name: "stale index and obsolete column", setupSQL: []string{obsoletePersonSQL, stalePersonIndexSQL}, expectedDDL: []string{`DROP INDEX "` + personStaleIndex + `"`}},
 		{name: "stale index on current column", setupSQL: []string{`CREATE INDEX "` + personStaleIndex + `" ON "` + PersonTableName + `" ("name")`}, expectedDDL: []string{`DROP INDEX "` + personStaleIndex + `"`}},
@@ -115,6 +119,15 @@ func TestGeneratedIndexReconciliation(t *testing.T) {
 			indexes := tableIndexNamesByName(ctx, t, db, PersonTableName)
 			assert.Check(t, indexes[personNameIndex])
 			assert.Check(t, indexes[personNameAgeIndex])
+			for _, tc := range []struct{ name, columns string }{
+				{personTimeIndex, "at_ns"},
+				{personNameTimeIndex, "name,at_ns"},
+				{personTimeIDIndex, "at_ns,id"},
+			} {
+				var columns string
+				assert.NilError(t, db.QueryRow(`SELECT group_concat(name) FROM (SELECT name FROM pragma_index_info(?) ORDER BY seqno)`, tc.name).Scan(&columns))
+				assert.Equal(t, columns, tc.columns)
+			}
 			assert.Check(t, indexes[applicationPersonIndex])
 			assert.Check(t, !indexes[personStaleIndex])
 			var obsoleteCount int
@@ -193,4 +206,32 @@ func TestGeneratedIndexReconciliationRollback(t *testing.T) {
 	var schemaAfter string
 	assert.NilError(t, db.QueryRow(readPersonSchemaSQL, PersonTableName).Scan(&schemaAfter))
 	assert.Equal(t, schemaAfter, schemaBefore)
+}
+
+func TestRecentObjectsUseTimestampIndex(t *testing.T) {
+	db := newProjectionDB(t)
+	crud := NewCRUD(rt.WrapDB(db))
+	assert.NilError(t, crud.Init())
+	const query = `SELECT at_ns FROM "generatedtest_example_person" WHERE at_ns > ? ORDER BY at_ns DESC LIMIT ?`
+	for _, atNs := range []int64{10, 30, 20} {
+		row, err := crud.Person.Insert(&Person{Name: testPersonNameAda})
+		assert.NilError(t, err)
+		_, err = db.Exec(`UPDATE "generatedtest_example_person" SET at_ns = ? WHERE id = ?`, atNs, row.ID)
+		assert.NilError(t, err)
+	}
+	rows, err := db.Query(query, 10, 2)
+	assert.NilError(t, err)
+	defer func() { assert.NilError(t, rows.Close()) }()
+	var timestamps []int64
+	for rows.Next() {
+		var atNs int64
+		assert.NilError(t, rows.Scan(&atNs))
+		timestamps = append(timestamps, atNs)
+	}
+	assert.NilError(t, rows.Err())
+	assert.DeepEqual(t, timestamps, []int64{30, 20})
+	var id, parent, unused int
+	var detail string
+	assert.NilError(t, db.QueryRow("EXPLAIN QUERY PLAN "+query, 10, 2).Scan(&id, &parent, &unused, &detail))
+	assert.Check(t, strings.Contains(detail, personTimeIndex), detail)
 }

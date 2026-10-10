@@ -11,8 +11,10 @@ import (
 )
 
 const (
+	scalarValueField      = `string value = 1;`
 	nestedMessageField    = "Nested nested = 1;"
 	nestedValueProjection = `option (com.github.fingon.proprdb.external_paths) = "nested.value";`
+	unprojectedIndexError = "must be marked"
 	reservedColumnError   = "reserved column"
 )
 
@@ -27,13 +29,24 @@ func TestNestedProjectionValidation(t *testing.T) {
 	assert.Assert(t, ok)
 	repoRoot := filepath.Dir(filepath.Dir(currentFile))
 	cases := []struct{ name, declaration, fields, errorText string }{
-		{"top-level scalar", `option (com.github.fingon.proprdb.external_paths) = "value";`, `string value = 1;`, ""},
+		{"id without projections", `option (com.github.fingon.proprdb.indexes) = {fields: "id"};`, "", ""},
+		{"timestamp and id", `option (com.github.fingon.proprdb.indexes) = {fields: "at_ns" fields: "id"};`, "", ""},
+		{"repeated id", `option (com.github.fingon.proprdb.indexes) = {fields: "id" fields: "id"};`, "", "duplicate field"},
+		{"data remains unsupported", `option (com.github.fingon.proprdb.indexes) = {fields: "data"};`, "", unknownPathFieldError},
+		{"timestamp without projections", `option (com.github.fingon.proprdb.indexes) = {fields: "at_ns"};`, "", ""},
+		{"timestamp composite", nestedValueProjection + `option (com.github.fingon.proprdb.indexes) = {fields: "nested.value" fields: "at_ns"};`, nestedMessageField, ""},
+		{"timestamp first", nestedValueProjection + `option (com.github.fingon.proprdb.indexes) = {fields: "at_ns" fields: "nested.value"};`, nestedMessageField, ""},
+		{"repeated timestamp", `option (com.github.fingon.proprdb.indexes) = {fields: "at_ns" fields: "at_ns"};`, "", "duplicate field"},
+		{"duplicate timestamp index", `option (com.github.fingon.proprdb.indexes) = {fields: "at_ns"}; option (com.github.fingon.proprdb.indexes) = {fields: "at_ns"};`, "", "duplicate index declaration"},
+		{"timestamp case", `option (com.github.fingon.proprdb.indexes) = {fields: "AT_NS"};`, "", unknownPathFieldError},
+		{"timestamp with unprojected field", `option (com.github.fingon.proprdb.indexes) = {fields: "at_ns" fields: "value"};`, scalarValueField, unprojectedIndexError},
+		{"top-level scalar", `option (com.github.fingon.proprdb.external_paths) = "value";`, scalarValueField, ""},
 		{"nested index", nestedValueProjection + `option (com.github.fingon.proprdb.indexes) = {fields: "nested.value"};`, nestedMessageField, ""},
 
 		{"unknown", `option (com.github.fingon.proprdb.external_paths) = "nested.missing";`, nestedMessageField, unknownPathFieldError},
 		{"empty segment", `option (com.github.fingon.proprdb.external_paths) = "nested..value";`, nestedMessageField, unknownPathFieldError},
 		{"message leaf", `option (com.github.fingon.proprdb.external_paths) = "nested";`, nestedMessageField, "unsupported external field kind message"},
-		{"scalar intermediate", `option (com.github.fingon.proprdb.external_paths) = "value.child";`, `string value = 1;`, "must be a message"},
+		{"scalar intermediate", `option (com.github.fingon.proprdb.external_paths) = "value.child";`, scalarValueField, "must be a message"},
 		{"repeated intermediate", nestedValueProjection, `repeated Nested nested = 1;`, repeatedPathError},
 		{"map intermediate", nestedValueProjection, `map<string, Nested> nested = 1;`, repeatedPathError},
 		{"repeated leaf", `option (com.github.fingon.proprdb.external_paths) = "nested.items";`, nestedMessageField, repeatedPathError},
@@ -42,7 +55,7 @@ func TestNestedProjectionValidation(t *testing.T) {
 		{"flattening collision", nestedValueProjection, `Nested nested = 1; string nested_value = 2 [(com.github.fingon.proprdb.external) = true];`, duplicateProjectionError},
 		{reservedColumnError, `option (com.github.fingon.proprdb.external_paths) = "id";`, `string id = 1;`, reservedColumnError},
 		{"unprojected index", `option (com.github.fingon.proprdb.indexes) = {fields: "nested.value"};`, nestedMessageField, unknownPathFieldError},
-		{"flattened alias is not a path", nestedValueProjection + `option (com.github.fingon.proprdb.indexes) = {fields: "nested_value"};`, nestedMessageField + `string nested_value = 2;`, "must be marked"},
+		{"flattened alias is not a path", nestedValueProjection + `option (com.github.fingon.proprdb.indexes) = {fields: "nested_value"};`, nestedMessageField + `string nested_value = 2;`, unprojectedIndexError},
 		{"case collision", nestedValueProjection, nestedMessageField + `string NESTED_VALUE = 2 [(com.github.fingon.proprdb.external) = true];`, duplicateProjectionError},
 	}
 	for _, target := range []string{"proprdb", "proprdb-swift", "proprdb-rust"} {

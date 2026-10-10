@@ -17,6 +17,15 @@ message Person {
     fields: "name"
     fields: "age"
   };
+  option (com.github.fingon.proprdb.indexes) = {fields: "at_ns"};
+  option (com.github.fingon.proprdb.indexes) = {
+    fields: "name"
+    fields: "at_ns"
+  };
+  option (com.github.fingon.proprdb.indexes) = {
+    fields: "at_ns"
+    fields: "id"
+  };
   string name = 1 [(com.github.fingon.proprdb.external) = true];
   int64 age = 2 [(com.github.fingon.proprdb.external) = true];
 }

@@ -46,7 +46,7 @@ func TestProtocRustPluginGolden(t *testing.T) {
 func TestProtocRustPluginRejectsInvalidSchemas(t *testing.T) {
 	repoRoot, tempDir, pluginPath := rustPlugin(t)
 	for _, tc := range []struct{ name, body, want string }{
-		{"index", `option (com.github.fingon.proprdb.indexes) = {fields: "name"}; string name = 1;`, "must be marked"},
+		{"index", `option (com.github.fingon.proprdb.indexes) = {fields: "name"}; string name = 1;`, unprojectedIndexError},
 		{"uint64", `uint64 count = 1 [(com.github.fingon.proprdb.external) = true];`, "cannot be projected"},
 		{"repeated", `repeated string name = 1 [(com.github.fingon.proprdb.external) = true];`, "must be scalar"},
 		{"reserved", `string id = 1 [(com.github.fingon.proprdb.external) = true];`, reservedColumnError},

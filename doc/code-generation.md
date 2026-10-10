@@ -97,7 +97,14 @@ an existing SQL column fails initialization, even if its scalar kind matches.
 - `proprdb.indexes` (`repeated proprdb.Index`, message-level):
   - Declares non-unique SQLite indexes for projected fields
     (`(proprdb.external)=true` or `external_paths`).
-  - Supports both single-field and multi-field indexes.
+  - Supports both single-field and multi-field indexes, including the built-in
+    `at_ns` and `id` columns without an `external` declaration.
+    `id` already has a unique primary-key index; a standalone declared index
+    on `id` is redundant. `(at_ns, id)` provides stable timestamp ordering.
+  - Declare `{ fields: "at_ns" }` for recent-object queries such as
+    `WHERE at_ns > ? ORDER BY at_ns DESC LIMIT ?`, or combine it with a
+    projected field using `{ fields: "name" fields: "at_ns" }`.
+    These queries return current live objects, not a history of changes.
 
 Example:
 

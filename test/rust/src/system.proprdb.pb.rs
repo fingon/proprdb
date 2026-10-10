@@ -28,6 +28,9 @@ const COLUMNS: &[::proprdb_runtime::Column] = &[
 const INDEXES: &[&str] = &[
 "CREATE INDEX IF NOT EXISTS \"idx_generatedtest_example_person__name\" ON \"generatedtest_example_person\" (\"name\")",
 "CREATE INDEX IF NOT EXISTS \"idx_generatedtest_example_person__name_age\" ON \"generatedtest_example_person\" (\"name\", \"age\")",
+"CREATE INDEX IF NOT EXISTS \"idx_generatedtest_example_person__at_ns\" ON \"generatedtest_example_person\" (\"at_ns\")",
+"CREATE INDEX IF NOT EXISTS \"idx_generatedtest_example_person__name_at_ns\" ON \"generatedtest_example_person\" (\"name\", \"at_ns\")",
+"CREATE INDEX IF NOT EXISTS \"idx_generatedtest_example_person__at_ns_id\" ON \"generatedtest_example_person\" (\"at_ns\", \"id\")",
 ];
 fn validate(data: &Self::Data) -> ::proprdb_runtime::Result<()> { data.valid() }
 fn projected_values(data: &Self::Data) -> Vec<::proprdb_runtime::Value> { vec![

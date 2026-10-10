@@ -25,6 +25,9 @@ const PersonUpsertSQL = "INSERT INTO \"generatedtest_example_person\" (\"id\", \
 const PersonGeneratedIndexPrefix = "idx_generatedtest_example_person__"
 const PersonCreateIndexSQL1 = "CREATE INDEX IF NOT EXISTS \"idx_generatedtest_example_person__name\" ON \"generatedtest_example_person\" (\"name\")"
 const PersonCreateIndexSQL2 = "CREATE INDEX IF NOT EXISTS \"idx_generatedtest_example_person__name_age\" ON \"generatedtest_example_person\" (\"name\", \"age\")"
+const PersonCreateIndexSQL3 = "CREATE INDEX IF NOT EXISTS \"idx_generatedtest_example_person__at_ns\" ON \"generatedtest_example_person\" (\"at_ns\")"
+const PersonCreateIndexSQL4 = "CREATE INDEX IF NOT EXISTS \"idx_generatedtest_example_person__name_at_ns\" ON \"generatedtest_example_person\" (\"name\", \"at_ns\")"
+const PersonCreateIndexSQL5 = "CREATE INDEX IF NOT EXISTS \"idx_generatedtest_example_person__at_ns_id\" ON \"generatedtest_example_person\" (\"at_ns\", \"id\")"
 
 type PersonRow = rt.Row[*Person]
 
@@ -49,6 +52,9 @@ var PersonGeneratedBinding = rt.GeneratedTableBinding{
 	GeneratedIndexes: []rt.GeneratedIndexDescriptor{
 		{Name: "idx_generatedtest_example_person__name", CreateSQL: PersonCreateIndexSQL1},
 		{Name: "idx_generatedtest_example_person__name_age", CreateSQL: PersonCreateIndexSQL2},
+		{Name: "idx_generatedtest_example_person__at_ns", CreateSQL: PersonCreateIndexSQL3},
+		{Name: "idx_generatedtest_example_person__name_at_ns", CreateSQL: PersonCreateIndexSQL4},
+		{Name: "idx_generatedtest_example_person__at_ns_id", CreateSQL: PersonCreateIndexSQL5},
 	},
 	ValidateMessage: func(message proto.Message) error {
 		data, ok := message.(*Person)

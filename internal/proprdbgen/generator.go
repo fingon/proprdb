@@ -427,12 +427,16 @@ func (c modelCollector) messageOptionIndexes(message *protogen.Message, fieldsBy
 			if columnSeen[fieldName] {
 				return nil, fmt.Errorf("index %d has duplicate field %q", indexPosition+1, fieldName)
 			}
-			if _, ok := fieldsByName[fieldName]; !ok {
-				return nil, fmt.Errorf("index %d references unknown field %q", indexPosition+1, fieldName)
-			}
-			columnName, projected := projectedColumnsByPath[fieldName]
-			if !projected {
-				return nil, fmt.Errorf("index %d field %q must be marked (com.github.fingon.proprdb.external)=true or declared in external_paths", indexPosition+1, fieldName)
+			columnName := fieldName
+			if fieldName != atNSColumn && fieldName != idColumn {
+				if _, ok := fieldsByName[fieldName]; !ok {
+					return nil, fmt.Errorf("index %d references unknown field %q", indexPosition+1, fieldName)
+				}
+				var projected bool
+				columnName, projected = projectedColumnsByPath[fieldName]
+				if !projected {
+					return nil, fmt.Errorf("index %d field %q must be marked (com.github.fingon.proprdb.external)=true or declared in external_paths", indexPosition+1, fieldName)
+				}
 			}
 			columnSeen[fieldName] = true
 			columnNames = append(columnNames, columnName)

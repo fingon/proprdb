@@ -9,6 +9,10 @@ private let personIndexPrefix = "idx_" + PersonTableName + "__"
 private let choiceIndexPrefix = "idx_" + ChoiceTableName + "__"
 private let personNameIndex = personIndexPrefix + "name"
 private let personNameAgeIndex = personIndexPrefix + "name_age"
+private let personTimeIndex = personIndexPrefix + "at_ns"
+private let personNameTimeIndex = personIndexPrefix + "name_at_ns"
+private let personTimeIDIndex = personIndexPrefix + "at_ns_id"
+private let personTimeSQL = "CREATE INDEX IF NOT EXISTS \"idx_generatedtest_example_person__at_ns\" ON \"generatedtest_example_person\" (\"at_ns\")"
 private let stalePersonIndex = personIndexPrefix + "stale"
 private let applicationPersonIndex = "application_person_age"
 private let obsoleteColumn = "obsolete"
@@ -115,6 +119,7 @@ final class IndexReconciliationTests: XCTestCase {
         let cases: [(name: String, setupSQL: [String], fullInit: Bool, expectedDDL: [String])] = [
             ("unchanged table", [], false, []),
             ("unchanged CRUD", [], true, []),
+            ("missing timestamp index", ["DROP INDEX \(quoteSQLiteIdentifier(personTimeIndex))"], false, [personTimeSQL]),
             ("missing index", ["DROP INDEX \(quoteSQLiteIdentifier(personNameIndex))"], false, [PersonCreateIndexSQL1]),
             ("stale index and obsolete column", [obsoleteColumnSQL, staleIndexSQL], false, ["DROP INDEX \(quoteSQLiteIdentifier(stalePersonIndex))"]),
             ("stale index on current column", ["CREATE INDEX \(quoteSQLiteIdentifier(stalePersonIndex)) ON \(quoteSQLiteIdentifier(PersonTableName)) (name)"], false, ["DROP INDEX \(quoteSQLiteIdentifier(stalePersonIndex))"]),
@@ -139,6 +144,9 @@ final class IndexReconciliationTests: XCTestCase {
             let indexes = try tableIndexNamesByName(db: db, tableName: PersonTableName)
             XCTAssertTrue(indexes.contains(personNameIndex), testCase.name)
             XCTAssertTrue(indexes.contains(personNameAgeIndex), testCase.name)
+            for (index, columns) in [(personTimeIndex, "at_ns"), (personNameTimeIndex, "name,at_ns"), (personTimeIDIndex, "at_ns,id")] {
+                XCTAssertEqual(try scalarString(db, sql: "SELECT group_concat(name) FROM (SELECT name FROM pragma_index_info(?) ORDER BY seqno)", arguments: [index]), columns, testCase.name)
+            }
             XCTAssertTrue(indexes.contains(applicationPersonIndex), testCase.name)
             XCTAssertFalse(indexes.contains(stalePersonIndex), testCase.name)
             XCTAssertEqual(try scalarInt(db, sql: columnCountSQL, arguments: [PersonTableName, obsoleteColumn]), 0, testCase.name)

@@ -14,6 +14,9 @@ private let PersonUpsertSQL = "INSERT INTO \"generatedtest_example_person\" (\"i
 private let PersonGeneratedIndexPrefix = "idx_generatedtest_example_person__"
 private let PersonCreateIndexSQL1 = "CREATE INDEX IF NOT EXISTS \"idx_generatedtest_example_person__name\" ON \"generatedtest_example_person\" (\"name\")"
 private let PersonCreateIndexSQL2 = "CREATE INDEX IF NOT EXISTS \"idx_generatedtest_example_person__name_age\" ON \"generatedtest_example_person\" (\"name\", \"age\")"
+private let PersonCreateIndexSQL3 = "CREATE INDEX IF NOT EXISTS \"idx_generatedtest_example_person__at_ns\" ON \"generatedtest_example_person\" (\"at_ns\")"
+private let PersonCreateIndexSQL4 = "CREATE INDEX IF NOT EXISTS \"idx_generatedtest_example_person__name_at_ns\" ON \"generatedtest_example_person\" (\"name\", \"at_ns\")"
+private let PersonCreateIndexSQL5 = "CREATE INDEX IF NOT EXISTS \"idx_generatedtest_example_person__at_ns_id\" ON \"generatedtest_example_person\" (\"at_ns\", \"id\")"
 
 private let PersonGeneratedBinding = GeneratedTableBinding(
 	descriptor: GeneratedTableDescriptor(tableName: PersonTableName, typeName: PersonTypeName, isCore: false, syncEnabled: true, changeListenersEnabled: true, queryStatisticsEnabled: true),
@@ -29,6 +32,9 @@ private let PersonGeneratedBinding = GeneratedTableBinding(
 	generatedIndexes: [
 		GeneratedIndexDescriptor(name: "idx_generatedtest_example_person__name", createSQL: PersonCreateIndexSQL1),
 		GeneratedIndexDescriptor(name: "idx_generatedtest_example_person__name_age", createSQL: PersonCreateIndexSQL2),
+		GeneratedIndexDescriptor(name: "idx_generatedtest_example_person__at_ns", createSQL: PersonCreateIndexSQL3),
+		GeneratedIndexDescriptor(name: "idx_generatedtest_example_person__name_at_ns", createSQL: PersonCreateIndexSQL4),
+		GeneratedIndexDescriptor(name: "idx_generatedtest_example_person__at_ns_id", createSQL: PersonCreateIndexSQL5),
 	],
 	generatedIndexPrefix: PersonGeneratedIndexPrefix,
 	decodeAnyJSON: { try decodeAnyJSON($0, as: Generatedtest_Example_Person.self) },

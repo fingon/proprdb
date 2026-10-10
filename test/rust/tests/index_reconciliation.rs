@@ -11,6 +11,9 @@ const PROJECTED_AGE: i64 = 37;
 const TEST_ID: &str = "01951d6e-a000-7000-8000-000000000001";
 const PERSON_NAME_INDEX: &str = "idx_generatedtest_example_person__name";
 const PERSON_NAME_AGE_INDEX: &str = "idx_generatedtest_example_person__name_age";
+const PERSON_TIME_INDEX: &str = "idx_generatedtest_example_person__at_ns";
+const PERSON_NAME_TIME_INDEX: &str = "idx_generatedtest_example_person__name_at_ns";
+const PERSON_TIME_ID_INDEX: &str = "idx_generatedtest_example_person__at_ns_id";
 const STALE_PERSON_INDEX: &str = "idx_generatedtest_example_person__stale";
 const APPLICATION_PERSON_INDEX: &str = "application_person_age";
 const ADD_OBSOLETE_SQL: &str = "ALTER TABLE generatedtest_example_person ADD COLUMN obsolete TEXT";
@@ -65,6 +68,12 @@ fn generated_indexes_are_reconciled_selectively() -> Result<()> {
     let cases: &[(&str, &[&str], bool, &[&str])] = &[
         ("unchanged table", &[], false, &[]),
         ("unchanged CRUD", &[], true, &[]),
+        (
+            "missing timestamp index",
+            &["DROP INDEX idx_generatedtest_example_person__at_ns"],
+            false,
+            &[PersonModel::INDEXES[2]],
+        ),
         (
             "missing index",
             &["DROP INDEX idx_generatedtest_example_person__name"],
@@ -125,6 +134,14 @@ fn generated_indexes_are_reconciled_selectively() -> Result<()> {
             APPLICATION_PERSON_INDEX,
         ] {
             assert!(indexes.contains(index), "{name}: {index}");
+        }
+        for (index, expected) in [
+            (PERSON_TIME_INDEX, "at_ns"),
+            (PERSON_NAME_TIME_INDEX, "name,at_ns"),
+            (PERSON_TIME_ID_INDEX, "at_ns,id"),
+        ] {
+            let columns: String = connection.query_row("SELECT group_concat(name) FROM (SELECT name FROM pragma_index_info(?) ORDER BY seqno)", [index], |row| row.get(0))?;
+            assert_eq!(columns, expected, "{name}");
         }
         assert!(!indexes.contains(STALE_PERSON_INDEX), "{name}");
         let obsolete_count: i64 =
