@@ -8,6 +8,10 @@ import "proto/proprdb/options.proto";
 option go_package = "generatedtest/gen;genexample";
 
 message Person {
+  option (com.github.fingon.proprdb.dirty_windows) = {
+    name: "age"
+    start_field: "age"
+  };
   option (com.github.fingon.proprdb.change_listeners) = true;
   option (com.github.fingon.proprdb.query_statistics) = true;
   option (com.github.fingon.proprdb.validate_write) = true;
@@ -49,6 +53,11 @@ message Hidden {
 }
 
 message Photo {
+  option (com.github.fingon.proprdb.dirty_windows) = {
+    name: "capture"
+    start_field: "exif_create.utc_time.seconds"
+    end_field: "exif_modify.utc_time.seconds"
+  };
   option (com.github.fingon.proprdb.external_paths) = "location.lon";
   option (com.github.fingon.proprdb.external_paths) = "location.lat";
   option (com.github.fingon.proprdb.external_paths) = "exif_create.utc_time.seconds";

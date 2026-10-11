@@ -266,6 +266,13 @@ func (e rustEmitter) emitModel(model rustModel) {
 	g.P("const SYNC_ENABLED: bool = ", !m.OmitSync, ";")
 	g.P("const CHANGE_LISTENERS: bool = ", m.ChangeListeners, ";")
 	g.P("const QUERY_STATISTICS: bool = ", m.QueryStatistics, ";")
+	if len(m.DirtyWindows) > 0 {
+		g.P("const DIRTY_WINDOWS: &[", rustRuntime, "::DirtyWindowDescriptor] = &[")
+		for _, window := range m.DirtyWindows {
+			g.P(rustRuntime, "::DirtyWindowDescriptor { name: ", strconv.Quote(window.Name), ", start_column: ", strconv.Quote(window.StartColumn), ", end_column: ", strconv.Quote(window.EndColumn), " },")
+		}
+		g.P("];")
+	}
 	g.P("const COLUMNS: &[", rustRuntime, "::Column] = &[")
 	for _, field := range m.ProjectedFields {
 		g.P(rustRuntime, "::Column { name: ", strconv.Quote(field.ColumnName), ", definition: ", strconv.Quote(field.createColumnSQL()), ", legacy_oneof_presence_repair: ", field.LegacyOneofPresenceRepair, " },")

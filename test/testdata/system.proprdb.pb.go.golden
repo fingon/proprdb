@@ -45,6 +45,9 @@ var PersonGeneratedBinding = rt.GeneratedTableBinding{
 	CreateTableSQL:    PersonCreateTableSQL,
 	ProjectionSchema:  PersonProjectionSchema,
 	GeneratedIndexKey: PersonGeneratedIndexPrefix,
+	DirtyWindows: []rt.DirtyWindowDescriptor{
+		{Name: "age", StartColumn: "age", EndColumn: "age"},
+	},
 	ProjectedColumns: []rt.ProjectedColumnDescriptor{
 		{Name: "name", ProtoKind: "string", SQLiteType: "TEXT", DefaultSQL: "''", Nullable: false, LegacyOneofPresenceRepair: false},
 		{Name: "age", ProtoKind: "int64", SQLiteType: "INTEGER", DefaultSQL: "0", Nullable: false, LegacyOneofPresenceRepair: false},
@@ -362,6 +365,9 @@ var PhotoGeneratedBinding = rt.GeneratedTableBinding{
 	CreateTableSQL:    PhotoCreateTableSQL,
 	ProjectionSchema:  PhotoProjectionSchema,
 	GeneratedIndexKey: PhotoGeneratedIndexPrefix,
+	DirtyWindows: []rt.DirtyWindowDescriptor{
+		{Name: "capture", StartColumn: "exif_create_utc_time_seconds", EndColumn: "exif_modify_utc_time_seconds"},
+	},
 	ProjectedColumns: []rt.ProjectedColumnDescriptor{
 		{Name: "exif_create_utc_time_seconds", ProtoKind: "int64", SQLiteType: "INTEGER", DefaultSQL: "0", Nullable: true, LegacyOneofPresenceRepair: false},
 		{Name: "exif_modify_utc_time_seconds", ProtoKind: "int64", SQLiteType: "INTEGER", DefaultSQL: "0", Nullable: true, LegacyOneofPresenceRepair: false},

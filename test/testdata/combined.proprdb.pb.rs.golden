@@ -111,6 +111,9 @@ const INDEX_PREFIX: &str = "idx_generatedtest_example_person__";
 const SYNC_ENABLED: bool = true;
 const CHANGE_LISTENERS: bool = true;
 const QUERY_STATISTICS: bool = true;
+const DIRTY_WINDOWS: &[::proprdb_runtime::DirtyWindowDescriptor] = &[
+::proprdb_runtime::DirtyWindowDescriptor { name: "age", start_column: "age", end_column: "age" },
+];
 const COLUMNS: &[::proprdb_runtime::Column] = &[
 ::proprdb_runtime::Column { name: "name", definition: "\"name\" TEXT NOT NULL DEFAULT ''", legacy_oneof_presence_repair: false },
 ::proprdb_runtime::Column { name: "age", definition: "\"age\" INTEGER NOT NULL DEFAULT 0", legacy_oneof_presence_repair: false },
@@ -195,6 +198,9 @@ const INDEX_PREFIX: &str = "idx_generatedtest_example_photo__";
 const SYNC_ENABLED: bool = true;
 const CHANGE_LISTENERS: bool = false;
 const QUERY_STATISTICS: bool = false;
+const DIRTY_WINDOWS: &[::proprdb_runtime::DirtyWindowDescriptor] = &[
+::proprdb_runtime::DirtyWindowDescriptor { name: "capture", start_column: "exif_create_utc_time_seconds", end_column: "exif_modify_utc_time_seconds" },
+];
 const COLUMNS: &[::proprdb_runtime::Column] = &[
 ::proprdb_runtime::Column { name: "exif_create_utc_time_seconds", definition: "\"exif_create_utc_time_seconds\" INTEGER", legacy_oneof_presence_repair: false },
 ::proprdb_runtime::Column { name: "exif_modify_utc_time_seconds", definition: "\"exif_modify_utc_time_seconds\" INTEGER", legacy_oneof_presence_repair: false },

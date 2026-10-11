@@ -119,6 +119,13 @@ func (e swiftEmitter) emitModel(file *protogen.File, model messageModel) {
 	g.P("\tupsertSQL: ", upsertConst, ",")
 	g.P("\tcreateTableSQL: ", createTableConst, ",")
 	g.P("\tprojectionSchema: ", schemaConst, ",")
+	if len(model.DirtyWindows) > 0 {
+		g.P("\tdirtyWindows: [")
+		for _, window := range model.DirtyWindows {
+			g.P("DirtyWindowDescriptor(name: ", strconv.Quote(window.Name), ", startColumn: ", strconv.Quote(window.StartColumn), ", endColumn: ", strconv.Quote(window.EndColumn), "),")
+		}
+		g.P("],")
+	}
 	g.P("\tprojectedColumns: [")
 	for _, projectedField := range model.ProjectedFields {
 		protoKind := strings.TrimPrefix(strings.TrimSuffix(projectedField.SchemaSignature, projectionOptionalFlag), projectedField.ColumnName+":")

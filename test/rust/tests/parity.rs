@@ -410,13 +410,13 @@ fn introspection_counts_payload_and_core_tables() -> Result<()> {
     crud.initialize()?;
     let row = crud.person.insert(&person())?;
     let tables = crud.introspect_tables()?;
-    assert_eq!(tables.len(), 13);
+    assert_eq!(tables.len(), 16);
     assert_eq!(
         tables
             .iter()
             .filter(|table| table.descriptor.is_core)
             .count(),
-        9
+        12
     );
     let person_table = tables
         .iter()
@@ -505,6 +505,19 @@ fn go_and_rust_share_sqlite_jsonl_and_checkpoints() -> Result<()> {
         let connection = Connection::open(directory.path().join("rust.db"))?;
         let crud = system::Crud::new(&connection);
         crud.initialize()?;
+        proprdb_runtime::register_dirty_window(
+            &connection,
+            system::PersonModel::TABLE_NAME,
+            "age",
+            "refresh",
+        )?;
+        let window = proprdb_runtime::read_dirty_window(
+            &connection,
+            system::PersonModel::TABLE_NAME,
+            "age",
+            "refresh",
+        )?;
+        proprdb_runtime::acknowledge_dirty_window(&connection, &window.token)?;
         crud.read_jsonl("", Cursor::new(GO_RECORDS))?;
         let file = std::fs::File::create(directory.path().join("rust.jsonl"))?;
         let checkpoint = crud.prepare_jsonl("go", file)?;
@@ -528,6 +541,17 @@ fn go_and_rust_share_sqlite_jsonl_and_checkpoints() -> Result<()> {
     let crud = system::Crud::new(&connection);
     crud.initialize()?;
     let data = crud.person.select_by_id(FIRST_ID)?.unwrap().data;
+    let generations =
+        proprdb_runtime::table_generations(&connection, &[system::PersonModel::TABLE_NAME])?;
+    assert_eq!(generations[system::PersonModel::TABLE_NAME], 2);
+    let window = proprdb_runtime::read_dirty_window(
+        &connection,
+        system::PersonModel::TABLE_NAME,
+        "age",
+        "refresh",
+    )?;
+    assert_eq!((window.lower, window.upper), (Some(35), Some(41)));
+    proprdb_runtime::acknowledge_dirty_window(&connection, &window.token)?;
     assert_eq!(data.name, "Grace");
     assert_eq!(data.age, 41);
     let checkpoint: JsonlCheckpoint =

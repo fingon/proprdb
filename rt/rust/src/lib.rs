@@ -9,10 +9,15 @@ pub use rusqlite::types::Value;
 
 mod connection;
 mod introspection;
+mod mutation;
 mod sync;
 pub use connection::{ChangeReceiver, Connection, Transaction};
 pub use introspection::{
     QueryStatistic, TableDescriptor, TableIntrospection, clear_query_statistics, query_statistics,
+};
+pub use mutation::{
+    DirtyWindowDescriptor, DirtyWindowState, DirtyWindowToken, acknowledge_dirty_window,
+    read_dirty_window, register_dirty_window, remove_dirty_window_consumer, table_generations,
 };
 pub use prost_reflect::{DescriptorPool, MessageDescriptor};
 use rusqlite::{OptionalExtension, params, params_from_iter};
@@ -26,6 +31,8 @@ pub type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
+    #[error("stale dirty window acknowledgment")]
+    StaleDirtyWindow,
     #[error("I/O: {0}")]
     Io(#[from] std::io::Error),
     #[error("JSON: {0}")]
@@ -81,6 +88,7 @@ pub trait Model {
     const QUERY_STATISTICS: bool;
     const COLUMNS: &[Column];
     const INDEXES: &[&str];
+    const DIRTY_WINDOWS: &[DirtyWindowDescriptor] = &[];
     fn descriptor() -> Result<MessageDescriptor>;
     fn projected_values(data: &Self::Data) -> Vec<Value>;
     fn validate(_data: &Self::Data) -> Result<()> {
@@ -205,6 +213,7 @@ impl<'a, M: Model> Table<'a, M> {
                 sync::ensure_core_tables(self.connection)?;
             }
             self.connection.execute_batch(M::CREATE_TABLE_SQL)?;
+            let tracking_changed = mutation::prepare::<M>(self.connection)?;
             self.remove_stale_indexes()?;
             self.reconcile_columns()?;
             for sql in M::INDEXES {
@@ -218,6 +227,7 @@ impl<'a, M: Model> Table<'a, M> {
                     self.connection.execute_batch(sql)?;
                 }
             }
+            mutation::finish::<M>(self.connection, tracking_changed)?;
             self.drain_unknown_rows()
         })
     }

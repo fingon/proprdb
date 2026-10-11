@@ -2,6 +2,7 @@ package genexample
 
 import (
 	"bytes"
+	"context"
 	"database/sql"
 	"os"
 	"path/filepath"
@@ -32,6 +33,13 @@ func TestRustRuntimeInterop(t *testing.T) {
 	assert.Equal(t, len(rows), 1)
 	assert.Equal(t, rows[0].Data.Name, testPersonNameAda)
 	assert.Equal(t, rows[0].Data.Age, int64(35))
+	q := rt.WrapDB(db)
+	ctx := context.Background()
+	assert.Equal(t, mutationGeneration(t, q, PersonTableName), int64(1))
+	state := readAgeWindow(t, q, mutationConsumer)
+	assert.Equal(t, state.Lower.Int64, int64(35))
+	assert.Equal(t, state.Upper.Int64, int64(35))
+	assert.NilError(t, rt.AcknowledgeDirtyWindow(ctx, q, state.Token))
 
 	checkpointBytes, err := os.ReadFile(filepath.Join(dir, "rust.checkpoint"))
 	assert.NilError(t, err)
@@ -60,6 +68,10 @@ func TestRustRuntimeInterop(t *testing.T) {
 
 	_, err = crud.Person.UpdateByID(rustInteropID, &Person{Name: testPersonNameGrace, Age: 41})
 	assert.NilError(t, err)
+	assert.Equal(t, mutationGeneration(t, q, PersonTableName), int64(2))
+	state = readAgeWindow(t, q, mutationConsumer)
+	assert.Equal(t, state.Lower.Int64, int64(35))
+	assert.Equal(t, state.Upper.Int64, int64(41))
 	var exported bytes.Buffer
 	goCheckpoint, err := crud.PrepareJSONL("rust", &exported)
 	assert.NilError(t, err)

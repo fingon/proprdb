@@ -3,6 +3,7 @@ package proprdbgen
 import (
 	"errors"
 	"fmt"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -51,7 +52,12 @@ type messageModel struct {
 	AllowCustomIDInsert bool
 	ChangeListeners     bool
 	QueryStatistics     bool
+	DirtyWindows        []messageDirtyWindow
 }
+
+type messageDirtyWindow struct{ Name, StartColumn, EndColumn string }
+
+var dirtyWindowNamePattern = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
 
 type modelCollector struct{}
 
@@ -330,6 +336,10 @@ func (c modelCollector) buildModel(message *protogen.Message) (messageModel, err
 	if err != nil {
 		return messageModel{}, fmt.Errorf("message %s indexes option: %w", message.Desc.FullName(), err)
 	}
+	dirtyWindows, err := c.messageDirtyWindows(message, fieldsByName, projectedColumnsByPath)
+	if err != nil {
+		return messageModel{}, fmt.Errorf("message %s dirty_windows option: %w", message.Desc.FullName(), err)
+	}
 	return messageModel{
 		GoName:              message.GoIdent.GoName,
 		SwiftTypeName:       swiftMessageTypeNameForMessage(message),
@@ -346,7 +356,47 @@ func (c modelCollector) buildModel(message *protogen.Message) (messageModel, err
 		AllowCustomIDInsert: allowCustomIDInsert,
 		ChangeListeners:     changeListeners,
 		QueryStatistics:     queryStatistics,
+		DirtyWindows:        dirtyWindows,
 	}, nil
+}
+
+func (c modelCollector) messageDirtyWindows(message *protogen.Message, fields map[string]*protogen.Field, columns map[string]string) (windows []messageDirtyWindow, err error) {
+	options := message.Desc.Options()
+	if !proto.HasExtension(options, proprdbpb.E_DirtyWindows) {
+		return nil, nil
+	}
+	declarations, ok := proto.GetExtension(options, proprdbpb.E_DirtyWindows).([]*proprdbpb.DirtyWindow)
+	if !ok {
+		return nil, errors.New("invalid dirty_windows extension")
+	}
+	names := make(map[string]bool)
+	for _, declaration := range declarations {
+		if declaration == nil || !dirtyWindowNamePattern.MatchString(declaration.Name) {
+			return nil, errors.New("dirty window name must match [a-z][a-z0-9_]*")
+		}
+		if names[declaration.Name] {
+			return nil, fmt.Errorf("duplicate dirty window %s", declaration.Name)
+		}
+		names[declaration.Name] = true
+		end := declaration.EndField
+		if end == "" {
+			end = declaration.StartField
+		}
+		for _, path := range []string{declaration.StartField, end} {
+			field, exists := fields[path]
+			if !exists || columns[path] == "" {
+				return nil, fmt.Errorf("dirty window field %q must already be projected", path)
+			}
+			switch field.Desc.Kind() {
+			case protoreflect.Int32Kind, protoreflect.Int64Kind, protoreflect.Sint32Kind, protoreflect.Sint64Kind, protoreflect.Sfixed32Kind, protoreflect.Sfixed64Kind:
+			default:
+				return nil, fmt.Errorf("dirty window field %q must be a signed integer", path)
+			}
+		}
+		windows = append(windows, messageDirtyWindow{Name: declaration.Name, StartColumn: columns[declaration.StartField], EndColumn: columns[end]})
+	}
+	sort.Slice(windows, func(i, j int) bool { return windows[i].Name < windows[j].Name })
+	return windows, nil
 }
 
 func (c modelCollector) messageExternalPaths(message *protogen.Message) (paths []string, err error) {
@@ -691,6 +741,13 @@ func (e generatorEmitter) emitModel(model messageModel) {
 	g.P("\tCreateTableSQL: ", createTableConst, ",")
 	g.P("\tProjectionSchema: ", schemaConst, ",")
 	g.P("\tGeneratedIndexKey: ", indexPrefixConst, ",")
+	if len(model.DirtyWindows) > 0 {
+		g.P("\tDirtyWindows: []rt.DirtyWindowDescriptor{")
+		for _, window := range model.DirtyWindows {
+			g.P("{Name: ", strconv.Quote(window.Name), ", StartColumn: ", strconv.Quote(window.StartColumn), ", EndColumn: ", strconv.Quote(window.EndColumn), "},")
+		}
+		g.P("},")
+	}
 	g.P("\tProjectedColumns: []rt.ProjectedColumnDescriptor{")
 	for _, projectedField := range model.ProjectedFields {
 		protoKind := strings.TrimPrefix(strings.TrimSuffix(projectedField.SchemaSignature, projectionOptionalFlag), projectedField.ColumnName+":")

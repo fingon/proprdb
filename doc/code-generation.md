@@ -27,6 +27,28 @@ message Person {
 
 ### Message options
 
+- `proprdb.dirty_windows` (`repeated DirtyWindow`, message-level):
+  - Defines named integer windows for persistent refresh invalidation. Each
+    declaration has `name`, `start_field`, and optional `end_field` (defaults to
+    `start_field` for point values).
+  - Bounds must already be projected signed-integer fields, including nested
+    `external_paths`. This option does not add projections or SQL indexes.
+  - Names must match `[a-z][a-z0-9_]*` and be unique within the message.
+  - Any actual row change dirties the enclosing old/new range for each registered
+    consumer. See [mutation tracking](runtime.md#mutation-generations-and-dirty-windows).
+
+```proto
+message Recording {
+  option (proprdb.dirty_windows) = {
+    name: "time"
+    start_field: "start_unix_sec"
+    end_field: "end_unix_sec"
+  };
+  int64 start_unix_sec = 1 [(proprdb.external) = true];
+  int64 end_unix_sec = 2 [(proprdb.external) = true];
+}
+```
+
 - `proprdb.external_paths` (`repeated string`, message-level):
   - Projects explicitly selected scalar paths, such as `location.lon` or
     `exif_create.utc_time.seconds`, without annotating the nested types.

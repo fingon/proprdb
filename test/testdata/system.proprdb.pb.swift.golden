@@ -25,6 +25,9 @@ private let PersonGeneratedBinding = GeneratedTableBinding(
 	upsertSQL: PersonUpsertSQL,
 	createTableSQL: PersonCreateTableSQL,
 	projectionSchema: PersonProjectionSchema,
+	dirtyWindows: [
+DirtyWindowDescriptor(name: "age", startColumn: "age", endColumn: "age"),
+],
 	projectedColumns: [
 		ProjectedColumnDescriptor(name: "name", protoKind: "string", sqliteType: "TEXT", defaultSQL: "''", nullable: false, legacyOneofPresenceRepair: false),
 		ProjectedColumnDescriptor(name: "age", protoKind: "int64", sqliteType: "INTEGER", defaultSQL: "0", nullable: false, legacyOneofPresenceRepair: false),
@@ -489,6 +492,9 @@ private let PhotoGeneratedBinding = GeneratedTableBinding(
 	upsertSQL: PhotoUpsertSQL,
 	createTableSQL: PhotoCreateTableSQL,
 	projectionSchema: PhotoProjectionSchema,
+	dirtyWindows: [
+DirtyWindowDescriptor(name: "capture", startColumn: "exif_create_utc_time_seconds", endColumn: "exif_modify_utc_time_seconds"),
+],
 	projectedColumns: [
 		ProjectedColumnDescriptor(name: "exif_create_utc_time_seconds", protoKind: "int64", sqliteType: "INTEGER", defaultSQL: "0", nullable: true, legacyOneofPresenceRepair: false),
 		ProjectedColumnDescriptor(name: "exif_modify_utc_time_seconds", protoKind: "int64", sqliteType: "INTEGER", defaultSQL: "0", nullable: true, legacyOneofPresenceRepair: false),

@@ -174,6 +174,9 @@ func TestGeneratedCRUDTableDescriptors(t *testing.T) {
 		{TableName: rt.CoreTableExportBatchName, TypeName: "", IsCore: true, SyncEnabled: false},
 		{TableName: rt.CoreTableExportEntryName, TypeName: "", IsCore: true, SyncEnabled: false},
 		{TableName: rt.CoreTableQueryStatName, TypeName: "", IsCore: true, SyncEnabled: false},
+		{TableName: rt.CoreTableGenerationName, TypeName: "", IsCore: true, SyncEnabled: false},
+		{TableName: rt.CoreTableDirtyDefinitionName, TypeName: "", IsCore: true, SyncEnabled: false},
+		{TableName: rt.CoreTableDirtyWindowName, TypeName: "", IsCore: true, SyncEnabled: false},
 	}
 	assert.DeepEqual(t, descriptors, expected)
 

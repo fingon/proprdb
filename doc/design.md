@@ -32,6 +32,12 @@ SQLite stores only the latest state of each object. Change history exists only
 in JSONL exports retained by the application; ProprDB does not keep a local
 append-only history.
 
+Local mutation generations and optional per-consumer dirty windows support
+incremental refresh without retaining change history. SQLite triggers update
+these alongside object writes. Dirty windows retain only enclosing bounds and
+are acknowledged transactionally with derived output. Their storage is shared
+by Go, Swift, and Rust but excluded from synchronization.
+
 ## Object model
 
 Each object update has:

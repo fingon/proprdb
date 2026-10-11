@@ -49,7 +49,7 @@ pub fn clear_query_statistics(connection: &Connection) -> Result<()> {
     Ok(())
 }
 
-pub(crate) const CORE_TABLES: [&str; 9] = [
+pub(crate) const CORE_TABLES: [&str; 12] = [
     "_deleted",
     "_sync",
     "_proprdb_schema",
@@ -59,6 +59,9 @@ pub(crate) const CORE_TABLES: [&str; 9] = [
     "_export_batches",
     "_export_batch_entries",
     "_querystat",
+    crate::mutation::CORE_TABLE_GENERATION,
+    crate::mutation::CORE_TABLE_DIRTY_DEFINITION,
+    crate::mutation::CORE_TABLE_DIRTY_WINDOW,
 ];
 
 pub(crate) fn introspect(

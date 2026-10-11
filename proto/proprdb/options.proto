@@ -14,6 +14,12 @@ message Index {
   repeated string fields = 1;
 }
 
+message DirtyWindow {
+  string name = 1;
+  string start_field = 2;
+  string end_field = 3;
+}
+
 extend google.protobuf.MessageOptions {
   bool omit_table = 50002;
   bool omit_sync = 50003;
@@ -23,4 +29,5 @@ extend google.protobuf.MessageOptions {
   bool change_listeners = 50007;
   bool query_statistics = 50008;
   repeated string external_paths = 50009;
+  repeated DirtyWindow dirty_windows = 50010;
 }

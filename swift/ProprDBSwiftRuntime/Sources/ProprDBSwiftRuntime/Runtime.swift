@@ -203,6 +203,7 @@ public struct GeneratedTableBinding: @unchecked Sendable {
     public let upsertSQL: String
     public let createTableSQL: String
     public let projectionSchema: String
+    public let dirtyWindows: [DirtyWindowDescriptor]
     public let projectedColumns: [ProjectedColumnDescriptor]
     public let generatedIndexes: [GeneratedIndexDescriptor]
     public let generatedIndexPrefix: String
@@ -219,6 +220,7 @@ public struct GeneratedTableBinding: @unchecked Sendable {
         upsertSQL: String,
         createTableSQL: String,
         projectionSchema: String,
+        dirtyWindows: [DirtyWindowDescriptor] = [],
         projectedColumns: [ProjectedColumnDescriptor],
         generatedIndexes: [GeneratedIndexDescriptor],
         generatedIndexPrefix: String,
@@ -234,6 +236,7 @@ public struct GeneratedTableBinding: @unchecked Sendable {
         self.upsertSQL = upsertSQL
         self.createTableSQL = createTableSQL
         self.projectionSchema = projectionSchema
+        self.dirtyWindows = dirtyWindows
         self.projectedColumns = projectedColumns
         self.generatedIndexes = generatedIndexes
         self.generatedIndexPrefix = generatedIndexPrefix
@@ -284,6 +287,9 @@ public func coreTableDescriptors() -> [GeneratedTableDescriptor] {
         GeneratedTableDescriptor(tableName: coreTableExportBatchName, typeName: "", isCore: true, syncEnabled: false),
         GeneratedTableDescriptor(tableName: coreTableExportEntryName, typeName: "", isCore: true, syncEnabled: false),
         GeneratedTableDescriptor(tableName: coreTableQueryStatName, typeName: "", isCore: true, syncEnabled: false),
+        GeneratedTableDescriptor(tableName: coreTableGenerationName, typeName: "", isCore: true, syncEnabled: false),
+        GeneratedTableDescriptor(tableName: coreTableDirtyDefinitionName, typeName: "", isCore: true, syncEnabled: false),
+        GeneratedTableDescriptor(tableName: coreTableDirtyWindowName, typeName: "", isCore: true, syncEnabled: false),
     ]
 }
 
@@ -713,6 +719,14 @@ public struct SQLiteRow {
         return value
     }
 
+    public func optionalInt64(at column: Int32) throws -> Int64? {
+        switch try value(at: column) {
+        case .null: return nil
+        case let .integer(value): return value
+        default: throw ProprDBError("expected nullable integer at column \(column)")
+        }
+    }
+
     public func data(at column: Int32) throws -> Data {
         guard case let .blob(value) = try value(at: column) else {
             throw ProprDBError("expected blob at column \(column)")
@@ -905,6 +919,7 @@ public func ensureCoreTables(_ q: any DBTX) throws {
         try transaction.execute("CREATE TABLE IF NOT EXISTS \(_exportBatchesTableName) (batch_id TEXT PRIMARY KEY, database_id TEXT NOT NULL, remote TEXT NOT NULL, complete INTEGER NOT NULL DEFAULT 0)")
         try transaction.execute("CREATE TABLE IF NOT EXISTS \(_exportBatchEntriesTableName) (batch_id TEXT NOT NULL, sequence INTEGER NOT NULL, table_name TEXT NOT NULL, object_id TEXT NOT NULL, at_ns INTEGER NOT NULL, record_json BLOB, PRIMARY KEY (batch_id, sequence), FOREIGN KEY (batch_id) REFERENCES \(_exportBatchesTableName)(batch_id) ON DELETE CASCADE)")
         try transaction.execute("CREATE TABLE IF NOT EXISTS \(_queryStatTableName) (table_name TEXT NOT NULL, query TEXT NOT NULL, calls INTEGER NOT NULL, duration_sum_ns INTEGER NOT NULL, PRIMARY KEY (table_name, query))")
+        try ensureMutationTables(transaction)
         try ensureLatestUnknownSchema(transaction)
         let databaseID = try transaction.withRows("SELECT value FROM \(_metadataTableName) WHERE key = ?", arguments: ["database_id"]) { rows in
             try rows.next()?.string(at: 0)
@@ -1004,6 +1019,7 @@ public func initializeGeneratedTables(_ q: any DBTX, bindings: [GeneratedTableBi
 public func reconcileGeneratedTable(_ q: any DBTX, binding: GeneratedTableBinding) throws {
     try q.withTransaction { transaction in
         try transaction.execute(binding.createTableSQL)
+        let trackingChanged = try prepareMutationTracking(transaction, binding: binding)
         let columns = try transaction.withRows("PRAGMA table_info(\(quoteSQLiteIdentifier(binding.descriptor.tableName)))") { rows in
             var result: [GeneratedTableColumn] = []
             while let row = try rows.next() {
@@ -1075,6 +1091,7 @@ public func reconcileGeneratedTable(_ q: any DBTX, binding: GeneratedTableBindin
                 arguments: [binding.descriptor.tableName, binding.projectionSchema]
             )
         }
+        try finishMutationTracking(transaction, binding: binding, changed: trackingChanged || changed)
     }
 }
 

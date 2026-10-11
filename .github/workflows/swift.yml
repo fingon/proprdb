@@ -1,0 +1,23 @@
+name: Swift runtime
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  swift:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: swift-actions/setup-swift@v2
+        with:
+          swift-version: "6.2"
+      - run: brew install protobuf
+      - run: make go-fixtures swift-test swift-build SWIFT_ARGS=--disable-sandbox
+      - run: go test ./test -run 'TestProtocSwiftPlugin|TestProtocPluginsValidateDirtyWindows'

@@ -308,6 +308,7 @@ fn conflict(type_name: &str, record: &JsonlRecord) -> Error {
 }
 
 pub(crate) fn ensure_core_tables(connection: &Connection) -> Result<()> {
+    crate::mutation::ensure_tables(connection)?;
     connection.execute_batch(crate::CORE_SQL)?;
     connection.execute_batch(SYNC_SQL)?;
     let sql: Option<String> = connection

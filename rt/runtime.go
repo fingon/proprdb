@@ -437,6 +437,7 @@ type GeneratedTableBinding struct {
 	ProjectedColumns  []ProjectedColumnDescriptor
 	GeneratedIndexes  []GeneratedIndexDescriptor
 	GeneratedIndexKey string
+	DirtyWindows      []DirtyWindowDescriptor
 	ProjectedValues   func(proto.Message) ([]any, error)
 	ValidateMessage   func(proto.Message) error
 }
@@ -466,6 +467,9 @@ func CoreTableDescriptors() []GeneratedTableDescriptor {
 		{TableName: CoreTableExportBatchName, IsCore: true},
 		{TableName: CoreTableExportEntryName, IsCore: true},
 		{TableName: CoreTableQueryStatName, IsCore: true},
+		{TableName: CoreTableGenerationName, IsCore: true},
+		{TableName: CoreTableDirtyDefinitionName, IsCore: true},
+		{TableName: CoreTableDirtyWindowName, IsCore: true},
 	}
 }
 
@@ -503,6 +507,9 @@ func EnsureCoreTablesContext(ctx context.Context, q DBTX) error {
 			}
 		}
 		if err := ensureLatestUnknownSchema(ctx, tx); err != nil {
+			return err
+		}
+		if err := ensureMutationTables(ctx, tx); err != nil {
 			return err
 		}
 		var databaseID string
@@ -685,6 +692,10 @@ func ReconcileGeneratedTableContext(ctx context.Context, q DBTX, binding Generat
 		if _, err := tx.ExecContext(ctx, binding.CreateTableSQL); err != nil {
 			return fmt.Errorf("create table %s: %w", binding.Descriptor.TableName, err)
 		}
+		trackingChanged, err := prepareMutationTracking(ctx, tx, binding)
+		if err != nil {
+			return err
+		}
 		columns, err := generatedTableColumnsContext(ctx, tx, binding.Descriptor.TableName)
 		if err != nil {
 			return err
@@ -773,7 +784,7 @@ func ReconcileGeneratedTableContext(ctx context.Context, q DBTX, binding Generat
 				return fmt.Errorf("write projection schema for %s: %w", binding.Descriptor.TableName, err)
 			}
 		}
-		return nil
+		return finishMutationTracking(ctx, tx, binding, trackingChanged || changed)
 	})
 }
 
