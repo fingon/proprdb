@@ -11,12 +11,27 @@ Generated CRUD wrappers include:
 - `PrepareJSONL`, `AcknowledgeJSONL`, and `DiscardJSONL`
 - `ReadJSONL(remote string, r io.Reader) error`
 
+Go table operations and CRUD sync operations also provide `Context` variants,
+such as `SelectContext(ctx, where, args...)`, `InitContext(ctx)`, and
+`PrepareJSONLContext(ctx, remote, writer)`. Pass a context to cancel queries,
+schema reconciliation, exports, or imports. The existing methods use
+`context.Background()` for convenience. Cancellation does not undo records
+already committed by an import.
+
 Swift exposes the same workflow as `prepareJSONL`, `acknowledgeJSONL`,
 `discardJSONL`, `writeJSONL`, and `readJSONL`. A prepared export is a stable
 database snapshot. Acknowledging its checkpoint advances sync watermarks;
 discarding it leaves them unchanged. `WriteJSONL`/`writeJSONL` are convenience
 operations that prepare and then acknowledge. Acknowledging or discarding an
 already-consumed checkpoint from the same database succeeds.
+
+Swift also provides `prepareJSONL(remote:write:)`, whose throwing callback
+receives one JSONL record as `Data` at a time. It returns a checkpoint to
+acknowledge after delivery succeeds, or discard without advancing watermarks.
+A writer failure discards the staged checkpoint and propagates the error.
+`writeJSONL(remote:write:)` streams and then acknowledges automatically.
+The string convenience API collects this stream. Source rows are staged in
+bounded keyset batches within one transaction, preserving snapshot semantics.
 
 `remote` controls whether `_sync` bookkeeping is used:
 

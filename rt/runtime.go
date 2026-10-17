@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"regexp"
 	"strconv"
 	"strings"
@@ -942,56 +943,63 @@ func reprojectGeneratedTableContext(ctx context.Context, q DBTX, binding Generat
 	if len(binding.ProjectedColumns) == 0 {
 		return nil
 	}
-	rows, err := q.QueryContext(ctx, `SELECT id, data FROM `+quoteSQLiteIdentifier(binding.Descriptor.TableName))
-	if err != nil {
-		return fmt.Errorf("query rows for reprojection from %s: %w", binding.Descriptor.TableName, err)
-	}
-	defer func() {
-		if closeErr := rows.Close(); closeErr != nil && err == nil {
-			err = fmt.Errorf("close reprojection rows from %s: %w", binding.Descriptor.TableName, closeErr)
-		}
-	}()
-	type reprojectRow struct {
-		id   string
-		data []byte
-	}
-	buffer := make([]reprojectRow, 0)
-	for rows.Next() {
-		var row reprojectRow
-		if err := rows.Scan(&row.id, &row.data); err != nil {
-			return fmt.Errorf("scan reprojection row from %s: %w", binding.Descriptor.TableName, err)
-		}
-		buffer = append(buffer, row)
-	}
-	if err := rows.Err(); err != nil {
-		return fmt.Errorf("iterate reprojection rows from %s: %w", binding.Descriptor.TableName, err)
-	}
-	if err := rows.Close(); err != nil {
-		return fmt.Errorf("close reprojection rows from %s: %w", binding.Descriptor.TableName, err)
-	}
+	slog.Debug("reproject generated table", "table", binding.Descriptor.TableName)
 	assignments := make([]string, 0, len(binding.ProjectedColumns))
 	for _, column := range binding.ProjectedColumns {
 		assignments = append(assignments, quoteSQLiteIdentifier(column.Name)+" = ?")
 	}
 	updateSQL := `UPDATE ` + quoteSQLiteIdentifier(binding.Descriptor.TableName) + ` SET ` + strings.Join(assignments, ", ") + ` WHERE id = ?`
-	for _, row := range buffer {
-		message := binding.NewMessage()
-		if message == nil {
-			return fmt.Errorf("binding for %s created nil message", binding.Descriptor.TypeName)
-		}
-		if err := proto.Unmarshal(row.data, message); err != nil {
-			return fmt.Errorf("unmarshal reprojection row %s/%s: %w", binding.Descriptor.TableName, row.id, err)
-		}
-		values, err := binding.ProjectedValues(message)
-		if err != nil {
-			return fmt.Errorf("project row %s/%s: %w", binding.Descriptor.TableName, row.id, err)
-		}
-		values = append(values, row.id)
-		if _, err := q.ExecContext(ctx, updateSQL, values...); err != nil {
-			return fmt.Errorf("reproject row %s/%s: %w", binding.Descriptor.TableName, row.id, err)
-		}
+	type reprojectRow struct {
+		id   string
+		data []byte
 	}
-	return nil
+	const batchSize = 128
+	lastID := ""
+	for {
+		buffer, readErr := func() (buffer []reprojectRow, err error) {
+			query := `SELECT id, data FROM ` + quoteSQLiteIdentifier(binding.Descriptor.TableName) + ` WHERE id > ? ORDER BY id LIMIT ?`
+			rows, err := q.QueryContext(ctx, query, lastID, batchSize)
+			if err != nil {
+				return nil, fmt.Errorf("query reprojection batch: %w", err)
+			}
+			defer func() { err = errors.Join(err, CloseRows(rows, "reprojection")) }()
+			for rows.Next() {
+				var row reprojectRow
+				if err := rows.Scan(&row.id, &row.data); err != nil {
+					return nil, fmt.Errorf("scan reprojection row: %w", err)
+				}
+				buffer = append(buffer, row)
+			}
+			if err := rows.Err(); err != nil {
+				return nil, fmt.Errorf("iterate reprojection batch: %w", err)
+			}
+			return buffer, nil
+		}()
+		if readErr != nil {
+			return readErr
+		}
+		if len(buffer) == 0 {
+			return nil
+		}
+		for _, row := range buffer {
+			message := binding.NewMessage()
+			if message == nil {
+				return fmt.Errorf("binding for %s created nil message", binding.Descriptor.TypeName)
+			}
+			if err := proto.Unmarshal(row.data, message); err != nil {
+				return fmt.Errorf("unmarshal reprojection row %s/%s: %w", binding.Descriptor.TableName, row.id, err)
+			}
+			values, err := binding.ProjectedValues(message)
+			if err != nil {
+				return fmt.Errorf("project row %s/%s: %w", binding.Descriptor.TableName, row.id, err)
+			}
+			values = append(values, row.id)
+			if _, err := q.ExecContext(ctx, updateSQL, values...); err != nil {
+				return fmt.Errorf("reproject row %s/%s: %w", binding.Descriptor.TableName, row.id, err)
+			}
+		}
+		lastID = buffer[len(buffer)-1].id
+	}
 }
 
 func CloseRows(rows *sql.Rows, operation string) error {
@@ -1190,13 +1198,6 @@ WHERE excluded.at_ns > at_ns`
 	return nil
 }
 
-func CompactUnknownLatest(q DBTX) error {
-	if q == nil {
-		return errors.New("nil DBTX")
-	}
-	return nil
-}
-
 func canonicalJSON(data json.RawMessage) ([]byte, error) {
 	var value any
 	decoder := json.NewDecoder(strings.NewReader(string(data)))
@@ -1220,9 +1221,6 @@ func ReplayUnknownByType(q DBTX, typeName string, apply func(JSONLRecord) error)
 	}
 	if strings.TrimSpace(typeName) == "" {
 		return errors.New("empty type name")
-	}
-	if err := CompactUnknownLatest(q); err != nil {
-		return err
 	}
 	ctx := context.Background()
 	selectUnknownSQL := `SELECT id, at_ns, deleted, data_json FROM ` + CoreTableUnknownName + ` WHERE type_name = ? ORDER BY at_ns ASC, id ASC, rowid ASC`

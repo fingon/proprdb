@@ -61,7 +61,6 @@ private let ChoiceUpsertSQL = "INSERT INTO \"generatedtest_example_choice\" (\"i
 
 private let ChoiceGeneratedBinding = GeneratedTableBinding(
 	descriptor: GeneratedTableDescriptor(tableName: ChoiceTableName, typeName: ChoiceTypeName, isCore: false, syncEnabled: true, changeListenersEnabled: false, queryStatisticsEnabled: false),
-	messageType: Generatedtest_Example_Choice.self,
 	insertSQL: ChoiceInsertSQL,
 	upsertSQL: ChoiceUpsertSQL,
 	createTableSQL: ChoiceCreateTableSQL,
@@ -95,7 +94,6 @@ private func indexedChoiceBinding() -> GeneratedTableBinding {
     let binding = ChoiceGeneratedBinding
     return GeneratedTableBinding(
         descriptor: binding.descriptor,
-        messageType: binding.messageType,
         insertSQL: binding.insertSQL,
         upsertSQL: binding.upsertSQL,
         createTableSQL: binding.createTableSQL,

@@ -196,9 +196,8 @@ public func sqliteBindValue(_ value: Double) -> SQLiteBindValue { .double(value)
 public func sqliteBindValue(_ value: Data) -> SQLiteBindValue { .data(value) }
 public func sqliteBindValue<T: Enum>(_ value: T) -> SQLiteBindValue { .int64(Int64(value.rawValue)) }
 
-public struct GeneratedTableBinding: @unchecked Sendable {
+public struct GeneratedTableBinding: Sendable {
     public let descriptor: GeneratedTableDescriptor
-    public let messageType: any Message.Type
     public let insertSQL: String
     public let upsertSQL: String
     public let createTableSQL: String
@@ -215,7 +214,6 @@ public struct GeneratedTableBinding: @unchecked Sendable {
 
     public init(
         descriptor: GeneratedTableDescriptor,
-        messageType: any Message.Type,
         insertSQL: String,
         upsertSQL: String,
         createTableSQL: String,
@@ -231,7 +229,6 @@ public struct GeneratedTableBinding: @unchecked Sendable {
         projectedValues: @escaping @Sendable (any Message) throws -> [SQLiteBindValue]
     ) {
         self.descriptor = descriptor
-        self.messageType = messageType
         self.insertSQL = insertSQL
         self.upsertSQL = upsertSQL
         self.createTableSQL = createTableSQL
@@ -1383,15 +1380,10 @@ public func unknownInsert(_ q: any DBTX, typeName: String, record: JSONLRecord) 
     try q.execute("INSERT INTO \(_unknownTypesTableName) (type_name, id, at_ns, deleted, data_json) VALUES (?, ?, ?, ?, ?) ON CONFLICT(type_name, id) DO UPDATE SET at_ns = excluded.at_ns, deleted = excluded.deleted, data_json = excluded.data_json WHERE excluded.at_ns > at_ns", arguments: [typeName, record.id, record.atNs, record.deleted ? 1 : 0, dataJSON])
 }
 
-public func compactUnknownLatest(_ q: any DBTX) throws {
-    _ = q
-}
-
 public func replayUnknownByType(_ q: any DBTX, typeName: String, apply: (JSONLRecord) throws -> Void) throws {
     guard !typeName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
         throw ProprDBError("empty type name")
     }
-    try compactUnknownLatest(q)
     let replayRows = try q.withRows("SELECT id, at_ns, deleted, data_json FROM \(_unknownTypesTableName) WHERE type_name = ? ORDER BY at_ns ASC, id ASC, rowid ASC", arguments: [typeName]) { rows in
         var buffered: [JSONLRecord] = []
         while let row = try rows.next() {
@@ -1625,78 +1617,110 @@ private func databaseID(_ q: any DBTX) throws -> String {
 }
 
 public func prepareBoundJSONL(_ q: any DBTX, bindings: [GeneratedTableBinding], remote: String) throws -> PreparedJSONLExport {
+    var text = ""
+    let checkpoint = try prepareBoundJSONL(q, bindings: bindings, remote: remote) { data in
+        text += String(decoding: data, as: UTF8.self)
+    }
+    return PreparedJSONLExport(text: text, checkpoint: checkpoint)
+}
+
+public func prepareBoundJSONL(_ q: any DBTX, bindings: [GeneratedTableBinding], remote: String, write: (Data) throws -> Void) throws -> JSONLCheckpoint {
     try ensureCoreTables(q)
     let knownTypeNames = Set(bindings.map(\.descriptor.typeName))
     let checkpoint = try q.withTransaction { transaction in
         let checkpoint = JSONLCheckpoint(version: 1, databaseId: try databaseID(transaction), batchId: try uuidV7())
         try transaction.execute("INSERT INTO \(_exportBatchesTableName) (batch_id, database_id, remote, complete) VALUES (?, ?, ?, 0)", arguments: [checkpoint.batchId, checkpoint.databaseId, remote])
         var sequence = 0
+        let batchSize = 128
         for binding in bindings where binding.descriptor.syncEnabled {
             let tableName = binding.descriptor.tableName
-            let rows = try transaction.withRows("""
-            SELECT row.id, row.at_ns, row.data FROM \(quoteSQLiteIdentifier(tableName)) row
-            LEFT JOIN \(_syncTableName) sync_row
-            ON sync_row.object_id = row.id AND sync_row.table_name = ? AND sync_row.remote = ?
-            WHERE ? = '' OR sync_row.at_ns IS NULL OR sync_row.at_ns < row.at_ns ORDER BY row.id
-            """, arguments: [tableName, remote, remote]) { rows in
-                var result: [(String, Int64, Data)] = []
+            var lastID = ""
+            while true {
+                let rows = try transaction.withRows("""
+                SELECT row.id, row.at_ns, row.data FROM \(quoteSQLiteIdentifier(tableName)) row
+                LEFT JOIN \(_syncTableName) sync_row
+                ON sync_row.object_id = row.id AND sync_row.table_name = ? AND sync_row.remote = ?
+                WHERE row.id > ? AND (? = '' OR sync_row.at_ns IS NULL OR sync_row.at_ns < row.at_ns) ORDER BY row.id LIMIT ?
+                """, arguments: [tableName, remote, lastID, remote, batchSize]) { rows in
+                    var result: [(String, Int64, Data)] = []
+                    while let row = try rows.next() {
+                        result.append((try row.string(at: 0), try row.int64(at: 1), try row.data(at: 2)))
+                    }
+                    return result
+                }
+                guard let lastRow = rows.last else { break }
+                lastID = lastRow.0
+                for (id, atNs, data) in rows {
+                    let message = try binding.decodeBinary(data)
+                    let record = JSONLRecord(id: id, deleted: false, atNs: atNs, data: try binding.encodeAnyJSON(message))
+                    try stageJSONLRecord(transaction, checkpoint: checkpoint, sequence: sequence, tableName: tableName, record: record)
+                    sequence += 1
+                }
+            }
+        }
+        let bindingsByTable = Dictionary(uniqueKeysWithValues: bindings.filter { $0.descriptor.syncEnabled }.map { ($0.descriptor.tableName, $0) })
+        var lastTable = ""
+        var lastDeletedID = ""
+        while true {
+            let tombstones = try transaction.withRows("SELECT table_name, id, at_ns FROM \(_deletedTableName) WHERE (table_name, id) > (?, ?) ORDER BY table_name, id LIMIT ?", arguments: [lastTable, lastDeletedID, batchSize]) { rows in
+                var result: [(String, String, Int64)] = []
                 while let row = try rows.next() {
-                    result.append((try row.string(at: 0), try row.int64(at: 1), try row.data(at: 2)))
+                    result.append((try row.string(at: 0), try row.string(at: 1), try row.int64(at: 2)))
                 }
                 return result
             }
-            for (id, atNs, data) in rows {
-                let message = try binding.decodeBinary(data)
-                let record = JSONLRecord(id: id, deleted: false, atNs: atNs, data: try binding.encodeAnyJSON(message))
+            guard let lastTombstone = tombstones.last else { break }
+            lastTable = lastTombstone.0
+            lastDeletedID = lastTombstone.1
+            for (tableName, id, atNs) in tombstones {
+                guard let binding = bindingsByTable[tableName], try syncNeedsSend(transaction, objectID: id, tableName: tableName, remote: remote, atNs: atNs) else {
+                    continue
+                }
+                let record = JSONLRecord(id: id, deleted: true, atNs: atNs, data: try marshalTypeOnlyAnyJSON(typeName: binding.descriptor.typeName))
                 try stageJSONLRecord(transaction, checkpoint: checkpoint, sequence: sequence, tableName: tableName, record: record)
                 sequence += 1
             }
         }
-        let bindingsByTable = Dictionary(uniqueKeysWithValues: bindings.filter { $0.descriptor.syncEnabled }.map { ($0.descriptor.tableName, $0) })
-        let tombstones = try transaction.withRows("SELECT table_name, id, at_ns FROM \(_deletedTableName) ORDER BY table_name, id") { rows in
-            var result: [(String, String, Int64)] = []
-            while let row = try rows.next() {
-                result.append((try row.string(at: 0), try row.string(at: 1), try row.int64(at: 2)))
+        var lastType = ""
+        var lastUnknownID = ""
+        while true {
+            let unknownRows = try transaction.withRows("SELECT type_name, id, at_ns, deleted, data_json FROM \(_unknownTypesTableName) WHERE (type_name, id) > (?, ?) ORDER BY type_name, id LIMIT ?", arguments: [lastType, lastUnknownID, batchSize]) { rows in
+                var result: [(String, JSONLRecord)] = []
+                while let row = try rows.next() {
+                    let typeName = try row.string(at: 0)
+                    let record = JSONLRecord(id: try row.string(at: 1), deleted: try row.int64(at: 3) != 0, atNs: try row.int64(at: 2), data: Data((try row.string(at: 4)).utf8))
+                    result.append((typeName, record))
+                }
+                return result
             }
-            return result
-        }
-        for (tableName, id, atNs) in tombstones {
-            guard let binding = bindingsByTable[tableName], try syncNeedsSend(transaction, objectID: id, tableName: tableName, remote: remote, atNs: atNs) else {
-                continue
-            }
-            let record = JSONLRecord(id: id, deleted: true, atNs: atNs, data: try marshalTypeOnlyAnyJSON(typeName: binding.descriptor.typeName))
-            try stageJSONLRecord(transaction, checkpoint: checkpoint, sequence: sequence, tableName: tableName, record: record)
-            sequence += 1
-        }
-        let unknownRows = try transaction.withRows("SELECT type_name, id, at_ns, deleted, data_json FROM \(_unknownTypesTableName) ORDER BY type_name, id") { rows in
-            var result: [(String, JSONLRecord)] = []
-            while let row = try rows.next() {
-                let typeName = try row.string(at: 0)
-                let record = JSONLRecord(id: try row.string(at: 1), deleted: try row.int64(at: 3) != 0, atNs: try row.int64(at: 2), data: Data((try row.string(at: 4)).utf8))
-                result.append((typeName, record))
-            }
-            return result
-        }
-        for (typeName, record) in unknownRows {
-            if knownTypeNames.contains(typeName) {
-                continue
-            }
-            if try remote.isEmpty || unknownSyncNeedsSend(transaction, typeName: typeName, record: record, remote: remote) {
-                try stageJSONLRecord(transaction, checkpoint: checkpoint, sequence: sequence, tableName: "@unknown:\(typeName)", record: record)
-                sequence += 1
+            guard let lastUnknown = unknownRows.last else { break }
+            lastType = lastUnknown.0
+            lastUnknownID = lastUnknown.1.id
+            for (typeName, record) in unknownRows {
+                if knownTypeNames.contains(typeName) {
+                    continue
+                }
+                if try remote.isEmpty || unknownSyncNeedsSend(transaction, typeName: typeName, record: record, remote: remote) {
+                    try stageJSONLRecord(transaction, checkpoint: checkpoint, sequence: sequence, tableName: "@unknown:\(typeName)", record: record)
+                    sequence += 1
+                }
             }
         }
         try transaction.execute("UPDATE \(_exportBatchesTableName) SET complete = 1 WHERE batch_id = ?", arguments: [checkpoint.batchId])
         return checkpoint
     }
-    let text = try q.withRows("SELECT record_json FROM \(_exportBatchEntriesTableName) WHERE batch_id = ? ORDER BY sequence", arguments: [checkpoint.batchId]) { rows in
-        var output = ""
-        while let row = try rows.next() {
-            output += String(decoding: try row.data(at: 0), as: UTF8.self)
+    do {
+        try q.withRows("SELECT record_json FROM \(_exportBatchEntriesTableName) WHERE batch_id = ? ORDER BY sequence", arguments: [checkpoint.batchId]) { rows in
+            while let row = try rows.next() {
+                try write(try row.data(at: 0))
+            }
         }
-        return output
+    } catch {
+        do { try discardBoundJSONL(q, checkpoint: checkpoint) }
+        catch let discardError { throw ProprDBError("stream export: \(error) (additionally, discard export: \(discardError))") }
+        throw error
     }
-    return PreparedJSONLExport(text: text, checkpoint: checkpoint)
+    return checkpoint
 }
 
 private func stageJSONLRecord(_ q: any DBTX, checkpoint: JSONLCheckpoint, sequence: Int, tableName: String, record: JSONLRecord) throws {

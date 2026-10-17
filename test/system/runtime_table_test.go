@@ -182,3 +182,40 @@ func TestGeneratedTableOptInAPIs(t *testing.T) {
 		})
 	}
 }
+
+func TestGeneratedContextCancellation(t *testing.T) {
+	_, q := openRuntimeTestDB(t)
+	crud := NewCRUD(q)
+	assert.NilError(t, crud.Init())
+	row, err := crud.Person.Insert(&Person{Name: testPersonNameAda, Age: 37})
+	assert.NilError(t, err)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	for _, tc := range []struct {
+		name string
+		run  func() error
+	}{
+		{"initialize", func() error { return crud.InitContext(ctx) }},
+		{"table initialize", func() error { return crud.Person.InitContext(ctx) }},
+		{"select", func() error { _, err := crud.Person.SelectContext(ctx, selectObjectByID, row.ID); return err }},
+		{"insert", func() error { _, err := crud.Person.InsertContext(ctx, row.Data); return err }},
+		{"update", func() error { _, err := crud.Person.UpdateRowContext(ctx, row); return err }},
+		{"delete", func() error { return crud.Person.DeleteRowContext(ctx, row) }},
+		{"drain", func() error { return crud.Person.DrainUnknownRowsContext(ctx) }},
+		{"export", func() error {
+			var output strings.Builder
+			return crud.WriteJSONLContext(ctx, testSourceRemote, &output)
+		}},
+		{"prepare", func() error {
+			var output strings.Builder
+			_, err := crud.PrepareJSONLContext(ctx, testSourceRemote, &output)
+			return err
+		}},
+		{"import", func() error { return crud.ReadJSONLContext(ctx, testSourceRemote, strings.NewReader("")) }},
+	} {
+		t.Run(tc.name, func(t *testing.T) { assert.ErrorIs(t, tc.run(), context.Canceled) })
+	}
+	rows, err := crud.Person.Select(selectObjectByID, row.ID)
+	assert.NilError(t, err)
+	assert.DeepEqual(t, rows, []PersonRow{row}, protocmp.Transform())
+}

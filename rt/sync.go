@@ -218,9 +218,13 @@ func applyBoundDeletionSQL(ctx context.Context, q DBTX, binding GeneratedTableBi
 }
 
 func ReadBoundJSONLContext(ctx context.Context, q DBTX, bindings []GeneratedTableBinding, remote string, reader io.Reader) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if reader == nil {
 		return errors.New("nil reader")
 	}
+	slog.Debug("import bound JSONL", "binding_count", len(bindings))
 	byType := make(map[string]GeneratedTableBinding, len(bindings))
 	for _, binding := range bindings {
 		if err := validateBinding(binding); err != nil {
@@ -232,6 +236,9 @@ func ReadBoundJSONLContext(ctx context.Context, q DBTX, bindings []GeneratedTabl
 		byType[binding.Descriptor.TypeName] = binding
 	}
 	return ReadJSONL(reader, func(record JSONLRecord, lineNumber int) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if record.ID == "" || len(record.Data) == 0 {
 			return fmt.Errorf("jsonl line %d has empty id or data", lineNumber)
 		}

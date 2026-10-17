@@ -198,7 +198,7 @@ message Outer {
 	generatedContent, err := os.ReadFile(filepath.Join(generatedDir, "names.proprdb.pb.swift"))
 	assert.NilError(t, err)
 	generatedText := string(generatedContent)
-	assert.Check(t, strings.Contains(generatedText, `messageType: ACMEOuter.Inner.self`))
+	assert.Check(t, strings.Contains(generatedText, `ACMEOuter.Inner(serializedBytes: $0)`))
 	assert.Check(t, strings.Contains(generatedText, `sqliteBindValue(data.description_p)`))
 }
 

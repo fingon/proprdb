@@ -3,6 +3,7 @@ package genexample
 import (
 	"context"
 	"database/sql"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -234,4 +235,26 @@ func TestRecentObjectsUseTimestampIndex(t *testing.T) {
 	var detail string
 	assert.NilError(t, db.QueryRow("EXPLAIN QUERY PLAN "+query, 10, 2).Scan(&id, &parent, &unused, &detail))
 	assert.Check(t, strings.Contains(detail, personTimeIndex), detail)
+}
+
+func TestReprojectionAcrossBatches(t *testing.T) {
+	for _, rowCount := range []int{0, 128, 257} {
+		t.Run(strconv.Itoa(rowCount), func(t *testing.T) {
+			db, q := openRuntimeTestDB(t)
+			crud := NewCRUD(q)
+			assert.NilError(t, crud.Init())
+			for range rowCount {
+				_, err := crud.Person.Insert(&Person{Name: testPersonNameAda, Age: testProjectedAge})
+				assert.NilError(t, err)
+			}
+			_, err := db.Exec(stalePersonSchemaSQL, PersonTableName)
+			assert.NilError(t, err)
+			_, err = db.Exec(corruptPersonAgeSQL)
+			assert.NilError(t, err)
+			assert.NilError(t, crud.Person.Init())
+			var count int
+			assert.NilError(t, db.QueryRow(`SELECT COUNT(*) FROM "`+PersonTableName+`" WHERE age = ?`, testProjectedAge).Scan(&count))
+			assert.Equal(t, count, rowCount)
+		})
+	}
 }

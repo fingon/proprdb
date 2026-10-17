@@ -91,52 +91,104 @@ func (t *PersonTable) Init() error {
 	return t.runtimeTable().Init(true)
 }
 
+func (t *PersonTable) InitContext(ctx context.Context) error {
+	return t.runtimeTable().InitContext(ctx, true)
+}
+
 func (t *PersonTable) init(ensureCore bool) error {
 	return t.runtimeTable().Init(ensureCore)
+}
+
+func (t *PersonTable) initContext(ctx context.Context, ensureCore bool) error {
+	return t.runtimeTable().InitContext(ctx, ensureCore)
 }
 
 func (t *PersonTable) Select(where string, args ...any) ([]PersonRow, error) {
 	return t.runtimeTable().Select[Person, *Person](where, args...)
 }
 
+func (t *PersonTable) SelectContext(ctx context.Context, where string, args ...any) ([]PersonRow, error) {
+	return t.runtimeTable().SelectContext[Person, *Person](ctx, where, args...)
+}
+
 func (t *PersonTable) Insert(data *Person) (PersonRow, error) {
 	return t.runtimeTable().Insert[Person, *Person](data)
+}
+
+func (t *PersonTable) InsertContext(ctx context.Context, data *Person) (PersonRow, error) {
+	return t.runtimeTable().InsertContext[Person, *Person](ctx, data)
 }
 
 func (t *PersonTable) insertWithID(id string, data *Person) (PersonRow, error) {
 	return t.runtimeTable().InsertWithID[Person, *Person](id, data)
 }
 
+func (t *PersonTable) insertWithIDContext(ctx context.Context, id string, data *Person) (PersonRow, error) {
+	return t.runtimeTable().InsertWithIDContext[Person, *Person](ctx, id, data)
+}
+
 func (t *PersonTable) UpdateByID(id string, data *Person) (PersonRow, error) {
 	return t.runtimeTable().UpdateByID[Person, *Person](id, data)
+}
+
+func (t *PersonTable) UpdateByIDContext(ctx context.Context, id string, data *Person) (PersonRow, error) {
+	return t.runtimeTable().UpdateByIDContext[Person, *Person](ctx, id, data)
 }
 
 func (t *PersonTable) UpdateRow(row PersonRow) (PersonRow, error) {
 	return t.runtimeTable().UpdateRow[Person, *Person](row)
 }
 
+func (t *PersonTable) UpdateRowContext(ctx context.Context, row PersonRow) (PersonRow, error) {
+	return t.runtimeTable().UpdateRowContext[Person, *Person](ctx, row)
+}
+
 func (t *PersonTable) DeleteByID(id string) error {
 	return t.runtimeTable().DeleteByID(id)
+}
+
+func (t *PersonTable) DeleteByIDContext(ctx context.Context, id string) error {
+	return t.runtimeTable().DeleteByIDContext(ctx, id)
 }
 
 func (t *PersonTable) DeleteRow(row PersonRow) error {
 	return t.runtimeTable().DeleteRow(row)
 }
 
+func (t *PersonTable) DeleteRowContext(ctx context.Context, row PersonRow) error {
+	return t.runtimeTable().DeleteRowContext(ctx, row)
+}
+
 func (t *PersonTable) upsertWithAtNs(id string, atNs int64, data *Person) error {
 	return t.runtimeTable().UpsertWithAtNs[Person, *Person](id, atNs, data)
+}
+
+func (t *PersonTable) upsertWithAtNsContext(ctx context.Context, id string, atNs int64, data *Person) error {
+	return t.runtimeTable().UpsertWithAtNsContext[Person, *Person](ctx, id, atNs, data)
 }
 
 func (t *PersonTable) tombstoneWithAtNs(id string, atNs int64) error {
 	return t.runtimeTable().TombstoneWithAtNs(id, atNs)
 }
 
+func (t *PersonTable) tombstoneWithAtNsContext(ctx context.Context, id string, atNs int64) error {
+	return t.runtimeTable().TombstoneWithAtNsContext(ctx, id, atNs)
+}
+
 func (t *PersonTable) DrainUnknownRows() error {
 	return t.runtimeTable().DrainUnknownRows()
 }
 
+func (t *PersonTable) DrainUnknownRowsContext(ctx context.Context) error {
+	return t.runtimeTable().DrainUnknownRowsContext(ctx)
+}
+
 func (t *PersonTable) InsertWithID(id string, data *Person) (PersonRow, error) {
 	return t.runtimeTable().InsertWithID[Person, *Person](id, data)
+}
+
+func (t *PersonTable) InsertWithIDContext(ctx context.Context, id string, data *Person) (PersonRow, error) {
+	return t.runtimeTable().InsertWithIDContext[Person, *Person](ctx, id, data)
 }
 
 func (t *PersonTable) Changes(ctx context.Context) (<-chan PersonChange, error) {
@@ -195,48 +247,96 @@ func (t *NoteTable) Init() error {
 	return t.runtimeTable().Init(true)
 }
 
+func (t *NoteTable) InitContext(ctx context.Context) error {
+	return t.runtimeTable().InitContext(ctx, true)
+}
+
 func (t *NoteTable) init(ensureCore bool) error {
 	return t.runtimeTable().Init(ensureCore)
+}
+
+func (t *NoteTable) initContext(ctx context.Context, ensureCore bool) error {
+	return t.runtimeTable().InitContext(ctx, ensureCore)
 }
 
 func (t *NoteTable) Select(where string, args ...any) ([]NoteRow, error) {
 	return t.runtimeTable().Select[Note, *Note](where, args...)
 }
 
+func (t *NoteTable) SelectContext(ctx context.Context, where string, args ...any) ([]NoteRow, error) {
+	return t.runtimeTable().SelectContext[Note, *Note](ctx, where, args...)
+}
+
 func (t *NoteTable) Insert(data *Note) (NoteRow, error) {
 	return t.runtimeTable().Insert[Note, *Note](data)
+}
+
+func (t *NoteTable) InsertContext(ctx context.Context, data *Note) (NoteRow, error) {
+	return t.runtimeTable().InsertContext[Note, *Note](ctx, data)
 }
 
 func (t *NoteTable) insertWithID(id string, data *Note) (NoteRow, error) {
 	return t.runtimeTable().InsertWithID[Note, *Note](id, data)
 }
 
+func (t *NoteTable) insertWithIDContext(ctx context.Context, id string, data *Note) (NoteRow, error) {
+	return t.runtimeTable().InsertWithIDContext[Note, *Note](ctx, id, data)
+}
+
 func (t *NoteTable) UpdateByID(id string, data *Note) (NoteRow, error) {
 	return t.runtimeTable().UpdateByID[Note, *Note](id, data)
+}
+
+func (t *NoteTable) UpdateByIDContext(ctx context.Context, id string, data *Note) (NoteRow, error) {
+	return t.runtimeTable().UpdateByIDContext[Note, *Note](ctx, id, data)
 }
 
 func (t *NoteTable) UpdateRow(row NoteRow) (NoteRow, error) {
 	return t.runtimeTable().UpdateRow[Note, *Note](row)
 }
 
+func (t *NoteTable) UpdateRowContext(ctx context.Context, row NoteRow) (NoteRow, error) {
+	return t.runtimeTable().UpdateRowContext[Note, *Note](ctx, row)
+}
+
 func (t *NoteTable) DeleteByID(id string) error {
 	return t.runtimeTable().DeleteByID(id)
+}
+
+func (t *NoteTable) DeleteByIDContext(ctx context.Context, id string) error {
+	return t.runtimeTable().DeleteByIDContext(ctx, id)
 }
 
 func (t *NoteTable) DeleteRow(row NoteRow) error {
 	return t.runtimeTable().DeleteRow(row)
 }
 
+func (t *NoteTable) DeleteRowContext(ctx context.Context, row NoteRow) error {
+	return t.runtimeTable().DeleteRowContext(ctx, row)
+}
+
 func (t *NoteTable) upsertWithAtNs(id string, atNs int64, data *Note) error {
 	return t.runtimeTable().UpsertWithAtNs[Note, *Note](id, atNs, data)
+}
+
+func (t *NoteTable) upsertWithAtNsContext(ctx context.Context, id string, atNs int64, data *Note) error {
+	return t.runtimeTable().UpsertWithAtNsContext[Note, *Note](ctx, id, atNs, data)
 }
 
 func (t *NoteTable) tombstoneWithAtNs(id string, atNs int64) error {
 	return t.runtimeTable().TombstoneWithAtNs(id, atNs)
 }
 
+func (t *NoteTable) tombstoneWithAtNsContext(ctx context.Context, id string, atNs int64) error {
+	return t.runtimeTable().TombstoneWithAtNsContext(ctx, id, atNs)
+}
+
 func (t *NoteTable) DrainUnknownRows() error {
 	return t.runtimeTable().DrainUnknownRows()
+}
+
+func (t *NoteTable) DrainUnknownRowsContext(ctx context.Context) error {
+	return t.runtimeTable().DrainUnknownRowsContext(ctx)
 }
 
 func (t *NoteTable) Changes(ctx context.Context) (<-chan NoteChange, error) {
@@ -297,48 +397,96 @@ func (t *ChoiceTable) Init() error {
 	return t.runtimeTable().Init(true)
 }
 
+func (t *ChoiceTable) InitContext(ctx context.Context) error {
+	return t.runtimeTable().InitContext(ctx, true)
+}
+
 func (t *ChoiceTable) init(ensureCore bool) error {
 	return t.runtimeTable().Init(ensureCore)
+}
+
+func (t *ChoiceTable) initContext(ctx context.Context, ensureCore bool) error {
+	return t.runtimeTable().InitContext(ctx, ensureCore)
 }
 
 func (t *ChoiceTable) Select(where string, args ...any) ([]ChoiceRow, error) {
 	return t.runtimeTable().Select[Choice, *Choice](where, args...)
 }
 
+func (t *ChoiceTable) SelectContext(ctx context.Context, where string, args ...any) ([]ChoiceRow, error) {
+	return t.runtimeTable().SelectContext[Choice, *Choice](ctx, where, args...)
+}
+
 func (t *ChoiceTable) Insert(data *Choice) (ChoiceRow, error) {
 	return t.runtimeTable().Insert[Choice, *Choice](data)
+}
+
+func (t *ChoiceTable) InsertContext(ctx context.Context, data *Choice) (ChoiceRow, error) {
+	return t.runtimeTable().InsertContext[Choice, *Choice](ctx, data)
 }
 
 func (t *ChoiceTable) insertWithID(id string, data *Choice) (ChoiceRow, error) {
 	return t.runtimeTable().InsertWithID[Choice, *Choice](id, data)
 }
 
+func (t *ChoiceTable) insertWithIDContext(ctx context.Context, id string, data *Choice) (ChoiceRow, error) {
+	return t.runtimeTable().InsertWithIDContext[Choice, *Choice](ctx, id, data)
+}
+
 func (t *ChoiceTable) UpdateByID(id string, data *Choice) (ChoiceRow, error) {
 	return t.runtimeTable().UpdateByID[Choice, *Choice](id, data)
+}
+
+func (t *ChoiceTable) UpdateByIDContext(ctx context.Context, id string, data *Choice) (ChoiceRow, error) {
+	return t.runtimeTable().UpdateByIDContext[Choice, *Choice](ctx, id, data)
 }
 
 func (t *ChoiceTable) UpdateRow(row ChoiceRow) (ChoiceRow, error) {
 	return t.runtimeTable().UpdateRow[Choice, *Choice](row)
 }
 
+func (t *ChoiceTable) UpdateRowContext(ctx context.Context, row ChoiceRow) (ChoiceRow, error) {
+	return t.runtimeTable().UpdateRowContext[Choice, *Choice](ctx, row)
+}
+
 func (t *ChoiceTable) DeleteByID(id string) error {
 	return t.runtimeTable().DeleteByID(id)
+}
+
+func (t *ChoiceTable) DeleteByIDContext(ctx context.Context, id string) error {
+	return t.runtimeTable().DeleteByIDContext(ctx, id)
 }
 
 func (t *ChoiceTable) DeleteRow(row ChoiceRow) error {
 	return t.runtimeTable().DeleteRow(row)
 }
 
+func (t *ChoiceTable) DeleteRowContext(ctx context.Context, row ChoiceRow) error {
+	return t.runtimeTable().DeleteRowContext(ctx, row)
+}
+
 func (t *ChoiceTable) upsertWithAtNs(id string, atNs int64, data *Choice) error {
 	return t.runtimeTable().UpsertWithAtNs[Choice, *Choice](id, atNs, data)
+}
+
+func (t *ChoiceTable) upsertWithAtNsContext(ctx context.Context, id string, atNs int64, data *Choice) error {
+	return t.runtimeTable().UpsertWithAtNsContext[Choice, *Choice](ctx, id, atNs, data)
 }
 
 func (t *ChoiceTable) tombstoneWithAtNs(id string, atNs int64) error {
 	return t.runtimeTable().TombstoneWithAtNs(id, atNs)
 }
 
+func (t *ChoiceTable) tombstoneWithAtNsContext(ctx context.Context, id string, atNs int64) error {
+	return t.runtimeTable().TombstoneWithAtNsContext(ctx, id, atNs)
+}
+
 func (t *ChoiceTable) DrainUnknownRows() error {
 	return t.runtimeTable().DrainUnknownRows()
+}
+
+func (t *ChoiceTable) DrainUnknownRowsContext(ctx context.Context) error {
+	return t.runtimeTable().DrainUnknownRowsContext(ctx)
 }
 
 const PhotoTableName = "generatedtest_example_photo"
@@ -460,48 +608,96 @@ func (t *PhotoTable) Init() error {
 	return t.runtimeTable().Init(true)
 }
 
+func (t *PhotoTable) InitContext(ctx context.Context) error {
+	return t.runtimeTable().InitContext(ctx, true)
+}
+
 func (t *PhotoTable) init(ensureCore bool) error {
 	return t.runtimeTable().Init(ensureCore)
+}
+
+func (t *PhotoTable) initContext(ctx context.Context, ensureCore bool) error {
+	return t.runtimeTable().InitContext(ctx, ensureCore)
 }
 
 func (t *PhotoTable) Select(where string, args ...any) ([]PhotoRow, error) {
 	return t.runtimeTable().Select[Photo, *Photo](where, args...)
 }
 
+func (t *PhotoTable) SelectContext(ctx context.Context, where string, args ...any) ([]PhotoRow, error) {
+	return t.runtimeTable().SelectContext[Photo, *Photo](ctx, where, args...)
+}
+
 func (t *PhotoTable) Insert(data *Photo) (PhotoRow, error) {
 	return t.runtimeTable().Insert[Photo, *Photo](data)
+}
+
+func (t *PhotoTable) InsertContext(ctx context.Context, data *Photo) (PhotoRow, error) {
+	return t.runtimeTable().InsertContext[Photo, *Photo](ctx, data)
 }
 
 func (t *PhotoTable) insertWithID(id string, data *Photo) (PhotoRow, error) {
 	return t.runtimeTable().InsertWithID[Photo, *Photo](id, data)
 }
 
+func (t *PhotoTable) insertWithIDContext(ctx context.Context, id string, data *Photo) (PhotoRow, error) {
+	return t.runtimeTable().InsertWithIDContext[Photo, *Photo](ctx, id, data)
+}
+
 func (t *PhotoTable) UpdateByID(id string, data *Photo) (PhotoRow, error) {
 	return t.runtimeTable().UpdateByID[Photo, *Photo](id, data)
+}
+
+func (t *PhotoTable) UpdateByIDContext(ctx context.Context, id string, data *Photo) (PhotoRow, error) {
+	return t.runtimeTable().UpdateByIDContext[Photo, *Photo](ctx, id, data)
 }
 
 func (t *PhotoTable) UpdateRow(row PhotoRow) (PhotoRow, error) {
 	return t.runtimeTable().UpdateRow[Photo, *Photo](row)
 }
 
+func (t *PhotoTable) UpdateRowContext(ctx context.Context, row PhotoRow) (PhotoRow, error) {
+	return t.runtimeTable().UpdateRowContext[Photo, *Photo](ctx, row)
+}
+
 func (t *PhotoTable) DeleteByID(id string) error {
 	return t.runtimeTable().DeleteByID(id)
+}
+
+func (t *PhotoTable) DeleteByIDContext(ctx context.Context, id string) error {
+	return t.runtimeTable().DeleteByIDContext(ctx, id)
 }
 
 func (t *PhotoTable) DeleteRow(row PhotoRow) error {
 	return t.runtimeTable().DeleteRow(row)
 }
 
+func (t *PhotoTable) DeleteRowContext(ctx context.Context, row PhotoRow) error {
+	return t.runtimeTable().DeleteRowContext(ctx, row)
+}
+
 func (t *PhotoTable) upsertWithAtNs(id string, atNs int64, data *Photo) error {
 	return t.runtimeTable().UpsertWithAtNs[Photo, *Photo](id, atNs, data)
+}
+
+func (t *PhotoTable) upsertWithAtNsContext(ctx context.Context, id string, atNs int64, data *Photo) error {
+	return t.runtimeTable().UpsertWithAtNsContext[Photo, *Photo](ctx, id, atNs, data)
 }
 
 func (t *PhotoTable) tombstoneWithAtNs(id string, atNs int64) error {
 	return t.runtimeTable().TombstoneWithAtNs(id, atNs)
 }
 
+func (t *PhotoTable) tombstoneWithAtNsContext(ctx context.Context, id string, atNs int64) error {
+	return t.runtimeTable().TombstoneWithAtNsContext(ctx, id, atNs)
+}
+
 func (t *PhotoTable) DrainUnknownRows() error {
 	return t.runtimeTable().DrainUnknownRows()
+}
+
+func (t *PhotoTable) DrainUnknownRowsContext(ctx context.Context) error {
+	return t.runtimeTable().DrainUnknownRowsContext(ctx)
 }
 
 type CRUD struct {
@@ -556,64 +752,88 @@ func (c *CRUD) dbtx() (DBTX, error) {
 }
 
 func (c *CRUD) Init() error {
+	return c.InitContext(context.Background())
+}
+
+func (c *CRUD) InitContext(ctx context.Context) error {
 	q, err := c.dbtx()
 	if err != nil {
 		return err
 	}
-	if err := rt.EnsureCoreTables(q); err != nil {
+	if err := rt.EnsureCoreTablesContext(ctx, q); err != nil {
 		return err
 	}
-	if err := c.Person.init(false); err != nil {
+	if err := c.Person.initContext(ctx, false); err != nil {
 		return fmt.Errorf("init Person table: %w", err)
 	}
-	if err := c.Note.init(false); err != nil {
+	if err := c.Note.initContext(ctx, false); err != nil {
 		return fmt.Errorf("init Note table: %w", err)
 	}
-	if err := c.Choice.init(false); err != nil {
+	if err := c.Choice.initContext(ctx, false); err != nil {
 		return fmt.Errorf("init Choice table: %w", err)
 	}
-	if err := c.Photo.init(false); err != nil {
+	if err := c.Photo.initContext(ctx, false); err != nil {
 		return fmt.Errorf("init Photo table: %w", err)
 	}
 	return nil
 }
 
 func (c *CRUD) WriteJSONL(remote string, w io.Writer) error {
+	return c.WriteJSONLContext(context.Background(), remote, w)
+}
+
+func (c *CRUD) WriteJSONLContext(ctx context.Context, remote string, w io.Writer) error {
 	q, err := c.dbtx()
 	if err != nil {
 		return err
 	}
-	return rt.WriteBoundJSONLContext(context.Background(), q, crudGeneratedBindings, remote, w)
+	return rt.WriteBoundJSONLContext(ctx, q, crudGeneratedBindings, remote, w)
 }
 
 func (c *CRUD) PrepareJSONL(remote string, w io.Writer) (rt.JSONLCheckpoint, error) {
+	return c.PrepareJSONLContext(context.Background(), remote, w)
+}
+
+func (c *CRUD) PrepareJSONLContext(ctx context.Context, remote string, w io.Writer) (rt.JSONLCheckpoint, error) {
 	q, err := c.dbtx()
 	if err != nil {
 		return rt.JSONLCheckpoint{}, err
 	}
-	return rt.PrepareBoundJSONLContext(context.Background(), q, crudGeneratedBindings, remote, w)
+	return rt.PrepareBoundJSONLContext(ctx, q, crudGeneratedBindings, remote, w)
 }
 
 func (c *CRUD) AcknowledgeJSONL(checkpoint rt.JSONLCheckpoint) error {
+	return c.AcknowledgeJSONLContext(context.Background(), checkpoint)
+}
+
+func (c *CRUD) AcknowledgeJSONLContext(ctx context.Context, checkpoint rt.JSONLCheckpoint) error {
 	q, err := c.dbtx()
 	if err != nil {
 		return err
 	}
-	return rt.AcknowledgeJSONLContext(context.Background(), q, checkpoint)
+	return rt.AcknowledgeJSONLContext(ctx, q, checkpoint)
 }
 
 func (c *CRUD) DiscardJSONL(checkpoint rt.JSONLCheckpoint) error {
+	return c.DiscardJSONLContext(context.Background(), checkpoint)
+}
+
+func (c *CRUD) DiscardJSONLContext(ctx context.Context, checkpoint rt.JSONLCheckpoint) error {
 	q, err := c.dbtx()
 	if err != nil {
 		return err
 	}
-	return rt.DiscardJSONLContext(context.Background(), q, checkpoint)
+	return rt.DiscardJSONLContext(ctx, q, checkpoint)
 }
 
 func (c *CRUD) ReadJSONL(remote string, r io.Reader) error {
+	return c.ReadJSONLContext(context.Background(), remote, r)
+}
+
+func (c *CRUD) ReadJSONLContext(ctx context.Context, remote string, r io.Reader) error {
 	q, err := c.dbtx()
 	if err != nil {
 		return err
 	}
-	return rt.ReadBoundJSONLContext(context.Background(), q, crudGeneratedBindings, remote, r)
+	return rt.ReadBoundJSONLContext(ctx, q, crudGeneratedBindings, remote, r)
 }

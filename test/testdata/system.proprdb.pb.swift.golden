@@ -20,7 +20,6 @@ private let PersonCreateIndexSQL5 = "CREATE INDEX IF NOT EXISTS \"idx_generatedt
 
 private let PersonGeneratedBinding = GeneratedTableBinding(
 	descriptor: GeneratedTableDescriptor(tableName: PersonTableName, typeName: PersonTypeName, isCore: false, syncEnabled: true, changeListenersEnabled: true, queryStatisticsEnabled: true),
-	messageType: Generatedtest_Example_Person.self,
 	insertSQL: PersonInsertSQL,
 	upsertSQL: PersonUpsertSQL,
 	createTableSQL: PersonCreateTableSQL,
@@ -189,7 +188,6 @@ private let NoteGeneratedIndexPrefix = "idx_generatedtest_example_note__"
 
 private let NoteGeneratedBinding = GeneratedTableBinding(
 	descriptor: GeneratedTableDescriptor(tableName: NoteTableName, typeName: NoteTypeName, isCore: false, syncEnabled: false, changeListenersEnabled: true, queryStatisticsEnabled: false),
-	messageType: Generatedtest_Example_Note.self,
 	insertSQL: NoteInsertSQL,
 	upsertSQL: NoteUpsertSQL,
 	createTableSQL: NoteCreateTableSQL,
@@ -340,7 +338,6 @@ private let ChoiceGeneratedIndexPrefix = "idx_generatedtest_example_choice__"
 
 private let ChoiceGeneratedBinding = GeneratedTableBinding(
 	descriptor: GeneratedTableDescriptor(tableName: ChoiceTableName, typeName: ChoiceTypeName, isCore: false, syncEnabled: true, changeListenersEnabled: false, queryStatisticsEnabled: false),
-	messageType: Generatedtest_Example_Choice.self,
 	insertSQL: ChoiceInsertSQL,
 	upsertSQL: ChoiceUpsertSQL,
 	createTableSQL: ChoiceCreateTableSQL,
@@ -487,7 +484,6 @@ private let PhotoCreateIndexSQL2 = "CREATE INDEX IF NOT EXISTS \"idx_generatedte
 
 private let PhotoGeneratedBinding = GeneratedTableBinding(
 	descriptor: GeneratedTableDescriptor(tableName: PhotoTableName, typeName: PhotoTypeName, isCore: false, syncEnabled: true, changeListenersEnabled: false, queryStatisticsEnabled: false),
-	messageType: Generatedtest_Example_Photo.self,
 	insertSQL: PhotoInsertSQL,
 	upsertSQL: PhotoUpsertSQL,
 	createTableSQL: PhotoCreateTableSQL,
@@ -665,8 +661,13 @@ struct CRUD {
 		try initializeGeneratedTables(dbtx(), bindings: crudGeneratedBindings)
 	}
 	func prepareJSONL(remote: String) throws -> PreparedJSONLExport { try prepareBoundJSONL(dbtx(), bindings: crudGeneratedBindings, remote: remote) }
+	func prepareJSONL(remote: String, write: (Data) throws -> Void) throws -> JSONLCheckpoint { try prepareBoundJSONL(dbtx(), bindings: crudGeneratedBindings, remote: remote, write: write) }
 	func acknowledgeJSONL(_ checkpoint: JSONLCheckpoint) throws { try acknowledgeBoundJSONL(dbtx(), checkpoint: checkpoint) }
 	func discardJSONL(_ checkpoint: JSONLCheckpoint) throws { try discardBoundJSONL(dbtx(), checkpoint: checkpoint) }
+	func writeJSONL(remote: String, write: (Data) throws -> Void) throws {
+		let checkpoint = try prepareJSONL(remote: remote, write: write)
+		try acknowledgeJSONL(checkpoint)
+	}
 	func writeJSONL(remote: String) throws -> String {
 		let prepared = try prepareJSONL(remote: remote)
 		try acknowledgeJSONL(prepared.checkpoint)
@@ -773,8 +774,10 @@ extension ProprDBActor {
 	fileprivate func _photoDeleteRow(_ row: PhotoRow) throws { try withDatabase { try CRUD($0).photo.deleteRow(row) } }
 	fileprivate func _photoDrainUnknownRows() throws { try withDatabase { try CRUD($0).photo.drainUnknownRows() } }
 	public func prepareJSONL(remote: String) throws -> PreparedJSONLExport { try withDatabase { try CRUD($0).prepareJSONL(remote: remote) } }
+	public func prepareJSONL(remote: String, write: @Sendable (Data) throws -> Void) throws -> JSONLCheckpoint { try withDatabase { try CRUD($0).prepareJSONL(remote: remote, write: write) } }
 	public func acknowledgeJSONL(_ checkpoint: JSONLCheckpoint) throws { try withDatabase { try CRUD($0).acknowledgeJSONL(checkpoint) } }
 	public func discardJSONL(_ checkpoint: JSONLCheckpoint) throws { try withDatabase { try CRUD($0).discardJSONL(checkpoint) } }
 	public func writeJSONL(remote: String) throws -> String { try withDatabase { try CRUD($0).writeJSONL(remote: remote) } }
+	public func writeJSONL(remote: String, write: @Sendable (Data) throws -> Void) throws { try withDatabase { try CRUD($0).writeJSONL(remote: remote, write: write) } }
 	public func readJSONL(remote: String, text: String) throws { try withDatabase { try CRUD($0).readJSONL(remote: remote, text: text) } }
 }

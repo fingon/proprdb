@@ -40,37 +40,47 @@ func NewTable(q DBTX, binding GeneratedTableBinding) Table {
 }
 
 func (t Table) Init(ensureCore bool) (err error) {
+	return t.InitContext(context.Background(), ensureCore)
+}
+
+func (t Table) InitContext(ctx context.Context, ensureCore bool) (err error) {
 	if t.q == nil {
 		return errors.New(errNilDBTX)
 	}
 	slog.Debug("initialize generated table", "table", t.binding.Descriptor.TableName, "ensure_core", ensureCore)
 	if ensureCore {
-		if err := EnsureCoreTables(t.q); err != nil {
+		if err := EnsureCoreTablesContext(ctx, t.q); err != nil {
 			return err
 		}
 	}
-	ctx := context.Background()
 	if err := ReconcileGeneratedTableContext(ctx, t.q, t.binding); err != nil {
 		return err
 	}
-	if err := t.DrainUnknownRows(); err != nil {
+	if err := t.DrainUnknownRowsContext(ctx); err != nil {
 		return fmt.Errorf("drain unknown rows for %s: %w", t.binding.Descriptor.TableName, err)
 	}
 	return nil
 }
 
 func (t Table) DrainUnknownRows() (err error) {
+	return t.DrainUnknownRowsContext(context.Background())
+}
+
+func (t Table) DrainUnknownRowsContext(ctx context.Context) (err error) {
 	if t.q == nil {
 		return errors.New(errNilDBTX)
 	}
-	return DrainUnknownBindingsContext(context.Background(), t.q, []GeneratedTableBinding{t.binding})
+	return DrainUnknownBindingsContext(ctx, t.q, []GeneratedTableBinding{t.binding})
 }
 
 func (t Table) Select[M any, P MessagePointer[M]](where string, args ...any) (result []Row[P], err error) {
+	return t.SelectContext[M, P](context.Background(), where, args...)
+}
+
+func (t Table) SelectContext[M any, P MessagePointer[M]](ctx context.Context, where string, args ...any) (result []Row[P], err error) {
 	if t.q == nil {
 		return nil, errors.New(errNilDBTX)
 	}
-	ctx := context.Background()
 	tableName := t.binding.Descriptor.TableName
 	query := `SELECT id, at_ns, data FROM ` + quoteSQLiteIdentifier(tableName)
 	if strings.TrimSpace(where) != "" {
@@ -116,6 +126,10 @@ func (t Table) Select[M any, P MessagePointer[M]](where string, args ...any) (re
 }
 
 func (t Table) Insert[M any, P MessagePointer[M]](data P) (row Row[P], err error) {
+	return t.InsertContext[M, P](context.Background(), data)
+}
+
+func (t Table) InsertContext[M any, P MessagePointer[M]](ctx context.Context, data P) (row Row[P], err error) {
 	if t.q == nil {
 		return row, errors.New(errNilDBTX)
 	}
@@ -126,20 +140,28 @@ func (t Table) Insert[M any, P MessagePointer[M]](data P) (row Row[P], err error
 	if err != nil {
 		return row, fmt.Errorf("generate uuidv7: %w", err)
 	}
-	return t.InsertWithID[M, P](id, data)
+	return t.InsertWithIDContext[M, P](ctx, id, data)
 }
 
 func (t Table) InsertWithID[M any, P MessagePointer[M]](id string, data P) (row Row[P], err error) {
+	return t.InsertWithIDContext[M, P](context.Background(), id, data)
+}
+
+func (t Table) InsertWithIDContext[M any, P MessagePointer[M]](ctx context.Context, id string, data P) (row Row[P], err error) {
 	if t.q == nil {
 		return row, errors.New(errNilDBTX)
 	}
 	if data == nil {
 		return row, errors.New(errNilData)
 	}
-	return t.write[M, P](id, data, true)
+	return t.write[M, P](ctx, id, data, true)
 }
 
 func (t Table) UpdateByID[M any, P MessagePointer[M]](id string, data P) (row Row[P], err error) {
+	return t.UpdateByIDContext[M, P](context.Background(), id, data)
+}
+
+func (t Table) UpdateByIDContext[M any, P MessagePointer[M]](ctx context.Context, id string, data P) (row Row[P], err error) {
 	if t.q == nil {
 		return row, errors.New(errNilDBTX)
 	}
@@ -149,10 +171,10 @@ func (t Table) UpdateByID[M any, P MessagePointer[M]](id string, data P) (row Ro
 	if data == nil {
 		return row, errors.New(errNilData)
 	}
-	return t.write[M, P](id, data, false)
+	return t.write[M, P](ctx, id, data, false)
 }
 
-func (t Table) write[M any, P MessagePointer[M]](id string, data P, insert bool) (row Row[P], err error) {
+func (t Table) write[M any, P MessagePointer[M]](ctx context.Context, id string, data P, insert bool) (row Row[P], err error) {
 	if err := validateObjectID(id); err != nil {
 		return row, err
 	}
@@ -161,7 +183,7 @@ func (t Table) write[M any, P MessagePointer[M]](id string, data P, insert bool)
 			return row, fmt.Errorf("validate %s: %w", t.binding.Descriptor.TypeName, err)
 		}
 	}
-	atNs, err := WriteLocalObjectContext(context.Background(), t.q, t.binding, id, data, insert)
+	atNs, err := WriteLocalObjectContext(ctx, t.q, t.binding, id, data, insert)
 	if err != nil {
 		return row, err
 	}
@@ -169,6 +191,10 @@ func (t Table) write[M any, P MessagePointer[M]](id string, data P, insert bool)
 }
 
 func (t Table) UpdateRow[M any, P MessagePointer[M]](row Row[P]) (updated Row[P], err error) {
+	return t.UpdateRowContext[M, P](context.Background(), row)
+}
+
+func (t Table) UpdateRowContext[M any, P MessagePointer[M]](ctx context.Context, row Row[P]) (updated Row[P], err error) {
 	if t.q == nil {
 		return updated, errors.New(errNilDBTX)
 	}
@@ -178,7 +204,7 @@ func (t Table) UpdateRow[M any, P MessagePointer[M]](row Row[P]) (updated Row[P]
 	if row.Data == nil {
 		return updated, errors.New(errNilData)
 	}
-	return t.UpdateByID[M, P](row.ID, row.Data)
+	return t.UpdateByIDContext[M, P](ctx, row.ID, row.Data)
 }
 
 func validateObjectID(id string) (err error) {
@@ -192,17 +218,25 @@ func validateObjectID(id string) (err error) {
 }
 
 func (t Table) DeleteByID(id string) (err error) {
+	return t.DeleteByIDContext(context.Background(), id)
+}
+
+func (t Table) DeleteByIDContext(ctx context.Context, id string) (err error) {
 	if t.q == nil {
 		return errors.New(errNilDBTX)
 	}
 	if id == "" {
 		return errors.New(errEmptyID)
 	}
-	return DeleteLocalBoundObjectContext(context.Background(), t.q, t.binding, id)
+	return DeleteLocalBoundObjectContext(ctx, t.q, t.binding, id)
 }
 
 func (t Table) DeleteRow[P proto.Message](row Row[P]) (err error) {
-	return t.DeleteByID(row.ID)
+	return t.DeleteRowContext[P](context.Background(), row)
+}
+
+func (t Table) DeleteRowContext[P proto.Message](ctx context.Context, row Row[P]) (err error) {
+	return t.DeleteByIDContext(ctx, row.ID)
 }
 
 func (t Table) Changes[P proto.Message](ctx context.Context) (changes <-chan TableChange[P], err error) {
@@ -213,6 +247,10 @@ func (t Table) Changes[P proto.Message](ctx context.Context) (changes <-chan Tab
 }
 
 func (t Table) UpsertWithAtNs[M any, P MessagePointer[M]](id string, atNs int64, data P) (err error) {
+	return t.UpsertWithAtNsContext[M, P](context.Background(), id, atNs, data)
+}
+
+func (t Table) UpsertWithAtNsContext[M any, P MessagePointer[M]](ctx context.Context, id string, atNs int64, data P) (err error) {
 	if t.q == nil {
 		return errors.New(errNilDBTX)
 	}
@@ -226,10 +264,14 @@ func (t Table) UpsertWithAtNs[M any, P MessagePointer[M]](id string, atNs int64,
 	if err != nil {
 		return err
 	}
-	return t.applyIncoming(JSONLRecord{ID: id, AtNs: atNs, Data: dataJSON})
+	return t.applyIncoming(ctx, JSONLRecord{ID: id, AtNs: atNs, Data: dataJSON})
 }
 
 func (t Table) TombstoneWithAtNs(id string, atNs int64) (err error) {
+	return t.TombstoneWithAtNsContext(context.Background(), id, atNs)
+}
+
+func (t Table) TombstoneWithAtNsContext(ctx context.Context, id string, atNs int64) (err error) {
 	if t.q == nil {
 		return errors.New(errNilDBTX)
 	}
@@ -240,11 +282,10 @@ func (t Table) TombstoneWithAtNs(id string, atNs int64) (err error) {
 	if err != nil {
 		return err
 	}
-	return t.applyIncoming(JSONLRecord{ID: id, Deleted: true, AtNs: atNs, Data: dataJSON})
+	return t.applyIncoming(ctx, JSONLRecord{ID: id, Deleted: true, AtNs: atNs, Data: dataJSON})
 }
 
-func (t Table) applyIncoming(record JSONLRecord) (err error) {
-	ctx := context.Background()
+func (t Table) applyIncoming(ctx context.Context, record JSONLRecord) (err error) {
 	return t.q.WithTransaction(ctx, func(tx DBTX) error {
 		return ApplyIncomingObjectContext(ctx, tx, t.binding, record)
 	})

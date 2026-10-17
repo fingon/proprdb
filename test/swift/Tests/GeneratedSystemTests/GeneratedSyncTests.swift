@@ -1,7 +1,9 @@
 @testable import GeneratedSystem
+import Foundation
 import ProprDBSwiftRuntime
 import XCTest
 
+private let testStreamedName = "Streamed"
 private let testRemoteA = "remote-a"
 private let testRemoteWS = "   "
 private let testRemoteEmpty = ""
@@ -10,6 +12,47 @@ private let unknownID = "018f4f3f-6f9f-7a1b-8f55-1234567890aa"
 private let drainPersonID = "018f4f3f-6f9f-7a1b-8f55-1234567890ac"
 
 final class GeneratedSyncTests: XCTestCase {
+    func testStreamingExportAcrossBatches() throws {
+        let db = try SQLiteDatabase(path: ":memory:")
+        let crud = CRUD(db)
+        try crud.initialize()
+        let recordCount = 257
+        let unknownData = try marshalTypeOnlyAnyJSON(typeName: unknownTypeName)
+        for _ in 0..<recordCount {
+            _ = try crud.person.insert(makePerson(name: testStreamedName, age: 1))
+            let deleted = try crud.person.insert(makePerson(name: testStreamedName, age: 1))
+            try crud.person.deleteByID(deleted.id)
+            try unknownInsert(db, typeName: unknownTypeName, record: JSONLRecord(id: try uuidV7(), deleted: false, atNs: 1, data: unknownData))
+        }
+        let expected = try crud.prepareJSONL(remote: testRemoteA)
+        var output = Data()
+        var chunks = 0
+        let checkpoint = try crud.prepareJSONL(remote: testRemoteA) { data in
+            chunks += 1
+            output.append(data)
+        }
+        XCTAssertEqual(chunks, recordCount * 3)
+        XCTAssertEqual(String(decoding: output, as: UTF8.self), expected.text)
+        var deliveredChunks = 0
+        try crud.writeJSONL(remote: testRemoteA) { _ in deliveredChunks += 1 }
+        XCTAssertEqual(deliveredChunks, chunks)
+        try crud.acknowledgeJSONL(checkpoint)
+        XCTAssertEqual(try crud.writeJSONL(remote: testRemoteA), "")
+        try crud.discardJSONL(expected.checkpoint)
+    }
+
+    func testStreamingExportFailureDiscardsCheckpoint() throws {
+        struct WriteFailure: Error {}
+        let db = try SQLiteDatabase(path: ":memory:")
+        let crud = CRUD(db)
+        try crud.initialize()
+        _ = try crud.person.insert(makePerson(name: testStreamedName, age: 1))
+        XCTAssertThrowsError(try crud.prepareJSONL(remote: testRemoteA) { _ in throw WriteFailure() })
+        XCTAssertEqual(try scalarInt(db, sql: "SELECT COUNT(*) FROM _export_batches", arguments: []), 0)
+        XCTAssertEqual(try scalarInt(db, sql: "SELECT COUNT(*) FROM _export_batch_entries", arguments: []), 0)
+        XCTAssertFalse(try crud.writeJSONL(remote: testRemoteA).isEmpty)
+    }
+
     func testPreparedExportCheckpointLifecycle() throws {
         let db = try SQLiteDatabase(path: ":memory:")
         let crud = CRUD(db)
