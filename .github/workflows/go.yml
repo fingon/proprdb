@@ -20,4 +20,5 @@ jobs:
             test/system/go.sum
       - run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
       - run: make go-fixtures go-lint go-test go-build race verify-generated
+      - run: CGO_ENABLED=0 make go-test go-build
       - run: git diff --exit-code -- test/testdata test/system/system.proprdb.pb.go

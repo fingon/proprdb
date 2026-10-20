@@ -24,7 +24,7 @@ const (
 
 func newProjectionDB(t *testing.T) *sql.DB {
 	t.Helper()
-	db, err := sql.Open("sqlite3", ":memory:")
+	db, err := sql.Open(sqliteDriverName, ":memory:")
 	assert.NilError(t, err)
 	t.Cleanup(func() { assert.NilError(t, db.Close()) })
 	return db

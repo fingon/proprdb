@@ -11,9 +11,9 @@ import (
 	"testing"
 
 	rt "github.com/fingon/proprdb/rt"
-	_ "github.com/mattn/go-sqlite3"
 	"gotest.tools/v3/assert"
 	is "gotest.tools/v3/assert/cmp"
+	_ "modernc.org/sqlite"
 )
 
 type failAfterWriter struct {
@@ -31,7 +31,7 @@ func (w *failAfterWriter) Write(data []byte) (int, error) {
 }
 
 func TestPrepareAcknowledgeAndWriterRetry(t *testing.T) {
-	db, err := sql.Open("sqlite3", "file:audit-prepare?mode=memory&cache=shared")
+	db, err := sql.Open(sqliteDriverName, "file:audit-prepare?mode=memory&cache=shared")
 	assert.NilError(t, err)
 	t.Cleanup(func() { assert.NilError(t, db.Close()) })
 	crud := NewCRUD(rt.WrapDB(db))
@@ -70,7 +70,7 @@ func TestPrepareAcknowledgeAndWriterRetry(t *testing.T) {
 }
 
 func TestEqualTimestampConflictAndStringTimestamp(t *testing.T) {
-	db, err := sql.Open("sqlite3", "file:audit-conflict?mode=memory&cache=shared")
+	db, err := sql.Open(sqliteDriverName, "file:audit-conflict?mode=memory&cache=shared")
 	assert.NilError(t, err)
 	t.Cleanup(func() { assert.NilError(t, db.Close()) })
 	crud := NewCRUD(rt.WrapDB(db))
@@ -90,7 +90,7 @@ func TestEqualTimestampConflictAndStringTimestamp(t *testing.T) {
 }
 
 func TestUnknownRecordsAreForwarded(t *testing.T) {
-	db, err := sql.Open("sqlite3", "file:audit-unknown-forward?mode=memory&cache=shared")
+	db, err := sql.Open(sqliteDriverName, "file:audit-unknown-forward?mode=memory&cache=shared")
 	assert.NilError(t, err)
 	t.Cleanup(func() { assert.NilError(t, db.Close()) })
 	crud := NewCRUD(rt.WrapDB(db))

@@ -9,9 +9,9 @@ import (
 	"testing"
 
 	rt "github.com/fingon/proprdb/rt"
-	_ "github.com/mattn/go-sqlite3"
 	"gotest.tools/v3/assert"
 	is "gotest.tools/v3/assert/cmp"
+	_ "modernc.org/sqlite"
 )
 
 const (
@@ -32,13 +32,13 @@ const (
 
 func TestGeneratedJSONLSync(t *testing.T) {
 	ctx := context.Background()
-	sourceDB, err := sql.Open("sqlite3", "file:source-sync?mode=memory&cache=shared")
+	sourceDB, err := sql.Open(sqliteDriverName, "file:source-sync?mode=memory&cache=shared")
 	assert.NilError(t, err)
 	t.Cleanup(func() {
 		assert.NilError(t, sourceDB.Close())
 	})
 
-	targetDB, err := sql.Open("sqlite3", "file:target-sync?mode=memory&cache=shared")
+	targetDB, err := sql.Open(sqliteDriverName, "file:target-sync?mode=memory&cache=shared")
 	assert.NilError(t, err)
 	t.Cleanup(func() {
 		assert.NilError(t, targetDB.Close())
@@ -185,13 +185,13 @@ func TestGeneratedJSONLSync(t *testing.T) {
 
 func TestGeneratedJSONLEmptyRemoteNoSyncEntries(t *testing.T) {
 	ctx := context.Background()
-	sourceDB, err := sql.Open("sqlite3", "file:source-sync-empty-remote?mode=memory&cache=shared")
+	sourceDB, err := sql.Open(sqliteDriverName, "file:source-sync-empty-remote?mode=memory&cache=shared")
 	assert.NilError(t, err)
 	t.Cleanup(func() {
 		assert.NilError(t, sourceDB.Close())
 	})
 
-	targetDB, err := sql.Open("sqlite3", "file:target-sync-empty-remote?mode=memory&cache=shared")
+	targetDB, err := sql.Open(sqliteDriverName, "file:target-sync-empty-remote?mode=memory&cache=shared")
 	assert.NilError(t, err)
 	t.Cleanup(func() {
 		assert.NilError(t, targetDB.Close())
@@ -249,7 +249,7 @@ func TestGeneratedJSONLEmptyRemoteNoSyncEntries(t *testing.T) {
 
 func TestGeneratedJSONLUnknownTypesAreCompacted(t *testing.T) {
 	ctx := context.Background()
-	db, err := sql.Open("sqlite3", "file:unknown-sync-compact?mode=memory&cache=shared")
+	db, err := sql.Open(sqliteDriverName, "file:unknown-sync-compact?mode=memory&cache=shared")
 	assert.NilError(t, err)
 	t.Cleanup(func() {
 		assert.NilError(t, db.Close())
@@ -276,7 +276,7 @@ func TestGeneratedJSONLUnknownTypesAreCompacted(t *testing.T) {
 
 func TestGeneratedInitDrainsUnknownRowsForKnownType(t *testing.T) {
 	ctx := context.Background()
-	db, err := sql.Open("sqlite3", "file:unknown-sync-drain?mode=memory&cache=shared")
+	db, err := sql.Open(sqliteDriverName, "file:unknown-sync-drain?mode=memory&cache=shared")
 	assert.NilError(t, err)
 	t.Cleanup(func() {
 		assert.NilError(t, db.Close())

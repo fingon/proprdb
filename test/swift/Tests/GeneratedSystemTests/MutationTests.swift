@@ -67,6 +67,7 @@ final class MutationTests: XCTestCase {
         process.currentDirectoryURL = testsDirectory.appendingPathComponent("../../../system").standardizedFileURL
         var environment = ProcessInfo.processInfo.environment
         environment["PROPRDB_SWIFT_MUTATION_DB"] = path.path
+        environment["CGO_ENABLED"] = "0"
         process.environment = environment
         let output = Pipe()
         process.standardOutput = output

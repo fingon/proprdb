@@ -22,7 +22,7 @@ func BenchmarkInitialization(b *testing.B) {
 				if storage == "file" {
 					path = filepath.Join(b.TempDir(), "init.sqlite")
 				}
-				db, err := sql.Open("sqlite3", path)
+				db, err := sql.Open(sqliteDriverName, path)
 				assert.NilError(b, err)
 				db.SetMaxOpenConns(1)
 				b.Cleanup(func() { assert.NilError(b, db.Close()) })

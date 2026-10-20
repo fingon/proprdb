@@ -14,6 +14,7 @@ SWIFT_ENV=HOME=/tmp SWIFTPM_MODULECACHE_OVERRIDE=/tmp/swiftpm-module-cache CLANG
 SWIFT_ARGS?=--disable-sandbox
 GOLANGCI_LINT=$(shell go tool -n golangci-lint)
 PROTOC_GEN_GO=$(shell go tool -n protoc-gen-go)
+STRIP_PROTO_VERSIONS=perl -i -ne 'print unless /^\/\/ (?:versions:|\tprotoc(?:-gen-go)?\s+v\S+)$$/'
 PROTOC_GEN_SWIFT=test/swift/.build/checkouts/swift-protobuf/.build/debug/protoc-gen-swift
 
 .PHONY: all
@@ -42,6 +43,7 @@ generate: options go-fixtures swift-fixtures rust-fixtures
 
 go-fixtures: options protoc-gen-proprdb
 	protoc -I test/fixtures -I . --plugin=protoc-gen-go=$(PROTOC_GEN_GO) --go_out=test/system --go_opt=paths=source_relative --plugin=protoc-gen-proprdb=./protoc-gen-proprdb --proprdb_out=paths=source_relative:test/system test/fixtures/system.proto
+	$(STRIP_PROTO_VERSIONS) test/system/system.pb.go
 
 .PHONY: verify-generated
 verify-generated:
@@ -116,6 +118,7 @@ release-patch:
 .PHONY: options
 options:
 	protoc -I . --plugin=protoc-gen-go=$(PROTOC_GEN_GO) --go_out=paths=source_relative:. proto/proprdb/options.proto
+	$(STRIP_PROTO_VERSIONS) proto/proprdb/options.pb.go
 
 .PHONY: go-test go-lint go-build
 go-test:

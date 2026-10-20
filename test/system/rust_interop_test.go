@@ -23,7 +23,7 @@ func TestRustRuntimeInterop(t *testing.T) {
 	if dir == "" {
 		t.Skip("invoked by the Rust cross-language integration test")
 	}
-	db, err := sql.Open("sqlite3", filepath.Join(dir, "rust.db"))
+	db, err := sql.Open(sqliteDriverName, filepath.Join(dir, "rust.db"))
 	assert.NilError(t, err)
 	t.Cleanup(func() { assert.NilError(t, db.Close()) })
 	crud := NewCRUD(rt.WrapDB(db))
@@ -52,7 +52,7 @@ func TestRustRuntimeInterop(t *testing.T) {
 
 	jsonl, err := os.ReadFile(filepath.Join(dir, "rust.jsonl"))
 	assert.NilError(t, err)
-	target, err := sql.Open("sqlite3", ":memory:")
+	target, err := sql.Open(sqliteDriverName, ":memory:")
 	assert.NilError(t, err)
 	t.Cleanup(func() { assert.NilError(t, target.Close()) })
 	targetCRUD := NewCRUD(rt.WrapDB(target))

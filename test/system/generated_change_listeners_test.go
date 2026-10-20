@@ -8,15 +8,15 @@ import (
 	"time"
 
 	rt "github.com/fingon/proprdb/rt"
-	_ "github.com/mattn/go-sqlite3"
 	"gotest.tools/v3/assert"
 	is "gotest.tools/v3/assert/cmp"
+	_ "modernc.org/sqlite"
 )
 
 const changeListenerTimeout = 2 * time.Second
 
 func TestGeneratedChangeListenersLocalWrites(t *testing.T) {
-	db, err := sql.Open("sqlite3", "file:change-listeners-local?mode=memory&cache=shared")
+	db, err := sql.Open(sqliteDriverName, "file:change-listeners-local?mode=memory&cache=shared")
 	assert.NilError(t, err)
 	t.Cleanup(func() {
 		assert.NilError(t, db.Close())
@@ -82,12 +82,12 @@ func TestGeneratedChangeListenersLocalWrites(t *testing.T) {
 }
 
 func TestGeneratedChangeListenersImportsAndFailures(t *testing.T) {
-	sourceDB, err := sql.Open("sqlite3", "file:change-listeners-source?mode=memory&cache=shared")
+	sourceDB, err := sql.Open(sqliteDriverName, "file:change-listeners-source?mode=memory&cache=shared")
 	assert.NilError(t, err)
 	t.Cleanup(func() {
 		assert.NilError(t, sourceDB.Close())
 	})
-	targetDB, err := sql.Open("sqlite3", "file:change-listeners-target?mode=memory&cache=shared")
+	targetDB, err := sql.Open(sqliteDriverName, "file:change-listeners-target?mode=memory&cache=shared")
 	assert.NilError(t, err)
 	t.Cleanup(func() {
 		assert.NilError(t, targetDB.Close())

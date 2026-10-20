@@ -7,14 +7,14 @@ import (
 	"testing"
 
 	rt "github.com/fingon/proprdb/rt"
-	_ "github.com/mattn/go-sqlite3"
 	"gotest.tools/v3/assert"
 	is "gotest.tools/v3/assert/cmp"
+	_ "modernc.org/sqlite"
 )
 
 func TestRTIntrospectTablesUsesDataBlobWhenPresent(t *testing.T) {
 	ctx := context.Background()
-	db, err := sql.Open("sqlite3", "file:rt-introspect-data-column?mode=memory&cache=shared")
+	db, err := sql.Open(sqliteDriverName, "file:rt-introspect-data-column?mode=memory&cache=shared")
 	assert.NilError(t, err)
 	t.Cleanup(func() {
 		assert.NilError(t, db.Close())
@@ -39,7 +39,7 @@ func TestRTIntrospectTablesUsesDataBlobWhenPresent(t *testing.T) {
 
 func TestRTIntrospectTablesFallbackForNoDataColumn(t *testing.T) {
 	ctx := context.Background()
-	db, err := sql.Open("sqlite3", "file:rt-introspect-no-data-column?mode=memory&cache=shared")
+	db, err := sql.Open(sqliteDriverName, "file:rt-introspect-no-data-column?mode=memory&cache=shared")
 	assert.NilError(t, err)
 	t.Cleanup(func() {
 		assert.NilError(t, db.Close())
@@ -66,7 +66,7 @@ func TestRTIntrospectTablesFallbackForNoDataColumn(t *testing.T) {
 
 func TestRTIntrospectTablesEmptyTableReturnsZero(t *testing.T) {
 	ctx := context.Background()
-	db, err := sql.Open("sqlite3", "file:rt-introspect-empty?mode=memory&cache=shared")
+	db, err := sql.Open(sqliteDriverName, "file:rt-introspect-empty?mode=memory&cache=shared")
 	assert.NilError(t, err)
 	t.Cleanup(func() {
 		assert.NilError(t, db.Close())
@@ -82,7 +82,7 @@ func TestRTIntrospectTablesEmptyTableReturnsZero(t *testing.T) {
 }
 
 func TestRTIntrospectTablesMissingTableErrors(t *testing.T) {
-	db, err := sql.Open("sqlite3", "file:rt-introspect-missing-table?mode=memory&cache=shared")
+	db, err := sql.Open(sqliteDriverName, "file:rt-introspect-missing-table?mode=memory&cache=shared")
 	assert.NilError(t, err)
 	t.Cleanup(func() {
 		assert.NilError(t, db.Close())

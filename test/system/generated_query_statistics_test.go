@@ -7,14 +7,14 @@ import (
 	"testing"
 
 	rt "github.com/fingon/proprdb/rt"
-	_ "github.com/mattn/go-sqlite3"
 	"gotest.tools/v3/assert"
 	is "gotest.tools/v3/assert/cmp"
+	_ "modernc.org/sqlite"
 )
 
 func TestGeneratedQueryStatistics(t *testing.T) {
 	ctx := context.Background()
-	db, err := sql.Open("sqlite3", "file:query-statistics?mode=memory&cache=shared")
+	db, err := sql.Open(sqliteDriverName, "file:query-statistics?mode=memory&cache=shared")
 	assert.NilError(t, err)
 	t.Cleanup(func() {
 		assert.NilError(t, db.Close())

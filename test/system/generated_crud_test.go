@@ -6,12 +6,13 @@ import (
 	"testing"
 
 	rt "github.com/fingon/proprdb/rt"
-	_ "github.com/mattn/go-sqlite3"
 	"gotest.tools/v3/assert"
 	is "gotest.tools/v3/assert/cmp"
+	_ "modernc.org/sqlite"
 )
 
 const (
+	sqliteDriverName      = "sqlite"
 	countTombstoneByIDSQL = "SELECT COUNT(*) FROM _deleted WHERE table_name = ? AND id = ?"
 	personNameIndex       = "idx_generatedtest_example_person__name"
 	personNameAgeIndex    = "idx_generatedtest_example_person__name_age"
@@ -20,7 +21,7 @@ const (
 
 func TestGeneratedCRUD(t *testing.T) {
 	ctx := context.Background()
-	db, err := sql.Open("sqlite3", "file::memory:?cache=shared")
+	db, err := sql.Open(sqliteDriverName, "file::memory:?cache=shared")
 	assert.NilError(t, err)
 	t.Cleanup(func() {
 		assert.NilError(t, db.Close())
@@ -152,7 +153,7 @@ func TestGeneratedCRUD(t *testing.T) {
 }
 
 func TestGeneratedCRUDTableDescriptors(t *testing.T) {
-	db, err := sql.Open("sqlite3", "file::memory:?cache=shared")
+	db, err := sql.Open(sqliteDriverName, "file::memory:?cache=shared")
 	assert.NilError(t, err)
 	t.Cleanup(func() {
 		assert.NilError(t, db.Close())

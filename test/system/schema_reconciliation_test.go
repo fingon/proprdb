@@ -7,14 +7,14 @@ import (
 	"testing"
 
 	rt "github.com/fingon/proprdb/rt"
-	_ "github.com/mattn/go-sqlite3"
 	"google.golang.org/protobuf/proto"
 	"gotest.tools/v3/assert"
 	is "gotest.tools/v3/assert/cmp"
+	_ "modernc.org/sqlite"
 )
 
 func TestProjectionReconciliationRemovesObsoleteColumns(t *testing.T) {
-	db, err := sql.Open("sqlite3", "file:projection-remove?mode=memory&cache=shared")
+	db, err := sql.Open(sqliteDriverName, "file:projection-remove?mode=memory&cache=shared")
 	assert.NilError(t, err)
 	t.Cleanup(func() { assert.NilError(t, db.Close()) })
 	crud := NewCRUD(rt.WrapDB(db))
@@ -43,7 +43,7 @@ func TestProjectionReconciliationRemovesObsoleteColumns(t *testing.T) {
 }
 
 func TestProjectionReconciliationRejectsTypeChanges(t *testing.T) {
-	db, err := sql.Open("sqlite3", "file:projection-type?mode=memory&cache=shared")
+	db, err := sql.Open(sqliteDriverName, "file:projection-type?mode=memory&cache=shared")
 	assert.NilError(t, err)
 	t.Cleanup(func() { assert.NilError(t, db.Close()) })
 	q := rt.WrapDB(db)
@@ -57,7 +57,7 @@ func TestProjectionReconciliationRejectsTypeChanges(t *testing.T) {
 }
 
 func TestProjectionReconciliationRepairsLegacyOneofPresence(t *testing.T) {
-	db, err := sql.Open("sqlite3", "file:projection-oneof?mode=memory&cache=shared")
+	db, err := sql.Open(sqliteDriverName, "file:projection-oneof?mode=memory&cache=shared")
 	assert.NilError(t, err)
 	t.Cleanup(func() { assert.NilError(t, db.Close()) })
 	q := rt.WrapDB(db)
@@ -82,7 +82,7 @@ func TestProjectionReconciliationRepairsLegacyOneofPresence(t *testing.T) {
 }
 
 func TestKnownOmitSyncUnknownRecordDoesNotExport(t *testing.T) {
-	db, err := sql.Open("sqlite3", "file:known-omit-sync?mode=memory&cache=shared")
+	db, err := sql.Open(sqliteDriverName, "file:known-omit-sync?mode=memory&cache=shared")
 	assert.NilError(t, err)
 	t.Cleanup(func() { assert.NilError(t, db.Close()) })
 	crud := NewCRUD(rt.WrapDB(db))
@@ -102,7 +102,7 @@ func TestKnownOmitSyncUnknownRecordDoesNotExport(t *testing.T) {
 }
 
 func TestStoredInvalidObjectIDDoesNotFailInitialization(t *testing.T) {
-	db, err := sql.Open("sqlite3", "file:invalid-stored-id?mode=memory&cache=shared")
+	db, err := sql.Open(sqliteDriverName, "file:invalid-stored-id?mode=memory&cache=shared")
 	assert.NilError(t, err)
 	t.Cleanup(func() { assert.NilError(t, db.Close()) })
 	q := rt.WrapDB(db)

@@ -56,7 +56,7 @@ const (
 
 func mutationDatabase(t *testing.T, path string) (*sql.DB, rt.DBTX, *CRUD) {
 	t.Helper()
-	db, err := sql.Open("sqlite3", path)
+	db, err := sql.Open(sqliteDriverName, path)
 	assert.NilError(t, err)
 	db.SetMaxOpenConns(1)
 	t.Cleanup(func() { assert.NilError(t, db.Close()) })
