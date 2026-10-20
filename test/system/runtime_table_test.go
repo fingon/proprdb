@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 
 	rt "github.com/fingon/proprdb/rt"
@@ -218,4 +219,66 @@ func TestGeneratedContextCancellation(t *testing.T) {
 	rows, err := crud.Person.Select(selectObjectByID, row.ID)
 	assert.NilError(t, err)
 	assert.DeepEqual(t, rows, []PersonRow{row}, protocmp.Transform())
+}
+
+func TestConcurrentBulkSelections(t *testing.T) {
+	const rowCount = 32
+	_, q := openRuntimeTestDB(t)
+	crud := NewCRUD(q)
+	assert.NilError(t, crud.Init())
+	expected := make([]PersonRow, 0, rowCount)
+	for i := range rowCount {
+		row, err := crud.Person.Insert(&Person{Name: testPersonNameAda, Age: int64(i)})
+		assert.NilError(t, err)
+		expected = append(expected, row)
+	}
+	note, err := crud.Note.Insert(&Note{Text: testPersonNameGrace})
+	assert.NilError(t, err)
+	var callers sync.WaitGroup
+	for range 4 {
+		callers.Go(func() {
+			rows, err := crud.Person.SelectContext(t.Context(), "name = ? ORDER BY age", testPersonNameAda)
+			assert.Check(t, err == nil)
+			assert.DeepEqual(t, rows, expected, protocmp.Transform())
+			if len(rows) > 1 {
+				rows[0].Data.Name = testPersonNameGrace
+				assert.Equal(t, rows[1].Data.Name, testPersonNameAda)
+			}
+		})
+		callers.Go(func() {
+			rows, err := crud.Note.SelectContext(t.Context(), selectObjectByID, note.ID)
+			assert.Check(t, err == nil)
+			assert.DeepEqual(t, rows, []NoteRow{note}, protocmp.Transform())
+		})
+	}
+	callers.Wait()
+	rows, err := crud.Person.Select("name = ?", "missing")
+	assert.NilError(t, err)
+	assert.Assert(t, rows != nil)
+	assert.Equal(t, len(rows), 0)
+}
+
+func TestBulkSelectionDecodeFailure(t *testing.T) {
+	const rowCount = 32
+	db, q := openRuntimeTestDB(t)
+	crud := NewCRUD(q)
+	assert.NilError(t, crud.Init())
+	var corruptID string
+	for i := range rowCount {
+		row, err := crud.Person.Insert(&Person{Name: testPersonNameAda, Age: int64(i)})
+		assert.NilError(t, err)
+		if i == rowCount/2 {
+			corruptID = row.ID
+		}
+	}
+	_, err := db.Exec(`UPDATE "`+PersonTableName+`" SET data = ? WHERE id = ?`, []byte{0xff}, corruptID)
+	assert.NilError(t, err)
+	rows, err := crud.Person.Select("name = ? ORDER BY age", testPersonNameAda)
+	assert.ErrorContains(t, err, "unmarshal")
+	assert.Assert(t, rows == nil)
+	_, err = crud.Person.UpdateByID(corruptID, &Person{Name: testPersonNameGrace})
+	assert.NilError(t, err)
+	rows, err = crud.Person.Select("name = ? ORDER BY age", testPersonNameAda)
+	assert.NilError(t, err)
+	assert.Equal(t, len(rows), rowCount-1)
 }

@@ -87,7 +87,10 @@ func (t Table) SelectContext[M any, P MessagePointer[M]](ctx context.Context, wh
 		query += " WHERE " + where
 	}
 	selectRows := func() (result []Row[P], err error) {
-		rows, err := t.q.QueryContext(ctx, query, args...)
+		slog.Debug("select generated table", "table", tableName)
+		batch := newDecodeBatch(ctx)
+		defer batch.cancel()
+		rows, err := t.q.QueryContext(batch.ctx, query, args...)
 		if err != nil {
 			return nil, fmt.Errorf("select from %s: %w", tableName, err)
 		}
@@ -101,6 +104,13 @@ func (t Table) SelectContext[M any, P MessagePointer[M]](ctx context.Context, wh
 				result = nil
 			}
 		}()
+		defer func() {
+			batch.fail(err)
+			if decodeErr := batch.finish(); decodeErr != nil {
+				err = decodeErr
+				result = nil
+			}
+		}()
 		result = make([]Row[P], 0)
 		for rows.Next() {
 			var row Row[P]
@@ -109,8 +119,13 @@ func (t Table) SelectContext[M any, P MessagePointer[M]](ctx context.Context, wh
 				return nil, fmt.Errorf("scan row from %s: %w", tableName, err)
 			}
 			row.Data = P(new(M))
-			if err := proto.Unmarshal(dataBytes, row.Data); err != nil {
-				return nil, fmt.Errorf("unmarshal %s row: %w", t.binding.Descriptor.TypeName, err)
+			if err := batch.submit(sharedDecodePool(), func() error {
+				if err := proto.Unmarshal(dataBytes, row.Data); err != nil {
+					return fmt.Errorf("unmarshal %s row: %w", t.binding.Descriptor.TypeName, err)
+				}
+				return nil
+			}); err != nil {
+				return nil, err
 			}
 			result = append(result, row)
 		}
