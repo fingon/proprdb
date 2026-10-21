@@ -410,13 +410,13 @@ fn introspection_counts_payload_and_core_tables() -> Result<()> {
     crud.initialize()?;
     let row = crud.person.insert(&person())?;
     let tables = crud.introspect_tables()?;
-    assert_eq!(tables.len(), 16);
+    assert_eq!(tables.len(), 19);
     assert_eq!(
         tables
             .iter()
             .filter(|table| table.descriptor.is_core)
             .count(),
-        12
+        15
     );
     let person_table = tables
         .iter()
@@ -518,6 +518,19 @@ fn go_and_rust_share_sqlite_jsonl_and_checkpoints() -> Result<()> {
             "refresh",
         )?;
         proprdb_runtime::acknowledge_dirty_window(&connection, &window.token)?;
+        proprdb_runtime::register_dirty_keys(
+            &connection,
+            system::PersonModel::TABLE_NAME,
+            "age",
+            "refresh",
+        )?;
+        let keys = proprdb_runtime::read_dirty_keys(
+            &connection,
+            system::PersonModel::TABLE_NAME,
+            "age",
+            "refresh",
+        )?;
+        proprdb_runtime::acknowledge_dirty_keys(&connection, &keys.token)?;
         crud.read_jsonl("", Cursor::new(GO_RECORDS))?;
         let file = std::fs::File::create(directory.path().join("rust.jsonl"))?;
         let checkpoint = crud.prepare_jsonl("go", file)?;
@@ -552,6 +565,15 @@ fn go_and_rust_share_sqlite_jsonl_and_checkpoints() -> Result<()> {
     )?;
     assert_eq!((window.lower, window.upper), (Some(35), Some(41)));
     proprdb_runtime::acknowledge_dirty_window(&connection, &window.token)?;
+    let keys = proprdb_runtime::read_dirty_keys(
+        &connection,
+        system::PersonModel::TABLE_NAME,
+        "age",
+        "refresh",
+    )?;
+    assert!(keys.dirty && !keys.full);
+    assert_eq!(keys.ids, [FIRST_ID]);
+    proprdb_runtime::acknowledge_dirty_keys(&connection, &keys.token)?;
     assert_eq!(data.name, "Grace");
     assert_eq!(data.age, 41);
     let checkpoint: JsonlCheckpoint =

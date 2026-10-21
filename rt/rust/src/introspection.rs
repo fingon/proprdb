@@ -49,7 +49,7 @@ pub fn clear_query_statistics(connection: &Connection) -> Result<()> {
     Ok(())
 }
 
-pub(crate) const CORE_TABLES: [&str; 12] = [
+pub(crate) const CORE_TABLES: [&str; 15] = [
     "_deleted",
     "_sync",
     "_proprdb_schema",
@@ -62,6 +62,9 @@ pub(crate) const CORE_TABLES: [&str; 12] = [
     crate::mutation::CORE_TABLE_GENERATION,
     crate::mutation::CORE_TABLE_DIRTY_DEFINITION,
     crate::mutation::CORE_TABLE_DIRTY_WINDOW,
+    crate::dirty_keys::CORE_TABLE_DIRTY_KEYS_DEFINITION,
+    crate::dirty_keys::CORE_TABLE_DIRTY_KEYS_CONSUMER,
+    crate::dirty_keys::CORE_TABLE_DIRTY_KEYS_ENTRY,
 ];
 
 pub(crate) fn introspect(

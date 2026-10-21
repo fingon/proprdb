@@ -273,6 +273,17 @@ func (e rustEmitter) emitModel(model rustModel) {
 		}
 		g.P("];")
 	}
+	if len(m.DirtyKeys) > 0 {
+		g.P("const DIRTY_KEYS: &[", rustRuntime, "::DirtyKeysDescriptor] = &[")
+		for _, tracker := range m.DirtyKeys {
+			g.P(rustRuntime, "::DirtyKeysDescriptor { name: ", strconv.Quote(tracker.Name), ", watched_columns: &[")
+			for _, column := range tracker.WatchedColumns {
+				g.P(strconv.Quote(column), ",")
+			}
+			g.P("] },")
+		}
+		g.P("];")
+	}
 	g.P("const COLUMNS: &[", rustRuntime, "::Column] = &[")
 	for _, field := range m.ProjectedFields {
 		g.P(rustRuntime, "::Column { name: ", strconv.Quote(field.ColumnName), ", definition: ", strconv.Quote(field.createColumnSQL()), ", legacy_oneof_presence_repair: ", field.LegacyOneofPresenceRepair, " },")

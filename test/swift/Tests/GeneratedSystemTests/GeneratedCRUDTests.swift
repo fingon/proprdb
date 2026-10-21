@@ -167,6 +167,9 @@ final class GeneratedCRUDTests: XCTestCase {
                 GeneratedTableDescriptor(tableName: coreTableGenerationName, typeName: "", isCore: true, syncEnabled: false),
                 GeneratedTableDescriptor(tableName: coreTableDirtyDefinitionName, typeName: "", isCore: true, syncEnabled: false),
                 GeneratedTableDescriptor(tableName: coreTableDirtyWindowName, typeName: "", isCore: true, syncEnabled: false),
+                GeneratedTableDescriptor(tableName: coreTableDirtyKeysDefinitionName, typeName: "", isCore: true, syncEnabled: false),
+                GeneratedTableDescriptor(tableName: coreTableDirtyKeysConsumerName, typeName: "", isCore: true, syncEnabled: false),
+                GeneratedTableDescriptor(tableName: coreTableDirtyKeysEntryName, typeName: "", isCore: true, syncEnabled: false),
             ]
         )
     }

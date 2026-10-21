@@ -14,6 +14,11 @@ message Index {
   repeated string fields = 1;
 }
 
+message DirtyKeys {
+  string name = 1;
+  repeated string watched_fields = 2;
+}
+
 message DirtyWindow {
   string name = 1;
   string start_field = 2;
@@ -30,4 +35,5 @@ extend google.protobuf.MessageOptions {
   bool query_statistics = 50008;
   repeated string external_paths = 50009;
   repeated DirtyWindow dirty_windows = 50010;
+  repeated DirtyKeys dirty_keys = 50011;
 }

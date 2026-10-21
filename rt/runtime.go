@@ -439,6 +439,7 @@ type GeneratedTableBinding struct {
 	GeneratedIndexes  []GeneratedIndexDescriptor
 	GeneratedIndexKey string
 	DirtyWindows      []DirtyWindowDescriptor
+	DirtyKeys         []DirtyKeysDescriptor
 	ProjectedValues   func(proto.Message) ([]any, error)
 	ValidateMessage   func(proto.Message) error
 }
@@ -471,6 +472,9 @@ func CoreTableDescriptors() []GeneratedTableDescriptor {
 		{TableName: CoreTableGenerationName, IsCore: true},
 		{TableName: CoreTableDirtyDefinitionName, IsCore: true},
 		{TableName: CoreTableDirtyWindowName, IsCore: true},
+		{TableName: CoreTableDirtyKeysDefinitionName, IsCore: true},
+		{TableName: CoreTableDirtyKeysConsumerName, IsCore: true},
+		{TableName: CoreTableDirtyKeysEntryName, IsCore: true},
 	}
 }
 

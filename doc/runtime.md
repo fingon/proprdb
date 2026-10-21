@@ -218,3 +218,83 @@ full refresh for its existing consumers; removed declarations remove their
 consumers. Unchanged initialization reads metadata without scanning object rows.
 Direct SQL writers remain responsible for consistency between payloads and
 projection columns and must preserve the managed tracking tables and triggers.
+
+## Dirty-key trackers
+
+Tables declaring `dirty_keys` retain affected object IDs for independently
+registered `(table, tracker, consumer)` identities. Each consumer stores a set,
+not an event history. Repeated writes deduplicate IDs while advancing its
+revision. Deletion/reinsertion does not cancel pending work. Deleted IDs remain
+until acknowledged, independently of sync tombstones. Read the current object
+by ID to distinguish a surviving object from a deletion; historical payloads
+and deletion flags are not retained.
+
+Inserts and deletes always contribute their IDs. Updates contribute the ID when
+any watched projected value changes, using NULL-safe comparisons. With no
+`watched_fields`, any actual stored-column change qualifies. ID changes
+contribute both old and new IDs regardless of watched values. Primary-key
+replacements through `INSERT OR REPLACE` and `UPDATE OR REPLACE` retain affected
+IDs with recursive triggers enabled or disabled, even when the replacement
+has identical watched values. This covers managed object-table primary keys;
+application-defined unique constraints are outside the managed schema.
+
+CRUD, direct SQL, accepted sync imports, and unknown-row draining use the same
+triggers. Ignored stale/idempotent sync records and sync bookkeeping alone do
+not dirty keys. Tracking is persistent, local to SQLite, and excluded from JSONL.
+
+| Operation | Go (`rt`) | Swift | Rust |
+| --- | --- | --- | --- |
+| Register | `RegisterDirtyKeys` | `registerDirtyKeys` | `register_dirty_keys` |
+| Read | `ReadDirtyKeys` | `readDirtyKeys` | `read_dirty_keys` |
+| Acknowledge | `AcknowledgeDirtyKeys` | `acknowledgeDirtyKeys` | `acknowledge_dirty_keys` |
+| Remove consumer | `RemoveDirtyKeysConsumer` | `removeDirtyKeysConsumer` | `remove_dirty_keys_consumer` |
+
+Registration requires an initialized declaration and nonempty consumer name.
+It is idempotent. New consumers start dirty with `Full = true` without scanning
+existing objects. Full repair must cover all application dependencies, including
+obsolete derived output; pending IDs cannot restrict that repair. Unregistered
+consumers accumulate no state. Algorithm changes require application-controlled
+full repair, for example by removing and re-registering the consumer.
+
+Reads return `Dirty`, `Full`, sorted unique `IDs` (`ids` in Swift/Rust), and an
+opaque token. A read obtains metadata and IDs in one transaction or savepoint
+and does not clear them. There is no pagination. Full-repair state can coexist
+with pending IDs. Clean state has neither repair flags nor pending IDs.
+
+Acknowledgment covers the entire read. It atomically compares the registration
+and revision, clears pending IDs and repair flags, and advances the revision.
+Any later qualifying mutation, including a repeated mutation to an already
+pending ID, makes the token stale. Acknowledgment, schema invalidation, and
+removal/re-registration also invalidate tokens. Failed acknowledgment clears
+nothing and reports `ErrStaleDirtyKeys`, `StaleDirtyKeysError`, or
+`Error::StaleDirtyKeys`. Re-read and retry. Tokens are process-local values;
+read new state after reopening rather than persisting tokens.
+
+Commit derived output and acknowledgment in the same caller transaction. All
+operations support nested savepoints. Rollback restores both pending keys and
+derived output. If output writes alter tracked inputs, process and re-read those
+inputs before acknowledging. Propagate stale acknowledgment errors so dependent
+output rolls back.
+
+```go
+err := q.WithTransaction(ctx, func(tx rt.DBTX) error {
+    state, err := rt.ReadDirtyKeys(ctx, tx, itemTable, "labels", "search")
+    if err != nil {
+        return err
+    }
+    if !state.Dirty {
+        return nil
+    }
+    if err := repairSearch(ctx, tx, state.Full, state.IDs); err != nil {
+        return err
+    }
+    return rt.AcknowledgeDirtyKeys(ctx, tx, state.Token)
+})
+```
+
+All runtimes share tracker definitions, storage, and canonical mutation
+signatures. Initialization upgrades existing databases transactionally without
+scanning objects for historical keys. Changed projection or mutation declarations
+invalidate tokens and require full repair for surviving consumers; removed
+trackers remove their consumers and pending IDs. Unchanged initialization
+preserves pending state. Revision overflow fails the write.

@@ -9,7 +9,7 @@ pub const CORE_TABLE_GENERATION: &str = "_proprdb_generations";
 pub const CORE_TABLE_DIRTY_DEFINITION: &str = "_proprdb_dirty_definitions";
 pub const CORE_TABLE_DIRTY_WINDOW: &str = "_proprdb_dirty_windows";
 const TRIGGER_PREFIX: &str = "_proprdb_mutation_";
-const FORMAT: &str = "v2|";
+const FORMAT: &str = "v3|";
 const BEFORE_INSERT: &str = "BEFORE_INSERT";
 const BEFORE_UPDATE: &str = "BEFORE_UPDATE";
 const EVENTS: [&str; 5] = ["INSERT", "UPDATE", "DELETE", BEFORE_INSERT, BEFORE_UPDATE];
@@ -54,7 +54,7 @@ pub(crate) fn ensure_tables(connection: &Connection) -> Result<()> {
         CREATE TABLE IF NOT EXISTS {CORE_TABLE_DIRTY_DEFINITION} (table_name TEXT NOT NULL, window_name TEXT NOT NULL, start_column TEXT NOT NULL, end_column TEXT NOT NULL, PRIMARY KEY(table_name, window_name));
         CREATE TABLE IF NOT EXISTS {CORE_TABLE_DIRTY_WINDOW} (table_name TEXT NOT NULL, window_name TEXT NOT NULL, consumer TEXT NOT NULL, registration TEXT NOT NULL, revision INTEGER NOT NULL CHECK(typeof(revision) = 'integer' AND revision >= 0), dirty INTEGER NOT NULL, full INTEGER NOT NULL, lower_bound INTEGER, upper_bound INTEGER, PRIMARY KEY(table_name, window_name, consumer));"
     ))?;
-    Ok(())
+    crate::dirty_keys::ensure_tables(connection)
 }
 
 fn signature<M: Model>() -> String {
@@ -67,7 +67,7 @@ fn signature<M: Model>() -> String {
             window.name, window.start_column, window.end_column
         )
     }));
-    parts.join("|")
+    parts.join("|") + &crate::dirty_keys::signature::<M>()
 }
 
 pub(crate) fn prepare<M: Model>(connection: &Connection) -> Result<bool> {
@@ -80,6 +80,7 @@ pub(crate) fn prepare<M: Model>(connection: &Connection) -> Result<bool> {
         .optional()?;
     let changed = stored.as_deref() != Some(&signature::<M>());
     if changed {
+        crate::dirty_keys::drop_triggers(connection, M::TABLE_NAME)?;
         for event in EVENTS {
             connection.execute_batch(&format!(
                 "DROP TRIGGER IF EXISTS {}",
@@ -114,7 +115,7 @@ pub(crate) fn finish<M: Model>(connection: &Connection, changed: bool) -> Result
         }
         connection.execute_batch(&trigger_sql::<M>(event))?;
     }
-    Ok(())
+    crate::dirty_keys::reconcile::<M>(connection, changed)
 }
 
 fn trigger_sql<M: Model>(event: &str) -> String {

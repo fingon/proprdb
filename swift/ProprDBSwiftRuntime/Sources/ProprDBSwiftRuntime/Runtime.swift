@@ -203,6 +203,7 @@ public struct GeneratedTableBinding: Sendable {
     public let createTableSQL: String
     public let projectionSchema: String
     public let dirtyWindows: [DirtyWindowDescriptor]
+    public let dirtyKeys: [DirtyKeysDescriptor]
     public let projectedColumns: [ProjectedColumnDescriptor]
     public let generatedIndexes: [GeneratedIndexDescriptor]
     public let generatedIndexPrefix: String
@@ -219,6 +220,7 @@ public struct GeneratedTableBinding: Sendable {
         createTableSQL: String,
         projectionSchema: String,
         dirtyWindows: [DirtyWindowDescriptor] = [],
+        dirtyKeys: [DirtyKeysDescriptor] = [],
         projectedColumns: [ProjectedColumnDescriptor],
         generatedIndexes: [GeneratedIndexDescriptor],
         generatedIndexPrefix: String,
@@ -234,6 +236,7 @@ public struct GeneratedTableBinding: Sendable {
         self.createTableSQL = createTableSQL
         self.projectionSchema = projectionSchema
         self.dirtyWindows = dirtyWindows
+        self.dirtyKeys = dirtyKeys
         self.projectedColumns = projectedColumns
         self.generatedIndexes = generatedIndexes
         self.generatedIndexPrefix = generatedIndexPrefix
@@ -287,6 +290,9 @@ public func coreTableDescriptors() -> [GeneratedTableDescriptor] {
         GeneratedTableDescriptor(tableName: coreTableGenerationName, typeName: "", isCore: true, syncEnabled: false),
         GeneratedTableDescriptor(tableName: coreTableDirtyDefinitionName, typeName: "", isCore: true, syncEnabled: false),
         GeneratedTableDescriptor(tableName: coreTableDirtyWindowName, typeName: "", isCore: true, syncEnabled: false),
+        GeneratedTableDescriptor(tableName: coreTableDirtyKeysDefinitionName, typeName: "", isCore: true, syncEnabled: false),
+        GeneratedTableDescriptor(tableName: coreTableDirtyKeysConsumerName, typeName: "", isCore: true, syncEnabled: false),
+        GeneratedTableDescriptor(tableName: coreTableDirtyKeysEntryName, typeName: "", isCore: true, syncEnabled: false),
     ]
 }
 

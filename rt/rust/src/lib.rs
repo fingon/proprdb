@@ -8,10 +8,15 @@ use prost::Message;
 pub use rusqlite::types::Value;
 
 mod connection;
+mod dirty_keys;
 mod introspection;
 mod mutation;
 mod sync;
 pub use connection::{ChangeReceiver, Connection, Transaction};
+pub use dirty_keys::{
+    DirtyKeysDescriptor, DirtyKeysState, DirtyKeysToken, acknowledge_dirty_keys, read_dirty_keys,
+    register_dirty_keys, remove_dirty_keys_consumer,
+};
 pub use introspection::{
     QueryStatistic, TableDescriptor, TableIntrospection, clear_query_statistics, query_statistics,
 };
@@ -33,6 +38,8 @@ pub type Result<T> = std::result::Result<T, Error>;
 pub enum Error {
     #[error("stale dirty window acknowledgment")]
     StaleDirtyWindow,
+    #[error("stale dirty keys acknowledgment")]
+    StaleDirtyKeys,
     #[error("I/O: {0}")]
     Io(#[from] std::io::Error),
     #[error("JSON: {0}")]
@@ -89,6 +96,7 @@ pub trait Model {
     const COLUMNS: &[Column];
     const INDEXES: &[&str];
     const DIRTY_WINDOWS: &[DirtyWindowDescriptor] = &[];
+    const DIRTY_KEYS: &[DirtyKeysDescriptor] = &[];
     fn descriptor() -> Result<MessageDescriptor>;
     fn projected_values(data: &Self::Data) -> Vec<Value>;
     fn validate(_data: &Self::Data) -> Result<()> {

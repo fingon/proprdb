@@ -40,6 +40,10 @@ func TestRustRuntimeInterop(t *testing.T) {
 	assert.Equal(t, state.Lower.Int64, int64(35))
 	assert.Equal(t, state.Upper.Int64, int64(35))
 	assert.NilError(t, rt.AcknowledgeDirtyWindow(ctx, q, state.Token))
+	keys := keyState(t, q, keysAge, mutationConsumer)
+	assert.Assert(t, keys.Dirty && !keys.Full)
+	assert.DeepEqual(t, keys.IDs, []string{rustInteropID})
+	assert.NilError(t, rt.AcknowledgeDirtyKeys(ctx, q, keys.Token))
 
 	checkpointBytes, err := os.ReadFile(filepath.Join(dir, "rust.checkpoint"))
 	assert.NilError(t, err)

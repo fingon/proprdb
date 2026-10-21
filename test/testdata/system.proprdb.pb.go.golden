@@ -48,6 +48,12 @@ var PersonGeneratedBinding = rt.GeneratedTableBinding{
 	DirtyWindows: []rt.DirtyWindowDescriptor{
 		{Name: "age", StartColumn: "age", EndColumn: "age"},
 	},
+	DirtyKeys: []rt.DirtyKeysDescriptor{
+		{Name: "age", WatchedColumns: []string{
+			"age",
+		}},
+		{Name: "all", WatchedColumns: []string{}},
+	},
 	ProjectedColumns: []rt.ProjectedColumnDescriptor{
 		{Name: "name", ProtoKind: "string", SQLiteType: "TEXT", DefaultSQL: "''", Nullable: false, LegacyOneofPresenceRepair: false},
 		{Name: "age", ProtoKind: "int64", SQLiteType: "INTEGER", DefaultSQL: "0", Nullable: false, LegacyOneofPresenceRepair: false},
@@ -219,6 +225,9 @@ var NoteGeneratedBinding = rt.GeneratedTableBinding{
 	CreateTableSQL:    NoteCreateTableSQL,
 	ProjectionSchema:  NoteProjectionSchema,
 	GeneratedIndexKey: NoteGeneratedIndexPrefix,
+	DirtyKeys: []rt.DirtyKeysDescriptor{
+		{Name: "all", WatchedColumns: []string{}},
+	},
 	ProjectedColumns: []rt.ProjectedColumnDescriptor{
 		{Name: "text", ProtoKind: "string", SQLiteType: "TEXT", DefaultSQL: "''", Nullable: false, LegacyOneofPresenceRepair: false},
 	},
@@ -515,6 +524,12 @@ var PhotoGeneratedBinding = rt.GeneratedTableBinding{
 	GeneratedIndexKey: PhotoGeneratedIndexPrefix,
 	DirtyWindows: []rt.DirtyWindowDescriptor{
 		{Name: "capture", StartColumn: "exif_create_utc_time_seconds", EndColumn: "exif_modify_utc_time_seconds"},
+	},
+	DirtyKeys: []rt.DirtyKeysDescriptor{
+		{Name: "location", WatchedColumns: []string{
+			"location_altitude",
+			"location_label",
+		}},
 	},
 	ProjectedColumns: []rt.ProjectedColumnDescriptor{
 		{Name: "exif_create_utc_time_seconds", ProtoKind: "int64", SQLiteType: "INTEGER", DefaultSQL: "0", Nullable: true, LegacyOneofPresenceRepair: false},

@@ -8,6 +8,11 @@ import "proto/proprdb/options.proto";
 option go_package = "generatedtest/gen;genexample";
 
 message Person {
+  option (com.github.fingon.proprdb.dirty_keys) = {name: "all"};
+  option (com.github.fingon.proprdb.dirty_keys) = {
+    name: "age"
+    watched_fields: "age"
+  };
   option (com.github.fingon.proprdb.dirty_windows) = {
     name: "age"
     start_field: "age"
@@ -35,6 +40,7 @@ message Person {
 }
 
 message Note {
+  option (com.github.fingon.proprdb.dirty_keys) = {name: "all"};
   option (com.github.fingon.proprdb.omit_sync) = true;
   option (com.github.fingon.proprdb.change_listeners) = true;
   string text = 1 [(com.github.fingon.proprdb.external) = true];
@@ -53,6 +59,11 @@ message Hidden {
 }
 
 message Photo {
+  option (com.github.fingon.proprdb.dirty_keys) = {
+    name: "location"
+    watched_fields: "location.altitude"
+    watched_fields: "location.label"
+  };
   option (com.github.fingon.proprdb.dirty_windows) = {
     name: "capture"
     start_field: "exif_create.utc_time.seconds"

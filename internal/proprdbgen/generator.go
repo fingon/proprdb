@@ -53,6 +53,12 @@ type messageModel struct {
 	ChangeListeners     bool
 	QueryStatistics     bool
 	DirtyWindows        []messageDirtyWindow
+	DirtyKeys           []messageDirtyKeys
+}
+
+type messageDirtyKeys struct {
+	Name           string
+	WatchedColumns []string
 }
 
 type messageDirtyWindow struct{ Name, StartColumn, EndColumn string }
@@ -339,6 +345,10 @@ func (c modelCollector) buildModel(message *protogen.Message) (messageModel, err
 	if err != nil {
 		return messageModel{}, fmt.Errorf("message %s dirty_windows option: %w", message.Desc.FullName(), err)
 	}
+	dirtyKeys, err := c.messageDirtyKeys(message, projectedColumnsByPath)
+	if err != nil {
+		return messageModel{}, fmt.Errorf("message %s dirty_keys option: %w", message.Desc.FullName(), err)
+	}
 	return messageModel{
 		GoName:              message.GoIdent.GoName,
 		SwiftTypeName:       swiftMessageTypeNameForMessage(message),
@@ -356,7 +366,46 @@ func (c modelCollector) buildModel(message *protogen.Message) (messageModel, err
 		ChangeListeners:     changeListeners,
 		QueryStatistics:     queryStatistics,
 		DirtyWindows:        dirtyWindows,
+		DirtyKeys:           dirtyKeys,
 	}, nil
+}
+
+func (c modelCollector) messageDirtyKeys(message *protogen.Message, columns map[string]string) (trackers []messageDirtyKeys, err error) {
+	options := message.Desc.Options()
+	if !proto.HasExtension(options, proprdbpb.E_DirtyKeys) {
+		return nil, nil
+	}
+	declarations, ok := proto.GetExtension(options, proprdbpb.E_DirtyKeys).([]*proprdbpb.DirtyKeys)
+	if !ok {
+		return nil, errors.New("invalid dirty_keys extension")
+	}
+	names := make(map[string]bool)
+	for _, declaration := range declarations {
+		if declaration == nil || !dirtyWindowNamePattern.MatchString(declaration.Name) {
+			return nil, errors.New("dirty keys name must match [a-z][a-z0-9_]*")
+		}
+		if names[declaration.Name] {
+			return nil, fmt.Errorf("duplicate dirty keys %s", declaration.Name)
+		}
+		names[declaration.Name] = true
+		tracker := messageDirtyKeys{Name: declaration.Name}
+		paths := make(map[string]bool)
+		for _, path := range declaration.WatchedFields {
+			if paths[path] {
+				return nil, fmt.Errorf("duplicate watched field %q", path)
+			}
+			paths[path] = true
+			column := columns[path]
+			if column == "" {
+				return nil, fmt.Errorf("dirty keys field %q must already be projected", path)
+			}
+			tracker.WatchedColumns = append(tracker.WatchedColumns, column)
+		}
+		sort.Strings(tracker.WatchedColumns)
+		trackers = append(trackers, tracker)
+	}
+	sort.Slice(trackers, func(i, j int) bool { return trackers[i].Name < trackers[j].Name })
+	return trackers, nil
 }
 
 func (c modelCollector) messageDirtyWindows(message *protogen.Message, fields map[string]*protogen.Field, columns map[string]string) (windows []messageDirtyWindow, err error) {
@@ -744,6 +793,17 @@ func (e generatorEmitter) emitModel(model messageModel) {
 		g.P("\tDirtyWindows: []rt.DirtyWindowDescriptor{")
 		for _, window := range model.DirtyWindows {
 			g.P("{Name: ", strconv.Quote(window.Name), ", StartColumn: ", strconv.Quote(window.StartColumn), ", EndColumn: ", strconv.Quote(window.EndColumn), "},")
+		}
+		g.P("},")
+	}
+	if len(model.DirtyKeys) > 0 {
+		g.P("DirtyKeys: []rt.DirtyKeysDescriptor{")
+		for _, tracker := range model.DirtyKeys {
+			g.P("{Name: ", strconv.Quote(tracker.Name), ", WatchedColumns: []string{")
+			for _, column := range tracker.WatchedColumns {
+				g.P(strconv.Quote(column), ",")
+			}
+			g.P("}},")
 		}
 		g.P("},")
 	}

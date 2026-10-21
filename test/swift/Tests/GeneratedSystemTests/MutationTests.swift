@@ -55,6 +55,8 @@ final class MutationTests: XCTestCase {
         let crud = CRUD(db)
         try crud.initialize()
         try registerAge(db)
+        try registerDirtyKeys(db, table: PersonTableName, tracker: ageWindow, consumer: mutationConsumer)
+        try acknowledgeDirtyKeys(db, token: readDirtyKeys(db, table: PersonTableName, tracker: ageWindow, consumer: mutationConsumer).token)
         var person = Generatedtest_Example_Person()
         person.name = "Ada"
         person.age = 10
@@ -76,6 +78,10 @@ final class MutationTests: XCTestCase {
         let data = output.fileHandleForReading.readDataToEndOfFile()
         process.waitUntilExit()
         XCTAssertEqual(process.terminationStatus, 0, String(decoding: data, as: UTF8.self))
+        let keys = try readDirtyKeys(db, table: PersonTableName, tracker: ageWindow, consumer: mutationConsumer)
+        XCTAssertTrue(keys.dirty && !keys.full)
+        XCTAssertEqual(keys.ids, [id])
+        try acknowledgeDirtyKeys(db, token: keys.token)
         XCTAssertEqual(try tableGenerations(db, tables: [PersonTableName])[PersonTableName], 2)
         let state = try ageState(db)
         XCTAssertEqual(state.lower, 10)

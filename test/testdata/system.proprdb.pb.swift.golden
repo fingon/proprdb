@@ -27,6 +27,13 @@ private let PersonGeneratedBinding = GeneratedTableBinding(
 	dirtyWindows: [
 DirtyWindowDescriptor(name: "age", startColumn: "age", endColumn: "age"),
 ],
+dirtyKeys: [
+DirtyKeysDescriptor(name: "age", watchedColumns: [
+"age",
+]),
+DirtyKeysDescriptor(name: "all", watchedColumns: [
+]),
+],
 	projectedColumns: [
 		ProjectedColumnDescriptor(name: "name", protoKind: "string", sqliteType: "TEXT", defaultSQL: "''", nullable: false, legacyOneofPresenceRepair: false),
 		ProjectedColumnDescriptor(name: "age", protoKind: "int64", sqliteType: "INTEGER", defaultSQL: "0", nullable: false, legacyOneofPresenceRepair: false),
@@ -192,6 +199,10 @@ private let NoteGeneratedBinding = GeneratedTableBinding(
 	upsertSQL: NoteUpsertSQL,
 	createTableSQL: NoteCreateTableSQL,
 	projectionSchema: NoteProjectionSchema,
+dirtyKeys: [
+DirtyKeysDescriptor(name: "all", watchedColumns: [
+]),
+],
 	projectedColumns: [
 		ProjectedColumnDescriptor(name: "text", protoKind: "string", sqliteType: "TEXT", defaultSQL: "''", nullable: false, legacyOneofPresenceRepair: false),
 	],
@@ -490,6 +501,12 @@ private let PhotoGeneratedBinding = GeneratedTableBinding(
 	projectionSchema: PhotoProjectionSchema,
 	dirtyWindows: [
 DirtyWindowDescriptor(name: "capture", startColumn: "exif_create_utc_time_seconds", endColumn: "exif_modify_utc_time_seconds"),
+],
+dirtyKeys: [
+DirtyKeysDescriptor(name: "location", watchedColumns: [
+"location_altitude",
+"location_label",
+]),
 ],
 	projectedColumns: [
 		ProjectedColumnDescriptor(name: "exif_create_utc_time_seconds", protoKind: "int64", sqliteType: "INTEGER", defaultSQL: "0", nullable: true, legacyOneofPresenceRepair: false),

@@ -124,6 +124,17 @@ func (e swiftEmitter) emitModel(file *protogen.File, model messageModel) {
 		}
 		g.P("],")
 	}
+	if len(model.DirtyKeys) > 0 {
+		g.P("dirtyKeys: [")
+		for _, tracker := range model.DirtyKeys {
+			g.P("DirtyKeysDescriptor(name: ", strconv.Quote(tracker.Name), ", watchedColumns: [")
+			for _, column := range tracker.WatchedColumns {
+				g.P(strconv.Quote(column), ",")
+			}
+			g.P("]),")
+		}
+		g.P("],")
+	}
 	g.P("\tprojectedColumns: [")
 	for _, projectedField := range model.ProjectedFields {
 		protoKind := strings.TrimPrefix(strings.TrimSuffix(projectedField.SchemaSignature, projectionOptionalFlag), projectedField.ColumnName+":")

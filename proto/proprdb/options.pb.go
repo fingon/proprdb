@@ -63,6 +63,58 @@ func (x *Index) GetFields() []string {
 	return nil
 }
 
+type DirtyKeys struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	WatchedFields []string               `protobuf:"bytes,2,rep,name=watched_fields,json=watchedFields,proto3" json:"watched_fields,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DirtyKeys) Reset() {
+	*x = DirtyKeys{}
+	mi := &file_proto_proprdb_options_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DirtyKeys) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DirtyKeys) ProtoMessage() {}
+
+func (x *DirtyKeys) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_proprdb_options_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DirtyKeys.ProtoReflect.Descriptor instead.
+func (*DirtyKeys) Descriptor() ([]byte, []int) {
+	return file_proto_proprdb_options_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *DirtyKeys) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *DirtyKeys) GetWatchedFields() []string {
+	if x != nil {
+		return x.WatchedFields
+	}
+	return nil
+}
+
 type DirtyWindow struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
@@ -74,7 +126,7 @@ type DirtyWindow struct {
 
 func (x *DirtyWindow) Reset() {
 	*x = DirtyWindow{}
-	mi := &file_proto_proprdb_options_proto_msgTypes[1]
+	mi := &file_proto_proprdb_options_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -86,7 +138,7 @@ func (x *DirtyWindow) String() string {
 func (*DirtyWindow) ProtoMessage() {}
 
 func (x *DirtyWindow) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_proprdb_options_proto_msgTypes[1]
+	mi := &file_proto_proprdb_options_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -99,7 +151,7 @@ func (x *DirtyWindow) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DirtyWindow.ProtoReflect.Descriptor instead.
 func (*DirtyWindow) Descriptor() ([]byte, []int) {
-	return file_proto_proprdb_options_proto_rawDescGZIP(), []int{1}
+	return file_proto_proprdb_options_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *DirtyWindow) GetName() string {
@@ -204,6 +256,14 @@ var file_proto_proprdb_options_proto_extTypes = []protoimpl.ExtensionInfo{
 		Tag:           "bytes,50010,rep,name=dirty_windows",
 		Filename:      "proto/proprdb/options.proto",
 	},
+	{
+		ExtendedType:  (*descriptorpb.MessageOptions)(nil),
+		ExtensionType: ([]*DirtyKeys)(nil),
+		Field:         50011,
+		Name:          "com.github.fingon.proprdb.dirty_keys",
+		Tag:           "bytes,50011,rep,name=dirty_keys",
+		Filename:      "proto/proprdb/options.proto",
+	},
 }
 
 // Extension fields to descriptorpb.FieldOptions.
@@ -232,6 +292,8 @@ var (
 	E_ExternalPaths = &file_proto_proprdb_options_proto_extTypes[8]
 	// repeated com.github.fingon.proprdb.DirtyWindow dirty_windows = 50010;
 	E_DirtyWindows = &file_proto_proprdb_options_proto_extTypes[9]
+	// repeated com.github.fingon.proprdb.DirtyKeys dirty_keys = 50011;
+	E_DirtyKeys = &file_proto_proprdb_options_proto_extTypes[10]
 )
 
 var File_proto_proprdb_options_proto protoreflect.FileDescriptor
@@ -240,7 +302,10 @@ const file_proto_proprdb_options_proto_rawDesc = "" +
 	"\n" +
 	"\x1bproto/proprdb/options.proto\x12\x19com.github.fingon.proprdb\x1a google/protobuf/descriptor.proto\"\x1f\n" +
 	"\x05Index\x12\x16\n" +
-	"\x06fields\x18\x01 \x03(\tR\x06fields\"_\n" +
+	"\x06fields\x18\x01 \x03(\tR\x06fields\"F\n" +
+	"\tDirtyKeys\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12%\n" +
+	"\x0ewatched_fields\x18\x02 \x03(\tR\rwatchedFields\"_\n" +
 	"\vDirtyWindow\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x1f\n" +
 	"\vstart_field\x18\x02 \x01(\tR\n" +
@@ -256,7 +321,9 @@ const file_proto_proprdb_options_proto_rawDesc = "" +
 	"\x10change_listeners\x12\x1f.google.protobuf.MessageOptions\x18׆\x03 \x01(\bR\x0fchangeListeners:L\n" +
 	"\x10query_statistics\x12\x1f.google.protobuf.MessageOptions\x18؆\x03 \x01(\bR\x0fqueryStatistics:H\n" +
 	"\x0eexternal_paths\x12\x1f.google.protobuf.MessageOptions\x18ن\x03 \x03(\tR\rexternalPaths:n\n" +
-	"\rdirty_windows\x12\x1f.google.protobuf.MessageOptions\x18چ\x03 \x03(\v2&.com.github.fingon.proprdb.DirtyWindowR\fdirtyWindowsB3Z1github.com/fingon/proprdb/proto/proprdb;proprdbpbb\x06proto3"
+	"\rdirty_windows\x12\x1f.google.protobuf.MessageOptions\x18چ\x03 \x03(\v2&.com.github.fingon.proprdb.DirtyWindowR\fdirtyWindows:f\n" +
+	"\n" +
+	"dirty_keys\x12\x1f.google.protobuf.MessageOptions\x18ۆ\x03 \x03(\v2$.com.github.fingon.proprdb.DirtyKeysR\tdirtyKeysB3Z1github.com/fingon/proprdb/proto/proprdb;proprdbpbb\x06proto3"
 
 var (
 	file_proto_proprdb_options_proto_rawDescOnce sync.Once
@@ -270,30 +337,33 @@ func file_proto_proprdb_options_proto_rawDescGZIP() []byte {
 	return file_proto_proprdb_options_proto_rawDescData
 }
 
-var file_proto_proprdb_options_proto_msgTypes = make([]protoimpl.MessageInfo, 2)
+var file_proto_proprdb_options_proto_msgTypes = make([]protoimpl.MessageInfo, 3)
 var file_proto_proprdb_options_proto_goTypes = []any{
 	(*Index)(nil),                       // 0: com.github.fingon.proprdb.Index
-	(*DirtyWindow)(nil),                 // 1: com.github.fingon.proprdb.DirtyWindow
-	(*descriptorpb.FieldOptions)(nil),   // 2: google.protobuf.FieldOptions
-	(*descriptorpb.MessageOptions)(nil), // 3: google.protobuf.MessageOptions
+	(*DirtyKeys)(nil),                   // 1: com.github.fingon.proprdb.DirtyKeys
+	(*DirtyWindow)(nil),                 // 2: com.github.fingon.proprdb.DirtyWindow
+	(*descriptorpb.FieldOptions)(nil),   // 3: google.protobuf.FieldOptions
+	(*descriptorpb.MessageOptions)(nil), // 4: google.protobuf.MessageOptions
 }
 var file_proto_proprdb_options_proto_depIdxs = []int32{
-	2,  // 0: com.github.fingon.proprdb.external:extendee -> google.protobuf.FieldOptions
-	3,  // 1: com.github.fingon.proprdb.omit_table:extendee -> google.protobuf.MessageOptions
-	3,  // 2: com.github.fingon.proprdb.omit_sync:extendee -> google.protobuf.MessageOptions
-	3,  // 3: com.github.fingon.proprdb.validate_write:extendee -> google.protobuf.MessageOptions
-	3,  // 4: com.github.fingon.proprdb.allow_custom_id_insert:extendee -> google.protobuf.MessageOptions
-	3,  // 5: com.github.fingon.proprdb.indexes:extendee -> google.protobuf.MessageOptions
-	3,  // 6: com.github.fingon.proprdb.change_listeners:extendee -> google.protobuf.MessageOptions
-	3,  // 7: com.github.fingon.proprdb.query_statistics:extendee -> google.protobuf.MessageOptions
-	3,  // 8: com.github.fingon.proprdb.external_paths:extendee -> google.protobuf.MessageOptions
-	3,  // 9: com.github.fingon.proprdb.dirty_windows:extendee -> google.protobuf.MessageOptions
-	0,  // 10: com.github.fingon.proprdb.indexes:type_name -> com.github.fingon.proprdb.Index
-	1,  // 11: com.github.fingon.proprdb.dirty_windows:type_name -> com.github.fingon.proprdb.DirtyWindow
-	12, // [12:12] is the sub-list for method output_type
-	12, // [12:12] is the sub-list for method input_type
-	10, // [10:12] is the sub-list for extension type_name
-	0,  // [0:10] is the sub-list for extension extendee
+	3,  // 0: com.github.fingon.proprdb.external:extendee -> google.protobuf.FieldOptions
+	4,  // 1: com.github.fingon.proprdb.omit_table:extendee -> google.protobuf.MessageOptions
+	4,  // 2: com.github.fingon.proprdb.omit_sync:extendee -> google.protobuf.MessageOptions
+	4,  // 3: com.github.fingon.proprdb.validate_write:extendee -> google.protobuf.MessageOptions
+	4,  // 4: com.github.fingon.proprdb.allow_custom_id_insert:extendee -> google.protobuf.MessageOptions
+	4,  // 5: com.github.fingon.proprdb.indexes:extendee -> google.protobuf.MessageOptions
+	4,  // 6: com.github.fingon.proprdb.change_listeners:extendee -> google.protobuf.MessageOptions
+	4,  // 7: com.github.fingon.proprdb.query_statistics:extendee -> google.protobuf.MessageOptions
+	4,  // 8: com.github.fingon.proprdb.external_paths:extendee -> google.protobuf.MessageOptions
+	4,  // 9: com.github.fingon.proprdb.dirty_windows:extendee -> google.protobuf.MessageOptions
+	4,  // 10: com.github.fingon.proprdb.dirty_keys:extendee -> google.protobuf.MessageOptions
+	0,  // 11: com.github.fingon.proprdb.indexes:type_name -> com.github.fingon.proprdb.Index
+	2,  // 12: com.github.fingon.proprdb.dirty_windows:type_name -> com.github.fingon.proprdb.DirtyWindow
+	1,  // 13: com.github.fingon.proprdb.dirty_keys:type_name -> com.github.fingon.proprdb.DirtyKeys
+	14, // [14:14] is the sub-list for method output_type
+	14, // [14:14] is the sub-list for method input_type
+	11, // [11:14] is the sub-list for extension type_name
+	0,  // [0:11] is the sub-list for extension extendee
 	0,  // [0:0] is the sub-list for field type_name
 }
 
@@ -308,8 +378,8 @@ func file_proto_proprdb_options_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_proto_proprdb_options_proto_rawDesc), len(file_proto_proprdb_options_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   2,
-			NumExtensions: 10,
+			NumMessages:   3,
+			NumExtensions: 11,
 			NumServices:   0,
 		},
 		GoTypes:           file_proto_proprdb_options_proto_goTypes,

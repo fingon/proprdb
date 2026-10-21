@@ -15,7 +15,9 @@ const (
 	CoreTableDirtyDefinitionName = "_proprdb_dirty_definitions"
 	CoreTableDirtyWindowName     = "_proprdb_dirty_windows"
 	mutationTriggerPrefix        = "_proprdb_mutation_"
-	mutationFormat               = "v2|"
+	mutationFormat               = "v3|"
+	mutationNew                  = "NEW"
+	mutationOld                  = "OLD"
 	mutationInsert               = "INSERT"
 	mutationUpdate               = "UPDATE"
 	mutationDelete               = "DELETE"
@@ -62,7 +64,7 @@ func ensureMutationTables(ctx context.Context, q DBTX) (err error) {
 			return fmt.Errorf("create mutation tracking tables: %w", err)
 		}
 	}
-	return nil
+	return ensureDirtyKeysTables(ctx, q)
 }
 
 func mutationSignature(binding GeneratedTableBinding) string {
@@ -72,7 +74,7 @@ func mutationSignature(binding GeneratedTableBinding) string {
 	for _, window := range windows {
 		parts = append(parts, window.Name+":"+window.StartColumn+":"+window.EndColumn)
 	}
-	return strings.Join(parts, "|")
+	return strings.Join(parts, "|") + dirtyKeysSignature(binding.DirtyKeys)
 }
 
 func mutationTriggerName(table, event string) string {
@@ -87,6 +89,9 @@ func prepareMutationTracking(ctx context.Context, q DBTX, binding GeneratedTable
 	}
 	changed = signature != mutationSignature(binding)
 	if changed {
+		if err := dropDirtyKeysTriggers(ctx, q, binding.Descriptor.TableName); err != nil {
+			return false, err
+		}
 		for _, event := range []string{mutationInsert, mutationUpdate, mutationDelete, mutationBeforeInsert, mutationBeforeUpdate} {
 			if _, err := q.ExecContext(ctx, `DROP TRIGGER IF EXISTS `+quoteSQLiteIdentifier(mutationTriggerName(binding.Descriptor.TableName, event))); err != nil {
 				return false, fmt.Errorf("drop mutation trigger: %w", err)
@@ -126,7 +131,7 @@ func finishMutationTracking(ctx context.Context, q DBTX, binding GeneratedTableB
 			return fmt.Errorf("create mutation trigger for %s: %w", table, err)
 		}
 	}
-	return nil
+	return reconcileDirtyKeys(ctx, q, binding, changed)
 }
 
 func mutationTriggerSQL(binding GeneratedTableBinding, event string) string {
@@ -160,12 +165,12 @@ func mutationTriggerSQL(binding GeneratedTableBinding, event string) string {
 		statements = nil
 	}
 	for _, window := range binding.DirtyWindows {
-		prefixes := []string{"NEW"}
+		prefixes := []string{mutationNew}
 		if event == mutationDelete {
-			prefixes = []string{"OLD"}
+			prefixes = []string{mutationOld}
 		}
 		if event == mutationUpdate {
-			prefixes = []string{"OLD", "NEW"}
+			prefixes = []string{mutationOld, mutationNew}
 		}
 		if capturesExisting {
 			prefixes = []string{"EXISTING"}

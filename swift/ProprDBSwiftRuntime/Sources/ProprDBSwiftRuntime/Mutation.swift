@@ -5,7 +5,7 @@ public let coreTableGenerationName = "_proprdb_generations"
 public let coreTableDirtyDefinitionName = "_proprdb_dirty_definitions"
 public let coreTableDirtyWindowName = "_proprdb_dirty_windows"
 private let mutationTriggerPrefix = "_proprdb_mutation_"
-private let mutationFormat = "v2|"
+private let mutationFormat = "v3|"
 private let mutationInsert = "INSERT"
 private let mutationUpdate = "UPDATE"
 private let mutationDelete = "DELETE"
@@ -51,11 +51,12 @@ func ensureMutationTables(_ q: any DBTX) throws {
         "CREATE TABLE IF NOT EXISTS \(coreTableDirtyWindowName) (table_name TEXT NOT NULL, window_name TEXT NOT NULL, consumer TEXT NOT NULL, registration TEXT NOT NULL, revision INTEGER NOT NULL CHECK(typeof(revision) = 'integer' AND revision >= 0), dirty INTEGER NOT NULL, full INTEGER NOT NULL, lower_bound INTEGER, upper_bound INTEGER, PRIMARY KEY(table_name, window_name, consumer))",
     ]
     for statement in statements { try q.execute(statement) }
+    try ensureDirtyKeysTables(q)
 }
 
 private func mutationSignature(_ binding: GeneratedTableBinding) -> String {
     let windows = binding.dirtyWindows.sorted { $0.name < $1.name }
-    return ([mutationFormat + binding.projectionSchema] + windows.map { "\($0.name):\($0.startColumn):\($0.endColumn)" }).joined(separator: "|")
+    return ([mutationFormat + binding.projectionSchema] + windows.map { "\($0.name):\($0.startColumn):\($0.endColumn)" }).joined(separator: "|") + dirtyKeysSignature(binding.dirtyKeys)
 }
 
 private func mutationTriggerName(_ table: String, _ event: String) -> String {
@@ -68,6 +69,7 @@ func prepareMutationTracking(_ q: any DBTX, binding: GeneratedTableBinding) thro
     }
     let changed = signature != mutationSignature(binding)
     if changed {
+        try dropDirtyKeysTriggers(q, table: binding.descriptor.tableName)
         for event in mutationEvents {
             try q.execute("DROP TRIGGER IF EXISTS \(quoteSQLiteIdentifier(mutationTriggerName(binding.descriptor.tableName, event)))")
         }
@@ -90,6 +92,7 @@ func finishMutationTracking(_ q: any DBTX, binding: GeneratedTableBinding, chang
     for event in mutationEvents where (event != mutationBeforeInsert && event != mutationBeforeUpdate) || !binding.dirtyWindows.isEmpty {
         try q.execute(mutationTriggerSQL(binding, event: event))
     }
+    try reconcileDirtyKeys(q, binding: binding, changed: changed)
 }
 
 private func mutationTriggerSQL(_ binding: GeneratedTableBinding, event: String) -> String {

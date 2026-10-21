@@ -114,6 +114,13 @@ const QUERY_STATISTICS: bool = true;
 const DIRTY_WINDOWS: &[::proprdb_runtime::DirtyWindowDescriptor] = &[
 ::proprdb_runtime::DirtyWindowDescriptor { name: "age", start_column: "age", end_column: "age" },
 ];
+const DIRTY_KEYS: &[::proprdb_runtime::DirtyKeysDescriptor] = &[
+::proprdb_runtime::DirtyKeysDescriptor { name: "age", watched_columns: &[
+"age",
+] },
+::proprdb_runtime::DirtyKeysDescriptor { name: "all", watched_columns: &[
+] },
+];
 const COLUMNS: &[::proprdb_runtime::Column] = &[
 ::proprdb_runtime::Column { name: "name", definition: "\"name\" TEXT NOT NULL DEFAULT ''", legacy_oneof_presence_repair: false },
 ::proprdb_runtime::Column { name: "age", definition: "\"age\" INTEGER NOT NULL DEFAULT 0", legacy_oneof_presence_repair: false },
@@ -148,6 +155,10 @@ const INDEX_PREFIX: &str = "idx_generatedtest_example_note__";
 const SYNC_ENABLED: bool = false;
 const CHANGE_LISTENERS: bool = true;
 const QUERY_STATISTICS: bool = false;
+const DIRTY_KEYS: &[::proprdb_runtime::DirtyKeysDescriptor] = &[
+::proprdb_runtime::DirtyKeysDescriptor { name: "all", watched_columns: &[
+] },
+];
 const COLUMNS: &[::proprdb_runtime::Column] = &[
 ::proprdb_runtime::Column { name: "text", definition: "\"text\" TEXT NOT NULL DEFAULT ''", legacy_oneof_presence_repair: false },
 ];
@@ -200,6 +211,12 @@ const CHANGE_LISTENERS: bool = false;
 const QUERY_STATISTICS: bool = false;
 const DIRTY_WINDOWS: &[::proprdb_runtime::DirtyWindowDescriptor] = &[
 ::proprdb_runtime::DirtyWindowDescriptor { name: "capture", start_column: "exif_create_utc_time_seconds", end_column: "exif_modify_utc_time_seconds" },
+];
+const DIRTY_KEYS: &[::proprdb_runtime::DirtyKeysDescriptor] = &[
+::proprdb_runtime::DirtyKeysDescriptor { name: "location", watched_columns: &[
+"location_altitude",
+"location_label",
+] },
 ];
 const COLUMNS: &[::proprdb_runtime::Column] = &[
 ::proprdb_runtime::Column { name: "exif_create_utc_time_seconds", definition: "\"exif_create_utc_time_seconds\" INTEGER", legacy_oneof_presence_repair: false },

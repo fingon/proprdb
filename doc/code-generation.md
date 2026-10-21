@@ -27,6 +27,31 @@ message Person {
 
 ### Message options
 
+- `proprdb.dirty_keys` (`repeated DirtyKeys`, message-level):
+  - Defines named sets of affected object IDs for independently registered consumers.
+  - Each declaration has `name` and optional `watched_fields`. An empty list
+    watches all stored columns; otherwise updates watch only the listed scalar
+    projections. Inserts, deletes, replacements, and ID changes always qualify.
+  - Watched fields must already be projected through `external` or
+    `external_paths`, including nullable and nested scalar fields. This option
+    does not add projections or indexes. Duplicate watched paths are rejected.
+  - Names must match `[a-z][a-z0-9_]*` and be unique among dirty-key declarations
+    within the message. Dirty-window names are a separate namespace.
+
+```proto
+message Item {
+  option (proprdb.dirty_keys) = {name: "all"};
+  option (proprdb.dirty_keys) = {
+    name: "labels"
+    watched_fields: "label"
+  };
+  string label = 1 [(proprdb.external) = true];
+}
+```
+
+See [dirty-key tracking](runtime.md#dirty-key-trackers) for repair and
+acknowledgment semantics.
+
 - `proprdb.dirty_windows` (`repeated DirtyWindow`, message-level):
   - Defines named integer windows for persistent refresh invalidation. Each
     declaration has `name`, `start_field`, and optional `end_field` (defaults to
