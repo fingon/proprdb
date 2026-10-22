@@ -8,8 +8,9 @@ use crate::{Connection, Error, Model, Result, atomic};
 pub const CORE_TABLE_GENERATION: &str = "_proprdb_generations";
 pub const CORE_TABLE_DIRTY_DEFINITION: &str = "_proprdb_dirty_definitions";
 pub const CORE_TABLE_DIRTY_WINDOW: &str = "_proprdb_dirty_windows";
+pub const CORE_TABLE_DIRTY_INTERVAL: &str = "_proprdb_dirty_intervals";
 const TRIGGER_PREFIX: &str = "_proprdb_mutation_";
-const FORMAT: &str = "v3|";
+const FORMAT: &str = "v4|";
 const BEFORE_INSERT: &str = "BEFORE_INSERT";
 const BEFORE_UPDATE: &str = "BEFORE_UPDATE";
 const EVENTS: [&str; 5] = ["INSERT", "UPDATE", "DELETE", BEFORE_INSERT, BEFORE_UPDATE];
@@ -29,8 +30,15 @@ pub struct DirtyWindowToken {
     revision: i64,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DirtyInterval {
+    pub lower: i64,
+    pub upper: i64,
+}
+
 #[derive(Clone, Debug)]
 pub struct DirtyWindowState {
+    pub intervals: Vec<DirtyInterval>,
     pub dirty: bool,
     pub full: bool,
     pub lower: Option<i64>,
@@ -50,7 +58,8 @@ fn trigger_name(table: &str, event: &str) -> String {
 
 pub(crate) fn ensure_tables(connection: &Connection) -> Result<()> {
     connection.execute_batch(&format!(
-        "CREATE TABLE IF NOT EXISTS {CORE_TABLE_GENERATION} (table_name TEXT PRIMARY KEY, generation INTEGER NOT NULL CHECK(typeof(generation) = 'integer' AND generation >= 0), signature TEXT NOT NULL);
+        "CREATE TABLE IF NOT EXISTS {CORE_TABLE_DIRTY_INTERVAL} (table_name TEXT NOT NULL, window_name TEXT NOT NULL, consumer TEXT NOT NULL, lower_bound INTEGER NOT NULL, upper_bound INTEGER NOT NULL, PRIMARY KEY(table_name, window_name, consumer, lower_bound, upper_bound));
+        CREATE TABLE IF NOT EXISTS {CORE_TABLE_GENERATION} (table_name TEXT PRIMARY KEY, generation INTEGER NOT NULL CHECK(typeof(generation) = 'integer' AND generation >= 0), signature TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS {CORE_TABLE_DIRTY_DEFINITION} (table_name TEXT NOT NULL, window_name TEXT NOT NULL, start_column TEXT NOT NULL, end_column TEXT NOT NULL, PRIMARY KEY(table_name, window_name));
         CREATE TABLE IF NOT EXISTS {CORE_TABLE_DIRTY_WINDOW} (table_name TEXT NOT NULL, window_name TEXT NOT NULL, consumer TEXT NOT NULL, registration TEXT NOT NULL, revision INTEGER NOT NULL CHECK(typeof(revision) = 'integer' AND revision >= 0), dirty INTEGER NOT NULL, full INTEGER NOT NULL, lower_bound INTEGER, upper_bound INTEGER, PRIMARY KEY(table_name, window_name, consumer));"
     ))?;
@@ -93,6 +102,10 @@ pub(crate) fn prepare<M: Model>(connection: &Connection) -> Result<bool> {
 
 pub(crate) fn finish<M: Model>(connection: &Connection, changed: bool) -> Result<()> {
     if changed {
+        connection.execute(
+            &format!("DELETE FROM {CORE_TABLE_DIRTY_INTERVAL} WHERE table_name = ?"),
+            [M::TABLE_NAME],
+        )?;
         log::debug!(
             "reconcile mutation tracking table={} window_count={}",
             M::TABLE_NAME,
@@ -181,9 +194,10 @@ fn trigger_sql<M: Model>(event: &str) -> String {
                 format!("{prefix}.{}", identifier(window.end_column))
             };
             let invalid = format!(
-                "typeof({start}) != 'integer' OR typeof({end}) != 'integer' OR {start} > {end}"
+                "NOT ({start} IS NULL AND {end} IS NULL) AND (typeof({start}) != 'integer' OR typeof({end}) != 'integer' OR {start} > {end})"
             );
-            body.push_str(&format!("UPDATE {CORE_TABLE_DIRTY_WINDOW} SET revision = revision + 1, dirty = 1, full = full OR ({invalid}), lower_bound = CASE WHEN {invalid} THEN lower_bound WHEN lower_bound IS NULL THEN {start} ELSE min(lower_bound, {start}) END, upper_bound = CASE WHEN {invalid} THEN upper_bound WHEN upper_bound IS NULL THEN {end} ELSE max(upper_bound, {end}) END WHERE table_name = {table} AND window_name = {};", literal(window.name)));
+            body.push_str(&format!("UPDATE {CORE_TABLE_DIRTY_WINDOW} SET revision = revision + 1, dirty = 1, full = full OR ({invalid}), lower_bound = CASE WHEN {start} IS NULL OR ({invalid}) THEN lower_bound WHEN lower_bound IS NULL THEN {start} ELSE min(lower_bound, {start}) END, upper_bound = CASE WHEN {end} IS NULL OR ({invalid}) THEN upper_bound WHEN upper_bound IS NULL THEN {end} ELSE max(upper_bound, {end}) END WHERE table_name = {table} AND window_name = {};", literal(window.name)));
+            body.push_str(&format!("INSERT INTO {CORE_TABLE_DIRTY_INTERVAL} (table_name,window_name,consumer,lower_bound,upper_bound) SELECT table_name,window_name,consumer,{start},{end} FROM {CORE_TABLE_DIRTY_WINDOW} WHERE table_name = {table} AND window_name = {} AND typeof({start}) = 'integer' AND typeof({end}) = 'integer' AND {start} <= {end} ON CONFLICT DO NOTHING;", literal(window.name)));
         }
     }
     let timing = if event == BEFORE_INSERT {
@@ -238,17 +252,40 @@ pub fn read_dirty_window(
     window: &str,
     consumer: &str,
 ) -> Result<DirtyWindowState> {
-    Ok(connection.query_row(&format!("SELECT registration, revision, dirty, full, lower_bound, upper_bound FROM {CORE_TABLE_DIRTY_WINDOW} WHERE table_name = ? AND window_name = ? AND consumer = ?"), params![table, window, consumer], |row| {
-        Ok(DirtyWindowState { dirty: row.get(2)?, full: row.get(3)?, lower: row.get(4)?, upper: row.get(5)?, token: DirtyWindowToken { table: table.into(), window: window.into(), consumer: consumer.into(), registration: row.get(0)?, revision: row.get(1)? } })
-    })?)
+    let mut state = connection.query_row(&format!("SELECT registration, revision, dirty, full, lower_bound, upper_bound FROM {CORE_TABLE_DIRTY_WINDOW} WHERE table_name = ? AND window_name = ? AND consumer = ?"), params![table, window, consumer], |row| {
+        Ok(DirtyWindowState { intervals: Vec::new(), dirty: row.get(2)?, full: row.get(3)?, lower: row.get(4)?, upper: row.get(5)?, token: DirtyWindowToken { table: table.into(), window: window.into(), consumer: consumer.into(), registration: row.get(0)?, revision: row.get(1)? } })
+    })?;
+    if state.dirty && !state.full {
+        let mut statement = connection.prepare(&format!("SELECT lower_bound,upper_bound FROM {CORE_TABLE_DIRTY_INTERVAL} WHERE table_name = ? AND window_name = ? AND consumer = ? ORDER BY lower_bound,upper_bound"))?;
+        let mut rows = statement.query(params![table, window, consumer])?;
+        while let Some(row) = rows.next()? {
+            let interval = DirtyInterval {
+                lower: row.get(0)?,
+                upper: row.get(1)?,
+            };
+            if let Some(last) = state
+                .intervals
+                .last_mut()
+                .filter(|last| interval.lower <= last.upper)
+            {
+                last.upper = last.upper.max(interval.upper);
+            } else {
+                state.intervals.push(interval);
+            }
+        }
+    }
+    Ok(state)
 }
 
 pub fn acknowledge_dirty_window(connection: &Connection, token: &DirtyWindowToken) -> Result<()> {
-    let updated: Option<i64> = connection.query_row(&format!("UPDATE {CORE_TABLE_DIRTY_WINDOW} SET revision = revision + 1, dirty = 0, full = 0, lower_bound = NULL, upper_bound = NULL WHERE table_name = ? AND window_name = ? AND consumer = ? AND registration = ? AND revision = ? RETURNING revision"), params![token.table, token.window, token.consumer, token.registration, token.revision], |row| row.get(0)).optional()?;
-    if updated.is_none() {
-        return Err(Error::StaleDirtyWindow);
-    }
-    Ok(())
+    atomic(connection, || {
+        let updated: Option<i64> = connection.query_row(&format!("UPDATE {CORE_TABLE_DIRTY_WINDOW} SET revision = revision + 1, dirty = 0, full = 0, lower_bound = NULL, upper_bound = NULL WHERE table_name = ? AND window_name = ? AND consumer = ? AND registration = ? AND revision = ? RETURNING revision"), params![token.table, token.window, token.consumer, token.registration, token.revision], |row| row.get(0)).optional()?;
+        if updated.is_none() {
+            return Err(Error::StaleDirtyWindow);
+        }
+        connection.execute(&format!("DELETE FROM {CORE_TABLE_DIRTY_INTERVAL} WHERE table_name = ? AND window_name = ? AND consumer = ?"), params![token.table, token.window, token.consumer])?;
+        Ok(())
+    })
 }
 
 pub fn remove_dirty_window_consumer(
@@ -257,6 +294,10 @@ pub fn remove_dirty_window_consumer(
     window: &str,
     consumer: &str,
 ) -> Result<()> {
-    connection.execute(&format!("DELETE FROM {CORE_TABLE_DIRTY_WINDOW} WHERE table_name = ? AND window_name = ? AND consumer = ?"), params![table, window, consumer])?;
-    Ok(())
+    atomic(connection, || {
+        for table_name in [CORE_TABLE_DIRTY_INTERVAL, CORE_TABLE_DIRTY_WINDOW] {
+            connection.execute(&format!("DELETE FROM {table_name} WHERE table_name = ? AND window_name = ? AND consumer = ?"), params![table, window, consumer])?;
+        }
+        Ok(())
+    })
 }

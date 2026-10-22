@@ -1,6 +1,6 @@
 use proprdb_runtime::{
-    Connection, Error, Model, Result, acknowledge_dirty_window, atomic, read_dirty_window,
-    register_dirty_window, remove_dirty_window_consumer, table_generations,
+    Connection, DirtyInterval, Error, Model, Result, acknowledge_dirty_window, atomic,
+    read_dirty_window, register_dirty_window, remove_dirty_window_consumer, table_generations,
 };
 use proprdb_rust_tests::{
     generatedtest::example::{Person, Photo},
@@ -200,5 +200,168 @@ fn generations_and_dirty_state_survive_reopen() -> Result<()> {
     let state = read_dirty_window(&connection, TABLE, WINDOW, CONSUMER)?;
     assert!(state.dirty && !state.full);
     assert_eq!((state.lower, state.upper), (Some(10), Some(10)));
+    Ok(())
+}
+
+#[test]
+fn disjoint_intervals_and_cleanup() -> Result<()> {
+    let connection = Connection::open_in_memory()?;
+    let crud = system::Crud::new(&connection);
+    crud.initialize()?;
+    register(&connection)?;
+    let row = crud.person.insert(&Person {
+        name: "Ada".into(),
+        age: 10,
+    })?;
+    let first = read_dirty_window(&connection, TABLE, WINDOW, CONSUMER)?;
+    connection.execute(UPDATE_AGE, rusqlite::params![100, row.id])?;
+    crud.person.delete_by_id(&row.id)?;
+    let state = read_dirty_window(&connection, TABLE, WINDOW, CONSUMER)?;
+    assert_eq!(
+        state.intervals,
+        vec![
+            DirtyInterval {
+                lower: 10,
+                upper: 10
+            },
+            DirtyInterval {
+                lower: 100,
+                upper: 100
+            }
+        ]
+    );
+    assert!(matches!(
+        acknowledge_dirty_window(&connection, &first.token),
+        Err(Error::StaleDirtyWindow)
+    ));
+    assert!(
+        atomic(&connection, || {
+            acknowledge_dirty_window(&connection, &state.token)?;
+            Err::<(), _>(Error::StaleDirtyWindow)
+        })
+        .is_err()
+    );
+    assert_eq!(
+        read_dirty_window(&connection, TABLE, WINDOW, CONSUMER)?.intervals,
+        state.intervals
+    );
+    acknowledge_dirty_window(&connection, &state.token)?;
+    let clean = read_dirty_window(&connection, TABLE, WINDOW, CONSUMER)?;
+    assert!(!clean.dirty && clean.intervals.is_empty());
+    Ok(())
+}
+
+#[test]
+fn null_bounds_remain_distinct_from_zero() -> Result<()> {
+    let connection = Connection::open_in_memory()?;
+    let crud = system::Crud::new(&connection);
+    crud.initialize()?;
+    let table = system::PhotoModel::TABLE_NAME;
+    let window = "capture";
+    register_dirty_window(&connection, table, window, CONSUMER)?;
+    acknowledge_dirty_window(
+        &connection,
+        &read_dirty_window(&connection, table, window, CONSUMER)?.token,
+    )?;
+    let row = crud.photo.insert(&Photo::default())?;
+    let state = read_dirty_window(&connection, table, window, CONSUMER)?;
+    assert!(state.dirty && !state.full && state.intervals.is_empty());
+    for bound in [Some(0_i64), None] {
+        connection.execute("UPDATE generatedtest_example_photo SET exif_create_utc_time_seconds = ?, exif_modify_utc_time_seconds = ? WHERE id = ?", rusqlite::params![bound, bound, row.id])?;
+        let state = read_dirty_window(&connection, table, window, CONSUMER)?;
+        assert!(!state.full);
+        assert_eq!(state.intervals, vec![DirtyInterval { lower: 0, upper: 0 }]);
+    }
+    Ok(())
+}
+
+#[test]
+fn go_and_rust_share_intervals() -> std::result::Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let path = directory.path().join("interop.db");
+    let connection = Connection::open(&path)?;
+    let crud = system::Crud::new(&connection);
+    crud.initialize()?;
+    register(&connection)?;
+    let id = "01951d6e-a000-7000-8000-000000000001";
+    crud.person.insert_with_id(
+        id,
+        &Person {
+            name: "Ada".into(),
+            age: 10,
+        },
+    )?;
+    let output = std::process::Command::new("go")
+        .args(["test", "-count=1", "-run", "^TestRustMutationInterop$", "."])
+        .current_dir(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../system"))
+        .env("PROPRDB_RUST_MUTATION_DB", &path)
+        .env("CGO_ENABLED", "0")
+        .output()?;
+    assert!(
+        output.status.success(),
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    crud.initialize()?;
+    assert_eq!(table_generations(&connection, &[TABLE])?[TABLE], 2);
+    let state = read_dirty_window(&connection, TABLE, WINDOW, CONSUMER)?;
+    assert_eq!(
+        state.intervals,
+        vec![
+            DirtyInterval {
+                lower: 10,
+                upper: 10
+            },
+            DirtyInterval {
+                lower: 41,
+                upper: 41
+            }
+        ]
+    );
+    acknowledge_dirty_window(&connection, &state.token)?;
+    Ok(())
+}
+
+#[test]
+fn overlapping_intervals_and_signature_upgrade() -> Result<()> {
+    let connection = Connection::open_in_memory()?;
+    let crud = system::Crud::new(&connection);
+    crud.initialize()?;
+    register(&connection)?;
+    connection.execute("INSERT INTO _proprdb_dirty_intervals VALUES (?, ?, ?, 1, 10), (?, ?, ?, 5, 20), (?, ?, ?, 30, 40)", rusqlite::params![TABLE, WINDOW, CONSUMER, TABLE, WINDOW, CONSUMER, TABLE, WINDOW, CONSUMER])?;
+    connection.execute("UPDATE _proprdb_dirty_windows SET dirty = 1 WHERE table_name = ? AND window_name = ? AND consumer = ?", rusqlite::params![TABLE, WINDOW, CONSUMER])?;
+    let state = read_dirty_window(&connection, TABLE, WINDOW, CONSUMER)?;
+    assert_eq!(
+        state.intervals,
+        vec![
+            DirtyInterval {
+                lower: 1,
+                upper: 20
+            },
+            DirtyInterval {
+                lower: 30,
+                upper: 40
+            }
+        ]
+    );
+    connection.execute(
+        "UPDATE _proprdb_generations SET signature = 'v3|legacy' WHERE table_name = ?",
+        [TABLE],
+    )?;
+    crud.initialize()?;
+    assert!(matches!(
+        acknowledge_dirty_window(&connection, &state.token),
+        Err(Error::StaleDirtyWindow)
+    ));
+    let state = read_dirty_window(&connection, TABLE, WINDOW, CONSUMER)?;
+    assert!(state.dirty && state.full && state.intervals.is_empty());
+    assert_eq!(table_generations(&connection, &[TABLE])?[TABLE], 1);
+    crud.initialize()?;
+    assert_eq!(table_generations(&connection, &[TABLE])?[TABLE], 1);
+    acknowledge_dirty_window(&connection, &state.token)?;
+    remove_dirty_window_consumer(&connection, TABLE, WINDOW, CONSUMER)?;
+    let count: i64 = connection.query_row("SELECT count(*) FROM _proprdb_dirty_intervals WHERE table_name = ? AND window_name = ? AND consumer = ?", rusqlite::params![TABLE, WINDOW, CONSUMER], |row| row.get(0))?;
+    assert_eq!(count, 0);
     Ok(())
 }

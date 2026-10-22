@@ -21,8 +21,9 @@ pub use introspection::{
     QueryStatistic, TableDescriptor, TableIntrospection, clear_query_statistics, query_statistics,
 };
 pub use mutation::{
-    DirtyWindowDescriptor, DirtyWindowState, DirtyWindowToken, acknowledge_dirty_window,
-    read_dirty_window, register_dirty_window, remove_dirty_window_consumer, table_generations,
+    DirtyInterval, DirtyWindowDescriptor, DirtyWindowState, DirtyWindowToken,
+    acknowledge_dirty_window, read_dirty_window, register_dirty_window,
+    remove_dirty_window_consumer, table_generations,
 };
 pub use prost_reflect::{DescriptorPool, MessageDescriptor};
 use rusqlite::{OptionalExtension, params, params_from_iter};

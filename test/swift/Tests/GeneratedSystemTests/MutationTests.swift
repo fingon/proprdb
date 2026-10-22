@@ -19,6 +19,74 @@ private func registerAge(_ db: any DBTX) throws {
 }
 
 final class MutationTests: XCTestCase {
+    func testOverlappingIntervalsAndSignatureUpgrade() throws {
+        let db = try SQLiteDatabase(path: ":memory:")
+        let crud = CRUD(db)
+        try crud.initialize()
+        try registerAge(db)
+        for (lower, upper) in [(1, 10), (5, 20), (30, 40)] {
+            try db.execute("INSERT INTO _proprdb_dirty_intervals VALUES (?, ?, ?, ?, ?)", arguments: [PersonTableName, ageWindow, mutationConsumer, lower, upper])
+        }
+        try db.execute("UPDATE _proprdb_dirty_windows SET dirty = 1 WHERE table_name = ? AND window_name = ? AND consumer = ?", arguments: [PersonTableName, ageWindow, mutationConsumer])
+        let state = try ageState(db)
+        XCTAssertEqual(state.intervals, [DirtyInterval(lower: 1, upper: 20), DirtyInterval(lower: 30, upper: 40)])
+        try db.execute("UPDATE _proprdb_generations SET signature = 'v3|legacy' WHERE table_name = ?", arguments: [PersonTableName])
+        try crud.initialize()
+        XCTAssertThrowsError(try acknowledgeDirtyWindow(db, token: state.token))
+        let upgraded = try ageState(db)
+        XCTAssertTrue(upgraded.dirty && upgraded.full && upgraded.intervals.isEmpty)
+        XCTAssertEqual(try tableGenerations(db, tables: [PersonTableName])[PersonTableName], 1)
+        try crud.initialize()
+        XCTAssertEqual(try tableGenerations(db, tables: [PersonTableName])[PersonTableName], 1)
+        try acknowledgeDirtyWindow(db, token: upgraded.token)
+        try removeDirtyWindowConsumer(db, table: PersonTableName, window: ageWindow, consumer: mutationConsumer)
+        try registerAge(db)
+        XCTAssertTrue(try ageState(db).intervals.isEmpty)
+    }
+
+    func testDisjointIntervalsAndCleanup() throws {
+        let db = try SQLiteDatabase(path: ":memory:")
+        let crud = CRUD(db)
+        try crud.initialize()
+        try registerAge(db)
+        var person = Generatedtest_Example_Person()
+        person.name = "Ada"
+        person.age = 10
+        let row = try crud.person.insert(person)
+        let first = try ageState(db)
+        try db.execute(updateAgeSQL, arguments: [Int64(100), row.id])
+        try crud.person.deleteByID(row.id)
+        let state = try ageState(db)
+        XCTAssertEqual(state.intervals, [DirtyInterval(lower: 10, upper: 10), DirtyInterval(lower: 100, upper: 100)])
+        XCTAssertThrowsError(try acknowledgeDirtyWindow(db, token: first.token))
+        XCTAssertThrowsError(try db.withTransaction { transaction in
+            try acknowledgeDirtyWindow(transaction, token: state.token)
+            throw ProprDBError("rollback intervals")
+        })
+        XCTAssertEqual(try ageState(db).intervals, state.intervals)
+        try acknowledgeDirtyWindow(db, token: state.token)
+        XCTAssertTrue(try ageState(db).intervals.isEmpty)
+        XCTAssertFalse(try ageState(db).dirty)
+    }
+
+    func testNullBoundsRemainDistinctFromZero() throws {
+        let db = try SQLiteDatabase(path: ":memory:")
+        let crud = CRUD(db)
+        try crud.initialize()
+        try registerDirtyWindow(db, table: PhotoTableName, window: "capture", consumer: mutationConsumer)
+        let read = { try readDirtyWindow(db, table: PhotoTableName, window: "capture", consumer: mutationConsumer) }
+        try acknowledgeDirtyWindow(db, token: read().token)
+        let row = try crud.photo.insert(Generatedtest_Example_Photo())
+        XCTAssertFalse(try read().full)
+        XCTAssertTrue(try read().intervals.isEmpty)
+        for bound: Int64? in [0, nil] {
+            try db.execute("UPDATE generatedtest_example_photo SET exif_create_utc_time_seconds = ?, exif_modify_utc_time_seconds = ? WHERE id = ?", arguments: [bound, bound, row.id])
+            let state = try read()
+            XCTAssertFalse(state.full)
+            XCTAssertEqual(state.intervals, [DirtyInterval(lower: 0, upper: 0)])
+        }
+    }
+
     func testReplacementsPreserveDisplacedBounds() throws {
         for recursive in [false, true] {
             let db = try SQLiteDatabase(path: ":memory:")
@@ -86,6 +154,7 @@ final class MutationTests: XCTestCase {
         let state = try ageState(db)
         XCTAssertEqual(state.lower, 10)
         XCTAssertEqual(state.upper, 41)
+        XCTAssertEqual(state.intervals, [DirtyInterval(lower: 10, upper: 10), DirtyInterval(lower: 41, upper: 41)])
         try acknowledgeDirtyWindow(db, token: state.token)
     }
 
