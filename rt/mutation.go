@@ -14,8 +14,9 @@ const (
 	CoreTableGenerationName      = "_proprdb_generations"
 	CoreTableDirtyDefinitionName = "_proprdb_dirty_definitions"
 	CoreTableDirtyWindowName     = "_proprdb_dirty_windows"
+	CoreTableDirtyIntervalName   = "_proprdb_dirty_intervals"
 	mutationTriggerPrefix        = "_proprdb_mutation_"
-	mutationFormat               = "v3|"
+	mutationFormat               = "v4|"
 	mutationNew                  = "NEW"
 	mutationOld                  = "OLD"
 	mutationInsert               = "INSERT"
@@ -45,16 +46,22 @@ type DirtyWindowToken struct {
 	revision     int64
 }
 
+type DirtyInterval struct {
+	Lower, Upper int64
+}
+
 type DirtyWindowState struct {
-	Dirty bool
-	Full  bool
-	Lower sql.NullInt64
-	Upper sql.NullInt64
-	Token DirtyWindowToken
+	Intervals []DirtyInterval
+	Dirty     bool
+	Full      bool
+	Lower     sql.NullInt64
+	Upper     sql.NullInt64
+	Token     DirtyWindowToken
 }
 
 func ensureMutationTables(ctx context.Context, q DBTX) (err error) {
 	statements := []string{
+		`CREATE TABLE IF NOT EXISTS ` + CoreTableDirtyIntervalName + ` (table_name TEXT NOT NULL, window_name TEXT NOT NULL, consumer TEXT NOT NULL, lower_bound INTEGER NOT NULL, upper_bound INTEGER NOT NULL, PRIMARY KEY(table_name, window_name, consumer, lower_bound, upper_bound))`,
 		`CREATE TABLE IF NOT EXISTS ` + CoreTableGenerationName + ` (table_name TEXT PRIMARY KEY, generation INTEGER NOT NULL CHECK(typeof(generation) = 'integer' AND generation >= 0), signature TEXT NOT NULL)`,
 		`CREATE TABLE IF NOT EXISTS ` + CoreTableDirtyDefinitionName + ` (table_name TEXT NOT NULL, window_name TEXT NOT NULL, start_column TEXT NOT NULL, end_column TEXT NOT NULL, PRIMARY KEY(table_name, window_name))`,
 		`CREATE TABLE IF NOT EXISTS ` + CoreTableDirtyWindowName + ` (table_name TEXT NOT NULL, window_name TEXT NOT NULL, consumer TEXT NOT NULL, registration TEXT NOT NULL, revision INTEGER NOT NULL CHECK(typeof(revision) = 'integer' AND revision >= 0), dirty INTEGER NOT NULL, full INTEGER NOT NULL, lower_bound INTEGER, upper_bound INTEGER, PRIMARY KEY(table_name, window_name, consumer))`,
@@ -104,6 +111,9 @@ func prepareMutationTracking(ctx context.Context, q DBTX, binding GeneratedTable
 func finishMutationTracking(ctx context.Context, q DBTX, binding GeneratedTableBinding, changed bool) (err error) {
 	table := binding.Descriptor.TableName
 	if changed {
+		if _, err := q.ExecContext(ctx, `DELETE FROM `+CoreTableDirtyIntervalName+` WHERE table_name=?`, table); err != nil {
+			return fmt.Errorf("reset dirty intervals: %w", err)
+		}
 		slog.Debug("reconcile mutation tracking", "table", table, "window_count", len(binding.DirtyWindows))
 		if _, err := q.ExecContext(ctx, `INSERT INTO `+CoreTableGenerationName+` (table_name, generation, signature) VALUES (?, 0, ?) ON CONFLICT(table_name) DO UPDATE SET generation = generation + 1, signature = excluded.signature`, table, mutationSignature(binding)); err != nil {
 			return fmt.Errorf("initialize table generation: %w", err)
@@ -182,8 +192,9 @@ func mutationTriggerSQL(binding GeneratedTableBinding, event string) string {
 				start = "(SELECT " + quoteSQLiteIdentifier(window.StartColumn) + " FROM " + quoteSQLiteIdentifier(table) + " WHERE id = NEW.id)"
 				end = "(SELECT " + quoteSQLiteIdentifier(window.EndColumn) + " FROM " + quoteSQLiteIdentifier(table) + " WHERE id = NEW.id)"
 			}
-			invalid := "typeof(" + start + ") != 'integer' OR typeof(" + end + ") != 'integer' OR " + start + " > " + end
-			statements = append(statements, `UPDATE `+CoreTableDirtyWindowName+` SET revision = revision + 1, dirty = 1, full = full OR (`+invalid+`), lower_bound = CASE WHEN `+invalid+` THEN lower_bound WHEN lower_bound IS NULL THEN `+start+` ELSE min(lower_bound, `+start+`) END, upper_bound = CASE WHEN `+invalid+` THEN upper_bound WHEN upper_bound IS NULL THEN `+end+` ELSE max(upper_bound, `+end+`) END WHERE table_name = `+quoteSQLiteString(table)+` AND window_name = `+quoteSQLiteString(window.Name)+`;`)
+			invalid := "NOT (" + start + " IS NULL AND " + end + " IS NULL) AND (typeof(" + start + ") != 'integer' OR typeof(" + end + ") != 'integer' OR " + start + " > " + end + ")"
+			statements = append(statements, `UPDATE `+CoreTableDirtyWindowName+` SET revision = revision + 1, dirty = 1, full = full OR (`+invalid+`), lower_bound = CASE WHEN `+start+` IS NULL OR (`+invalid+`) THEN lower_bound WHEN lower_bound IS NULL THEN `+start+` ELSE min(lower_bound, `+start+`) END, upper_bound = CASE WHEN `+end+` IS NULL OR (`+invalid+`) THEN upper_bound WHEN upper_bound IS NULL THEN `+end+` ELSE max(upper_bound, `+end+`) END WHERE table_name = `+quoteSQLiteString(table)+` AND window_name = `+quoteSQLiteString(window.Name)+`;`)
+			statements = append(statements, `INSERT INTO `+CoreTableDirtyIntervalName+` (table_name,window_name,consumer,lower_bound,upper_bound) SELECT table_name,window_name,consumer,`+start+`,`+end+` FROM `+CoreTableDirtyWindowName+` WHERE table_name = `+quoteSQLiteString(table)+` AND window_name = `+quoteSQLiteString(window.Name)+` AND typeof(`+start+`) = 'integer' AND typeof(`+end+`) = 'integer' AND `+start+` <= `+end+` ON CONFLICT DO NOTHING;`)
 		}
 	}
 	timing := "AFTER " + event
@@ -246,6 +257,33 @@ func ReadDirtyWindow(ctx context.Context, q DBTX, table, window, consumer string
 	if err != nil {
 		return state, fmt.Errorf("read dirty window: %w", err)
 	}
+	if !state.Dirty || state.Full {
+		return state, nil
+	}
+	rows, err := q.QueryContext(ctx, `SELECT lower_bound,upper_bound FROM `+CoreTableDirtyIntervalName+` WHERE table_name=? AND window_name=? AND consumer=? ORDER BY lower_bound,upper_bound`, table, window, consumer)
+	if err != nil {
+		return state, fmt.Errorf("read dirty intervals: %w", err)
+	}
+	defer func() {
+		if closeErr := rows.Close(); closeErr != nil {
+			err = errors.Join(err, fmt.Errorf("close dirty intervals: %w", closeErr))
+		}
+	}()
+	for rows.Next() {
+		var interval DirtyInterval
+		if err := rows.Scan(&interval.Lower, &interval.Upper); err != nil {
+			return state, fmt.Errorf("scan dirty interval: %w", err)
+		}
+		n := len(state.Intervals)
+		if n > 0 && interval.Lower <= state.Intervals[n-1].Upper {
+			state.Intervals[n-1].Upper = max(state.Intervals[n-1].Upper, interval.Upper)
+		} else {
+			state.Intervals = append(state.Intervals, interval)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return state, fmt.Errorf("iterate dirty intervals: %w", err)
+	}
 	return state, nil
 }
 
@@ -253,23 +291,32 @@ func AcknowledgeDirtyWindow(ctx context.Context, q DBTX, token DirtyWindowToken)
 	if q == nil {
 		return errors.New(errNilDBTX)
 	}
-	var revision int64
-	err = q.QueryRowContext(ctx, `UPDATE `+CoreTableDirtyWindowName+` SET revision = revision + 1, dirty = 0, full = 0, lower_bound = NULL, upper_bound = NULL WHERE table_name = ? AND window_name = ? AND consumer = ? AND registration = ? AND revision = ? RETURNING revision`, token.table, token.window, token.consumer, token.registration, token.revision).Scan(&revision)
-	if errors.Is(err, sql.ErrNoRows) {
-		return ErrStaleDirtyWindow
-	}
-	if err != nil {
-		return fmt.Errorf("acknowledge dirty window: %w", err)
-	}
-	return nil
+	return q.WithTransaction(ctx, func(tx DBTX) error {
+		var revision int64
+		err = tx.QueryRowContext(ctx, `UPDATE `+CoreTableDirtyWindowName+` SET revision = revision + 1, dirty = 0, full = 0, lower_bound = NULL, upper_bound = NULL WHERE table_name = ? AND window_name = ? AND consumer = ? AND registration = ? AND revision = ? RETURNING revision`, token.table, token.window, token.consumer, token.registration, token.revision).Scan(&revision)
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrStaleDirtyWindow
+		}
+		if err != nil {
+			return fmt.Errorf("acknowledge dirty window: %w", err)
+		}
+		if _, err := tx.ExecContext(ctx, `DELETE FROM `+CoreTableDirtyIntervalName+` WHERE table_name=? AND window_name=? AND consumer=?`, token.table, token.window, token.consumer); err != nil {
+			return fmt.Errorf("acknowledge dirty intervals: %w", err)
+		}
+		return nil
+	})
 }
 
 func RemoveDirtyWindowConsumer(ctx context.Context, q DBTX, table, window, consumer string) (err error) {
 	if q == nil {
 		return errors.New(errNilDBTX)
 	}
-	if _, err := q.ExecContext(ctx, `DELETE FROM `+CoreTableDirtyWindowName+` WHERE table_name = ? AND window_name = ? AND consumer = ?`, table, window, consumer); err != nil {
-		return fmt.Errorf("remove dirty consumer: %w", err)
-	}
-	return nil
+	return q.WithTransaction(ctx, func(tx DBTX) error {
+		for _, target := range []string{CoreTableDirtyIntervalName, CoreTableDirtyWindowName} {
+			if _, err := tx.ExecContext(ctx, `DELETE FROM `+target+` WHERE table_name=? AND window_name=? AND consumer=?`, table, window, consumer); err != nil {
+				return fmt.Errorf("remove dirty consumer from %s: %w", target, err)
+			}
+		}
+		return nil
+	})
 }

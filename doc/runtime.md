@@ -298,3 +298,18 @@ scanning objects for historical keys. Changed projection or mutation declaration
 invalidate tokens and require full repair for surviving consumers; removed
 trackers remove their consumers and pending IDs. Unchanged initialization
 preserves pending state. Revision overflow fails the write.
+
+### Go dirty interval lists
+
+The Go runtime additionally retains disjoint mutation intervals in
+`_proprdb_dirty_intervals`. `DirtyWindowState.Intervals` returns their ordered,
+merged union; the existing `Lower`/`Upper` envelope remains available for older
+consumers. Updates retain both old and new bounds and deletions retain old bounds.
+Both NULL bounds contribute no timed interval; partial NULL, reversed, or invalid
+bounds still require full repair. Use a dirty-key tracker for untimed work.
+
+Acknowledgement atomically clears interval entries with the matching consumer
+revision. Rollback and stale tokens retain pending intervals. The Go mutation
+signature upgrade invalidates existing consumers for one bootstrap. The extended
+interval-list API is currently Go-only; Swift/Rust runtimes retain their previous
+aggregate API and should be upgraded before mixed-runtime use of the new format.

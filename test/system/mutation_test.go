@@ -279,8 +279,7 @@ func TestDirtyWindowMissingAndReversedBounds(t *testing.T) {
 			assert.NilError(t, err)
 			state, err = rt.ReadDirtyWindow(ctx, q, PhotoTableName, captureWindow, mutationConsumer)
 			assert.NilError(t, err)
-			// The old row has unknown bounds, so moving from it needs a full refresh.
-			assert.Assert(t, state.Full)
+			assert.Equal(t, state.Full, tc.full)
 			assert.NilError(t, rt.AcknowledgeDirtyWindow(ctx, q, state.Token))
 			_, err = db.ExecContext(ctx, `UPDATE "`+PhotoTableName+`" SET at_ns = at_ns + 1 WHERE id = ?`, row.ID)
 			assert.NilError(t, err)
@@ -358,4 +357,45 @@ func TestMutationSchemaInvalidation(t *testing.T) {
 	assert.NilError(t, rt.ReconcileGeneratedTableContext(ctx, q, PersonGeneratedBinding))
 	_, err = rt.ReadDirtyWindow(ctx, q, PersonTableName, "extra", mutationConsumer)
 	assert.ErrorIs(t, err, sql.ErrNoRows)
+}
+
+func TestDirtyIntervalsRemainDisjointAcrossUpdateAndDelete(t *testing.T) {
+	ctx := context.Background()
+	_, q, crud := mutationDatabase(t, ":memory:")
+	registerAgeWindow(t, q, mutationConsumer)
+	row, err := crud.Person.Insert(&Person{Name: "interval-test", Age: 10})
+	assert.NilError(t, err)
+	_, err = crud.Person.UpdateByID(row.ID, &Person{Name: "interval-test", Age: 100})
+	assert.NilError(t, err)
+	assert.NilError(t, crud.Person.DeleteByID(row.ID))
+	state := readAgeWindow(t, q, mutationConsumer)
+	assert.DeepEqual(t, state.Intervals, []rt.DirtyInterval{{Lower: 10, Upper: 10}, {Lower: 100, Upper: 100}})
+	assert.NilError(t, rt.AcknowledgeDirtyWindow(ctx, q, state.Token))
+	state = readAgeWindow(t, q, mutationConsumer)
+	assert.Assert(t, !state.Dirty)
+	assert.Equal(t, len(state.Intervals), 0)
+}
+
+func TestDirtyIntervalsDistinguishNullFromZero(t *testing.T) {
+	ctx := context.Background()
+	db, q, crud := mutationDatabase(t, ":memory:")
+	assert.NilError(t, rt.RegisterDirtyWindow(ctx, q, PhotoTableName, captureWindow, mutationConsumer))
+	state, err := rt.ReadDirtyWindow(ctx, q, PhotoTableName, captureWindow, mutationConsumer)
+	assert.NilError(t, err)
+	assert.NilError(t, rt.AcknowledgeDirtyWindow(ctx, q, state.Token))
+	photo, err := crud.Photo.Insert(&Photo{})
+	assert.NilError(t, err)
+	state, err = rt.ReadDirtyWindow(ctx, q, PhotoTableName, captureWindow, mutationConsumer)
+	assert.NilError(t, err)
+	assert.Assert(t, state.Dirty && !state.Full)
+	assert.Equal(t, len(state.Intervals), 0)
+	for _, bounds := range []any{int64(0), nil} {
+		_, err = db.Exec(`UPDATE "`+PhotoTableName+`" SET exif_create_utc_time_seconds=?,exif_modify_utc_time_seconds=? WHERE id=?`, bounds, bounds, photo.ID)
+		assert.NilError(t, err)
+		state, err = rt.ReadDirtyWindow(ctx, q, PhotoTableName, captureWindow, mutationConsumer)
+		assert.NilError(t, err)
+		assert.Assert(t, !state.Full)
+		assert.DeepEqual(t, state.Intervals, []rt.DirtyInterval{{Lower: 0, Upper: 0}})
+		assert.Assert(t, state.Lower.Valid && state.Upper.Valid)
+	}
 }
