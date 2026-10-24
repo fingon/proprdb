@@ -230,8 +230,11 @@ by ID to distinguish a surviving object from a deletion; historical payloads
 and deletion flags are not retained.
 
 Inserts and deletes always contribute their IDs. Updates contribute the ID when
-any watched projected value changes, using NULL-safe comparisons. With no
-`watched_fields`, any actual stored-column change qualifies. ID changes
+any watched projected value changes, using NULL-safe comparisons. Named hash
+projections referenced through `watched_hashes` participate in these comparisons
+as ordinary BLOB columns. Managed writes compute them before SQL execution;
+triggers do not interpret protobuf payloads. With neither
+`watched_fields` nor `watched_hashes`, any actual stored-column change qualifies. ID changes
 contribute both old and new IDs regardless of watched values. Primary-key
 replacements through `INSERT OR REPLACE` and `UPDATE OR REPLACE` retain affected
 IDs with recursive triggers enabled or disabled, even when the replacement

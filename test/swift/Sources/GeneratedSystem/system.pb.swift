@@ -8,6 +8,11 @@
 // For information on using the generated types, please see the documentation:
 //   https://github.com/apple/swift-protobuf/
 
+#if canImport(FoundationEssentials)
+import FoundationEssentials
+#else
+import Foundation
+#endif
 import SwiftProtobuf
 
 // If the compiler emits an error on this type, it is because this file
@@ -243,6 +248,202 @@ public struct Generatedtest_Example_ZonedTimestamp: Sendable {
   public init() {}
 
   fileprivate var _utcTime: SwiftProtobuf.Google_Protobuf_Timestamp? = nil
+}
+
+public struct Generatedtest_Example_HashRecord: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var label: String = String()
+
+  public var enabled: Bool = false
+
+  public var detail: Generatedtest_Example_HashRecord.Detail {
+    get {_detail ?? Generatedtest_Example_HashRecord.Detail()}
+    set {_detail = newValue}
+  }
+  /// Returns true if `detail` has been explicitly set.
+  public var hasDetail: Bool {self._detail != nil}
+  /// Clears the value of `detail`. Subsequent reads from it will return its default value.
+  public mutating func clearDetail() {self._detail = nil}
+
+  public var tags: [String] = []
+
+  public var counters: Dictionary<String,Int64> = [:]
+
+  public var optionalValue: Int32 {
+    get {_optionalValue ?? 0}
+    set {_optionalValue = newValue}
+  }
+  /// Returns true if `optionalValue` has been explicitly set.
+  public var hasOptionalValue: Bool {self._optionalValue != nil}
+  /// Clears the value of `optionalValue`. Subsequent reads from it will return its default value.
+  public mutating func clearOptionalValue() {self._optionalValue = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public struct Detail: @unchecked Sendable {
+    // SwiftProtobuf.Message conformance is added in an extension below. See the
+    // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+    // methods supported on all messages.
+
+    public var name: String {
+      get {_storage._name}
+      set {_uniqueStorage()._name = newValue}
+    }
+
+    public var values: [Int64] {
+      get {_storage._values}
+      set {_uniqueStorage()._values = newValue}
+    }
+
+    public var labels: Dictionary<Int32,String> {
+      get {_storage._labels}
+      set {_uniqueStorage()._labels = newValue}
+    }
+
+    public var child: Generatedtest_Example_HashRecord.Detail {
+      get {_storage._child ?? Generatedtest_Example_HashRecord.Detail()}
+      set {_uniqueStorage()._child = newValue}
+    }
+    /// Returns true if `child` has been explicitly set.
+    public var hasChild: Bool {_storage._child != nil}
+    /// Clears the value of `child`. Subsequent reads from it will return its default value.
+    public mutating func clearChild() {_uniqueStorage()._child = nil}
+
+    public var selection: OneOf_Selection? {
+      get {return _storage._selection}
+      set {_uniqueStorage()._selection = newValue}
+    }
+
+    public var text: String {
+      get {
+        if case .text(let v)? = _storage._selection {return v}
+        return String()
+      }
+      set {_uniqueStorage()._selection = .text(newValue)}
+    }
+
+    public var count: Int64 {
+      get {
+        if case .count(let v)? = _storage._selection {return v}
+        return 0
+      }
+      set {_uniqueStorage()._selection = .count(newValue)}
+    }
+
+    public var score: Double {
+      get {_storage._score}
+      set {_uniqueStorage()._score = newValue}
+    }
+
+    public var ratio: Float {
+      get {_storage._ratio}
+      set {_uniqueStorage()._ratio = newValue}
+    }
+
+    public var payload: Data {
+      get {_storage._payload}
+      set {_uniqueStorage()._payload = newValue}
+    }
+
+    public var unsignedValue: UInt64 {
+      get {_storage._unsignedValue}
+      set {_uniqueStorage()._unsignedValue = newValue}
+    }
+
+    public var fixed32Value: UInt32 {
+      get {_storage._fixed32Value}
+      set {_uniqueStorage()._fixed32Value = newValue}
+    }
+
+    public var fixed64Value: UInt64 {
+      get {_storage._fixed64Value}
+      set {_uniqueStorage()._fixed64Value = newValue}
+    }
+
+    public var sfixed32Value: Int32 {
+      get {_storage._sfixed32Value}
+      set {_uniqueStorage()._sfixed32Value = newValue}
+    }
+
+    public var sfixed64Value: Int64 {
+      get {_storage._sfixed64Value}
+      set {_uniqueStorage()._sfixed64Value = newValue}
+    }
+
+    public var sint32Value: Int32 {
+      get {_storage._sint32Value}
+      set {_uniqueStorage()._sint32Value = newValue}
+    }
+
+    public var int32Value: Int32 {
+      get {_storage._int32Value}
+      set {_uniqueStorage()._int32Value = newValue}
+    }
+
+    public var uint32Value: UInt32 {
+      get {_storage._uint32Value}
+      set {_uniqueStorage()._uint32Value = newValue}
+    }
+
+    public var state: Generatedtest_Example_HashRecord.Detail.State {
+      get {_storage._state}
+      set {_uniqueStorage()._state = newValue}
+    }
+
+    public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+    public enum OneOf_Selection: Equatable, Sendable {
+      case text(String)
+      case count(Int64)
+
+    }
+
+    public enum State: SwiftProtobuf.Enum, Swift.CaseIterable {
+      public typealias RawValue = Int
+      case unknown // = 0
+      case ready // = 1
+      case UNRECOGNIZED(Int)
+
+      public init() {
+        self = .unknown
+      }
+
+      public init?(rawValue: Int) {
+        switch rawValue {
+        case 0: self = .unknown
+        case 1: self = .ready
+        default: self = .UNRECOGNIZED(rawValue)
+        }
+      }
+
+      public var rawValue: Int {
+        switch self {
+        case .unknown: return 0
+        case .ready: return 1
+        case .UNRECOGNIZED(let i): return i
+        }
+      }
+
+      // The compiler won't synthesize support with the UNRECOGNIZED case.
+      public static let allCases: [Generatedtest_Example_HashRecord.Detail.State] = [
+        .unknown,
+        .ready,
+      ]
+
+    }
+
+    public init() {}
+
+    fileprivate var _storage = _StorageClass.defaultInstance
+  }
+
+  public init() {}
+
+  fileprivate var _detail: Generatedtest_Example_HashRecord.Detail? = nil
+  fileprivate var _optionalValue: Int32? = nil
 }
 
 // MARK: - Code below here is support for the SwiftProtobuf runtime.
@@ -631,4 +832,272 @@ extension Generatedtest_Example_ZonedTimestamp: SwiftProtobuf.Message, SwiftProt
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
+}
+
+extension Generatedtest_Example_HashRecord: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".HashRecord"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}label\0\u{1}enabled\0\u{1}detail\0\u{1}tags\0\u{1}counters\0\u{3}optional_value\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.label) }()
+      case 2: try { try decoder.decodeSingularBoolField(value: &self.enabled) }()
+      case 3: try { try decoder.decodeSingularMessageField(value: &self._detail) }()
+      case 4: try { try decoder.decodeRepeatedStringField(value: &self.tags) }()
+      case 5: try { try decoder.decodeMapField(fieldType: SwiftProtobuf._ProtobufMap<SwiftProtobuf.ProtobufString,SwiftProtobuf.ProtobufInt64>.self, value: &self.counters) }()
+      case 6: try { try decoder.decodeSingularInt32Field(value: &self._optionalValue) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    if !self.label.isEmpty {
+      try visitor.visitSingularStringField(value: self.label, fieldNumber: 1)
+    }
+    if self.enabled != false {
+      try visitor.visitSingularBoolField(value: self.enabled, fieldNumber: 2)
+    }
+    try { if let v = self._detail {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 3)
+    } }()
+    if !self.tags.isEmpty {
+      try visitor.visitRepeatedStringField(value: self.tags, fieldNumber: 4)
+    }
+    if !self.counters.isEmpty {
+      try visitor.visitMapField(fieldType: SwiftProtobuf._ProtobufMap<SwiftProtobuf.ProtobufString,SwiftProtobuf.ProtobufInt64>.self, value: self.counters, fieldNumber: 5)
+    }
+    try { if let v = self._optionalValue {
+      try visitor.visitSingularInt32Field(value: v, fieldNumber: 6)
+    } }()
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Generatedtest_Example_HashRecord, rhs: Generatedtest_Example_HashRecord) -> Bool {
+    if lhs.label != rhs.label {return false}
+    if lhs.enabled != rhs.enabled {return false}
+    if lhs._detail != rhs._detail {return false}
+    if lhs.tags != rhs.tags {return false}
+    if lhs.counters != rhs.counters {return false}
+    if lhs._optionalValue != rhs._optionalValue {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension Generatedtest_Example_HashRecord.Detail: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = Generatedtest_Example_HashRecord.protoMessageName + ".Detail"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}name\0\u{1}values\0\u{1}labels\0\u{1}child\0\u{1}text\0\u{1}count\0\u{1}score\0\u{1}ratio\0\u{1}payload\0\u{3}unsigned_value\0\u{3}fixed32_value\0\u{3}fixed64_value\0\u{3}sfixed32_value\0\u{3}sfixed64_value\0\u{3}sint32_value\0\u{3}int32_value\0\u{3}uint32_value\0\u{1}state\0")
+
+  fileprivate class _StorageClass {
+    var _name: String = String()
+    var _values: [Int64] = []
+    var _labels: Dictionary<Int32,String> = [:]
+    var _child: Generatedtest_Example_HashRecord.Detail? = nil
+    var _selection: Generatedtest_Example_HashRecord.Detail.OneOf_Selection?
+    var _score: Double = 0
+    var _ratio: Float = 0
+    var _payload: Data = Data()
+    var _unsignedValue: UInt64 = 0
+    var _fixed32Value: UInt32 = 0
+    var _fixed64Value: UInt64 = 0
+    var _sfixed32Value: Int32 = 0
+    var _sfixed64Value: Int64 = 0
+    var _sint32Value: Int32 = 0
+    var _int32Value: Int32 = 0
+    var _uint32Value: UInt32 = 0
+    var _state: Generatedtest_Example_HashRecord.Detail.State = .unknown
+
+      // This property is used as the initial default value for new instances of the type.
+      // The type itself is protecting the reference to its storage via CoW semantics.
+      // This will force a copy to be made of this reference when the first mutation occurs;
+      // hence, it is safe to mark this as `nonisolated(unsafe)`.
+      static nonisolated(unsafe) let defaultInstance = _StorageClass()
+
+    private init() {}
+
+    init(copying source: _StorageClass) {
+      _name = source._name
+      _values = source._values
+      _labels = source._labels
+      _child = source._child
+      _selection = source._selection
+      _score = source._score
+      _ratio = source._ratio
+      _payload = source._payload
+      _unsignedValue = source._unsignedValue
+      _fixed32Value = source._fixed32Value
+      _fixed64Value = source._fixed64Value
+      _sfixed32Value = source._sfixed32Value
+      _sfixed64Value = source._sfixed64Value
+      _sint32Value = source._sint32Value
+      _int32Value = source._int32Value
+      _uint32Value = source._uint32Value
+      _state = source._state
+    }
+  }
+
+  fileprivate mutating func _uniqueStorage() -> _StorageClass {
+    if !isKnownUniquelyReferenced(&_storage) {
+      _storage = _StorageClass(copying: _storage)
+    }
+    return _storage
+  }
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    _ = _uniqueStorage()
+    try withExtendedLifetime(_storage) { (_storage: _StorageClass) in
+      while let fieldNumber = try decoder.nextFieldNumber() {
+        // The use of inline closures is to circumvent an issue where the compiler
+        // allocates stack space for every case branch when no optimizations are
+        // enabled. https://github.com/apple/swift-protobuf/issues/1034
+        switch fieldNumber {
+        case 1: try { try decoder.decodeSingularStringField(value: &_storage._name) }()
+        case 2: try { try decoder.decodeRepeatedSInt64Field(value: &_storage._values) }()
+        case 3: try { try decoder.decodeMapField(fieldType: SwiftProtobuf._ProtobufMap<SwiftProtobuf.ProtobufInt32,SwiftProtobuf.ProtobufString>.self, value: &_storage._labels) }()
+        case 4: try { try decoder.decodeSingularMessageField(value: &_storage._child) }()
+        case 5: try {
+          var v: String?
+          try decoder.decodeSingularStringField(value: &v)
+          if let v = v {
+            if _storage._selection != nil {try decoder.handleConflictingOneOf()}
+            _storage._selection = .text(v)
+          }
+        }()
+        case 6: try {
+          var v: Int64?
+          try decoder.decodeSingularInt64Field(value: &v)
+          if let v = v {
+            if _storage._selection != nil {try decoder.handleConflictingOneOf()}
+            _storage._selection = .count(v)
+          }
+        }()
+        case 7: try { try decoder.decodeSingularDoubleField(value: &_storage._score) }()
+        case 8: try { try decoder.decodeSingularFloatField(value: &_storage._ratio) }()
+        case 9: try { try decoder.decodeSingularBytesField(value: &_storage._payload) }()
+        case 10: try { try decoder.decodeSingularUInt64Field(value: &_storage._unsignedValue) }()
+        case 11: try { try decoder.decodeSingularFixed32Field(value: &_storage._fixed32Value) }()
+        case 12: try { try decoder.decodeSingularFixed64Field(value: &_storage._fixed64Value) }()
+        case 13: try { try decoder.decodeSingularSFixed32Field(value: &_storage._sfixed32Value) }()
+        case 14: try { try decoder.decodeSingularSFixed64Field(value: &_storage._sfixed64Value) }()
+        case 15: try { try decoder.decodeSingularSInt32Field(value: &_storage._sint32Value) }()
+        case 16: try { try decoder.decodeSingularInt32Field(value: &_storage._int32Value) }()
+        case 17: try { try decoder.decodeSingularUInt32Field(value: &_storage._uint32Value) }()
+        case 18: try { try decoder.decodeSingularEnumField(value: &_storage._state) }()
+        default: break
+        }
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    try withExtendedLifetime(_storage) { (_storage: _StorageClass) in
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every if/case branch local when no optimizations
+      // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+      // https://github.com/apple/swift-protobuf/issues/1182
+      if !_storage._name.isEmpty {
+        try visitor.visitSingularStringField(value: _storage._name, fieldNumber: 1)
+      }
+      if !_storage._values.isEmpty {
+        try visitor.visitPackedSInt64Field(value: _storage._values, fieldNumber: 2)
+      }
+      if !_storage._labels.isEmpty {
+        try visitor.visitMapField(fieldType: SwiftProtobuf._ProtobufMap<SwiftProtobuf.ProtobufInt32,SwiftProtobuf.ProtobufString>.self, value: _storage._labels, fieldNumber: 3)
+      }
+      try { if let v = _storage._child {
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 4)
+      } }()
+      switch _storage._selection {
+      case .text?: try {
+        guard case .text(let v)? = _storage._selection else { preconditionFailure() }
+        try visitor.visitSingularStringField(value: v, fieldNumber: 5)
+      }()
+      case .count?: try {
+        guard case .count(let v)? = _storage._selection else { preconditionFailure() }
+        try visitor.visitSingularInt64Field(value: v, fieldNumber: 6)
+      }()
+      case nil: break
+      }
+      if _storage._score.bitPattern != 0 {
+        try visitor.visitSingularDoubleField(value: _storage._score, fieldNumber: 7)
+      }
+      if _storage._ratio.bitPattern != 0 {
+        try visitor.visitSingularFloatField(value: _storage._ratio, fieldNumber: 8)
+      }
+      if !_storage._payload.isEmpty {
+        try visitor.visitSingularBytesField(value: _storage._payload, fieldNumber: 9)
+      }
+      if _storage._unsignedValue != 0 {
+        try visitor.visitSingularUInt64Field(value: _storage._unsignedValue, fieldNumber: 10)
+      }
+      if _storage._fixed32Value != 0 {
+        try visitor.visitSingularFixed32Field(value: _storage._fixed32Value, fieldNumber: 11)
+      }
+      if _storage._fixed64Value != 0 {
+        try visitor.visitSingularFixed64Field(value: _storage._fixed64Value, fieldNumber: 12)
+      }
+      if _storage._sfixed32Value != 0 {
+        try visitor.visitSingularSFixed32Field(value: _storage._sfixed32Value, fieldNumber: 13)
+      }
+      if _storage._sfixed64Value != 0 {
+        try visitor.visitSingularSFixed64Field(value: _storage._sfixed64Value, fieldNumber: 14)
+      }
+      if _storage._sint32Value != 0 {
+        try visitor.visitSingularSInt32Field(value: _storage._sint32Value, fieldNumber: 15)
+      }
+      if _storage._int32Value != 0 {
+        try visitor.visitSingularInt32Field(value: _storage._int32Value, fieldNumber: 16)
+      }
+      if _storage._uint32Value != 0 {
+        try visitor.visitSingularUInt32Field(value: _storage._uint32Value, fieldNumber: 17)
+      }
+      if _storage._state != .unknown {
+        try visitor.visitSingularEnumField(value: _storage._state, fieldNumber: 18)
+      }
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Generatedtest_Example_HashRecord.Detail, rhs: Generatedtest_Example_HashRecord.Detail) -> Bool {
+    if lhs._storage !== rhs._storage {
+      let storagesAreEqual: Bool = withExtendedLifetime((lhs._storage, rhs._storage)) { (_args: (_StorageClass, _StorageClass)) in
+        let _storage = _args.0
+        let rhs_storage = _args.1
+        if _storage._name != rhs_storage._name {return false}
+        if _storage._values != rhs_storage._values {return false}
+        if _storage._labels != rhs_storage._labels {return false}
+        if _storage._child != rhs_storage._child {return false}
+        if _storage._selection != rhs_storage._selection {return false}
+        if _storage._score != rhs_storage._score {return false}
+        if _storage._ratio != rhs_storage._ratio {return false}
+        if _storage._payload != rhs_storage._payload {return false}
+        if _storage._unsignedValue != rhs_storage._unsignedValue {return false}
+        if _storage._fixed32Value != rhs_storage._fixed32Value {return false}
+        if _storage._fixed64Value != rhs_storage._fixed64Value {return false}
+        if _storage._sfixed32Value != rhs_storage._sfixed32Value {return false}
+        if _storage._sfixed64Value != rhs_storage._sfixed64Value {return false}
+        if _storage._sint32Value != rhs_storage._sint32Value {return false}
+        if _storage._int32Value != rhs_storage._int32Value {return false}
+        if _storage._uint32Value != rhs_storage._uint32Value {return false}
+        if _storage._state != rhs_storage._state {return false}
+        return true
+      }
+      if !storagesAreEqual {return false}
+    }
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension Generatedtest_Example_HashRecord.Detail.State: SwiftProtobuf._ProtoNameProviding {
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0STATE_UNKNOWN\0\u{1}STATE_READY\0")
 }

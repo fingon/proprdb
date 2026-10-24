@@ -29,9 +29,10 @@ message Person {
 
 - `proprdb.dirty_keys` (`repeated DirtyKeys`, message-level):
   - Defines named sets of affected object IDs for independently registered consumers.
-  - Each declaration has `name` and optional `watched_fields`. An empty list
-    watches all stored columns; otherwise updates watch only the listed scalar
-    projections. Inserts, deletes, replacements, and ID changes always qualify.
+  - Each declaration has `name`, optional `watched_fields`, and optional
+    `watched_hashes`. When both watch lists are empty, the tracker
+    watches all stored columns; otherwise updates watch the union of listed hash
+    and scalar projections. Inserts, deletes, replacements, and ID changes always qualify.
   - Watched fields must already be projected through `external` or
     `external_paths`, including nullable and nested scalar fields. This option
     does not add projections or indexes. Duplicate watched paths are rejected.
@@ -278,3 +279,57 @@ Run `make rust-test`, `make rust-build`, and `make rust-lint` for the Rust
 checks. These are also included in the project-wide test, build, and lint
 targets; `make generate` and `make verify-generated` cover Rust fixtures and
 golden files as well.
+
+## Hash projections
+
+`proprdb.hash_projections` is a repeated message option. Each declaration has a
+`name` matching `[a-z][a-z0-9_]*` and a nonempty `fields` list of protobuf paths.
+Paths traverse singular messages and select scalars, complete nested messages,
+repeated values, or maps. The selected fields need no `external` annotation or
+SQL index. Repeated/map traversal, duplicate or overlapping selections, duplicate
+names, missing fields, and generated column collisions fail generation.
+Hash projections support proto3 fields, including imported messages and recursive
+types; proto2 fields and groups are rejected.
+
+```proto
+option (proprdb.hash_projections) = {
+  name: "support"
+  fields: "place_id"
+  fields: "non_stay"
+  fields: "anchor"
+  fields: "supersedes"
+};
+option (proprdb.dirty_keys) = {
+  name: "support"
+  watched_hashes: "support"
+};
+```
+
+Each projection creates an unindexed BLOB column named `_proprdb_hash_<name>`.
+Managed writes compute an eight-byte, big-endian XXH3-64 fingerprint with seed
+zero. This is a noncryptographic change detector, not an identity or integrity
+check. `watched_hashes` names must reference declared projections; duplicate or
+unknown references fail generation. `watched_fields` and `watched_hashes` combine
+with OR semantics and retain independent names and purposes.
+
+Fingerprints include known nested contents, protobuf presence, oneof selection,
+and repeated ordering. Map insertion order, unknown fields, NaN bit patterns,
+and signed zero do not affect them. Unselected fields are excluded. The exact
+[canonical encoding](hash-projection-format.md) is shared across Go, Swift, and
+Rust; runtime-specific deterministic serialization is not used as the canonical
+format.
+
+CRUD, accepted synchronization, replacement writes through managed APIs, and
+unknown-row draining use the same projection path. Initialization transactionally
+backfills added or changed definitions from existing payloads without modifying
+payload bytes or synchronization timestamps. Algorithm, encoding, selection, or
+reachable nested-schema changes alter the projection signature and invalidate
+existing tracking consumers for the affected table. Reopening an unchanged
+schema does not scan object rows. Older generated definitions must not be used
+concurrently with newer definitions for the same database.
+
+Direct SQL writers must keep fingerprints consistent with payloads, just as for
+other projections; triggers compare stored fingerprints and do not compute them.
+The runtime `ProjectHash` / `projectHash` / `project_hash` helpers accept generated
+schema definitions and return errors on invalid input. Rust's `Model::projected_values`
+now returns `Result<Vec<Value>>`; custom implementations must propagate failures.

@@ -180,7 +180,7 @@ impl Model for IndexedChoice {
     fn descriptor() -> Result<MessageDescriptor> {
         ChoiceModel::descriptor()
     }
-    fn projected_values(data: &Choice) -> Vec<Value> {
+    fn projected_values(data: &Choice) -> proprdb_runtime::Result<Vec<Value>> {
         ChoiceModel::projected_values(data)
     }
 }

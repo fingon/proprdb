@@ -20,6 +20,52 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+type HashRecord_Detail_State int32
+
+const (
+	HashRecord_Detail_STATE_UNKNOWN HashRecord_Detail_State = 0
+	HashRecord_Detail_STATE_READY   HashRecord_Detail_State = 1
+)
+
+// Enum value maps for HashRecord_Detail_State.
+var (
+	HashRecord_Detail_State_name = map[int32]string{
+		0: "STATE_UNKNOWN",
+		1: "STATE_READY",
+	}
+	HashRecord_Detail_State_value = map[string]int32{
+		"STATE_UNKNOWN": 0,
+		"STATE_READY":   1,
+	}
+)
+
+func (x HashRecord_Detail_State) Enum() *HashRecord_Detail_State {
+	p := new(HashRecord_Detail_State)
+	*p = x
+	return p
+}
+
+func (x HashRecord_Detail_State) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (HashRecord_Detail_State) Descriptor() protoreflect.EnumDescriptor {
+	return file_system_proto_enumTypes[0].Descriptor()
+}
+
+func (HashRecord_Detail_State) Type() protoreflect.EnumType {
+	return &file_system_proto_enumTypes[0]
+}
+
+func (x HashRecord_Detail_State) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use HashRecord_Detail_State.Descriptor instead.
+func (HashRecord_Detail_State) EnumDescriptor() ([]byte, []int) {
+	return file_system_proto_rawDescGZIP(), []int{7, 1, 0}
+}
+
 type Person struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
@@ -506,6 +552,300 @@ func (x *ZonedTimestamp) GetUtcTime() *timestamppb.Timestamp {
 	return nil
 }
 
+type HashRecord struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Label         string                 `protobuf:"bytes,1,opt,name=label,proto3" json:"label,omitempty"`
+	Enabled       bool                   `protobuf:"varint,2,opt,name=enabled,proto3" json:"enabled,omitempty"`
+	Detail        *HashRecord_Detail     `protobuf:"bytes,3,opt,name=detail,proto3" json:"detail,omitempty"`
+	Tags          []string               `protobuf:"bytes,4,rep,name=tags,proto3" json:"tags,omitempty"`
+	Counters      map[string]int64       `protobuf:"bytes,5,rep,name=counters,proto3" json:"counters,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"varint,2,opt,name=value"`
+	OptionalValue *int32                 `protobuf:"varint,6,opt,name=optional_value,json=optionalValue,proto3,oneof" json:"optional_value,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *HashRecord) Reset() {
+	*x = HashRecord{}
+	mi := &file_system_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *HashRecord) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*HashRecord) ProtoMessage() {}
+
+func (x *HashRecord) ProtoReflect() protoreflect.Message {
+	mi := &file_system_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use HashRecord.ProtoReflect.Descriptor instead.
+func (*HashRecord) Descriptor() ([]byte, []int) {
+	return file_system_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *HashRecord) GetLabel() string {
+	if x != nil {
+		return x.Label
+	}
+	return ""
+}
+
+func (x *HashRecord) GetEnabled() bool {
+	if x != nil {
+		return x.Enabled
+	}
+	return false
+}
+
+func (x *HashRecord) GetDetail() *HashRecord_Detail {
+	if x != nil {
+		return x.Detail
+	}
+	return nil
+}
+
+func (x *HashRecord) GetTags() []string {
+	if x != nil {
+		return x.Tags
+	}
+	return nil
+}
+
+func (x *HashRecord) GetCounters() map[string]int64 {
+	if x != nil {
+		return x.Counters
+	}
+	return nil
+}
+
+func (x *HashRecord) GetOptionalValue() int32 {
+	if x != nil && x.OptionalValue != nil {
+		return *x.OptionalValue
+	}
+	return 0
+}
+
+type HashRecord_Detail struct {
+	state  protoimpl.MessageState `protogen:"open.v1"`
+	Name   string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	Values []int64                `protobuf:"zigzag64,2,rep,packed,name=values,proto3" json:"values,omitempty"`
+	Labels map[int32]string       `protobuf:"bytes,3,rep,name=labels,proto3" json:"labels,omitempty" protobuf_key:"varint,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	Child  *HashRecord_Detail     `protobuf:"bytes,4,opt,name=child,proto3" json:"child,omitempty"`
+	// Types that are valid to be assigned to Selection:
+	//
+	//	*HashRecord_Detail_Text
+	//	*HashRecord_Detail_Count
+	Selection     isHashRecord_Detail_Selection `protobuf_oneof:"selection"`
+	Score         float64                       `protobuf:"fixed64,7,opt,name=score,proto3" json:"score,omitempty"`
+	Ratio         float32                       `protobuf:"fixed32,8,opt,name=ratio,proto3" json:"ratio,omitempty"`
+	Payload       []byte                        `protobuf:"bytes,9,opt,name=payload,proto3" json:"payload,omitempty"`
+	UnsignedValue uint64                        `protobuf:"varint,10,opt,name=unsigned_value,json=unsignedValue,proto3" json:"unsigned_value,omitempty"`
+	Fixed32Value  uint32                        `protobuf:"fixed32,11,opt,name=fixed32_value,json=fixed32Value,proto3" json:"fixed32_value,omitempty"`
+	Fixed64Value  uint64                        `protobuf:"fixed64,12,opt,name=fixed64_value,json=fixed64Value,proto3" json:"fixed64_value,omitempty"`
+	Sfixed32Value int32                         `protobuf:"fixed32,13,opt,name=sfixed32_value,json=sfixed32Value,proto3" json:"sfixed32_value,omitempty"`
+	Sfixed64Value int64                         `protobuf:"fixed64,14,opt,name=sfixed64_value,json=sfixed64Value,proto3" json:"sfixed64_value,omitempty"`
+	Sint32Value   int32                         `protobuf:"zigzag32,15,opt,name=sint32_value,json=sint32Value,proto3" json:"sint32_value,omitempty"`
+	Int32Value    int32                         `protobuf:"varint,16,opt,name=int32_value,json=int32Value,proto3" json:"int32_value,omitempty"`
+	Uint32Value   uint32                        `protobuf:"varint,17,opt,name=uint32_value,json=uint32Value,proto3" json:"uint32_value,omitempty"`
+	State         HashRecord_Detail_State       `protobuf:"varint,18,opt,name=state,proto3,enum=generatedtest.example.HashRecord_Detail_State" json:"state,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *HashRecord_Detail) Reset() {
+	*x = HashRecord_Detail{}
+	mi := &file_system_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *HashRecord_Detail) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*HashRecord_Detail) ProtoMessage() {}
+
+func (x *HashRecord_Detail) ProtoReflect() protoreflect.Message {
+	mi := &file_system_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use HashRecord_Detail.ProtoReflect.Descriptor instead.
+func (*HashRecord_Detail) Descriptor() ([]byte, []int) {
+	return file_system_proto_rawDescGZIP(), []int{7, 1}
+}
+
+func (x *HashRecord_Detail) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *HashRecord_Detail) GetValues() []int64 {
+	if x != nil {
+		return x.Values
+	}
+	return nil
+}
+
+func (x *HashRecord_Detail) GetLabels() map[int32]string {
+	if x != nil {
+		return x.Labels
+	}
+	return nil
+}
+
+func (x *HashRecord_Detail) GetChild() *HashRecord_Detail {
+	if x != nil {
+		return x.Child
+	}
+	return nil
+}
+
+func (x *HashRecord_Detail) GetSelection() isHashRecord_Detail_Selection {
+	if x != nil {
+		return x.Selection
+	}
+	return nil
+}
+
+func (x *HashRecord_Detail) GetText() string {
+	if x != nil {
+		if x, ok := x.Selection.(*HashRecord_Detail_Text); ok {
+			return x.Text
+		}
+	}
+	return ""
+}
+
+func (x *HashRecord_Detail) GetCount() int64 {
+	if x != nil {
+		if x, ok := x.Selection.(*HashRecord_Detail_Count); ok {
+			return x.Count
+		}
+	}
+	return 0
+}
+
+func (x *HashRecord_Detail) GetScore() float64 {
+	if x != nil {
+		return x.Score
+	}
+	return 0
+}
+
+func (x *HashRecord_Detail) GetRatio() float32 {
+	if x != nil {
+		return x.Ratio
+	}
+	return 0
+}
+
+func (x *HashRecord_Detail) GetPayload() []byte {
+	if x != nil {
+		return x.Payload
+	}
+	return nil
+}
+
+func (x *HashRecord_Detail) GetUnsignedValue() uint64 {
+	if x != nil {
+		return x.UnsignedValue
+	}
+	return 0
+}
+
+func (x *HashRecord_Detail) GetFixed32Value() uint32 {
+	if x != nil {
+		return x.Fixed32Value
+	}
+	return 0
+}
+
+func (x *HashRecord_Detail) GetFixed64Value() uint64 {
+	if x != nil {
+		return x.Fixed64Value
+	}
+	return 0
+}
+
+func (x *HashRecord_Detail) GetSfixed32Value() int32 {
+	if x != nil {
+		return x.Sfixed32Value
+	}
+	return 0
+}
+
+func (x *HashRecord_Detail) GetSfixed64Value() int64 {
+	if x != nil {
+		return x.Sfixed64Value
+	}
+	return 0
+}
+
+func (x *HashRecord_Detail) GetSint32Value() int32 {
+	if x != nil {
+		return x.Sint32Value
+	}
+	return 0
+}
+
+func (x *HashRecord_Detail) GetInt32Value() int32 {
+	if x != nil {
+		return x.Int32Value
+	}
+	return 0
+}
+
+func (x *HashRecord_Detail) GetUint32Value() uint32 {
+	if x != nil {
+		return x.Uint32Value
+	}
+	return 0
+}
+
+func (x *HashRecord_Detail) GetState() HashRecord_Detail_State {
+	if x != nil {
+		return x.State
+	}
+	return HashRecord_Detail_STATE_UNKNOWN
+}
+
+type isHashRecord_Detail_Selection interface {
+	isHashRecord_Detail_Selection()
+}
+
+type HashRecord_Detail_Text struct {
+	Text string `protobuf:"bytes,5,opt,name=text,proto3,oneof"`
+}
+
+type HashRecord_Detail_Count struct {
+	Count int64 `protobuf:"varint,6,opt,name=count,proto3,oneof"`
+}
+
+func (*HashRecord_Detail_Text) isHashRecord_Detail_Selection() {}
+
+func (*HashRecord_Detail_Count) isHashRecord_Detail_Selection() {}
+
 var File_system_proto protoreflect.FileDescriptor
 
 const file_system_proto_rawDesc = "" +
@@ -560,7 +900,52 @@ const file_system_proto_rawDesc = "" +
 	"\vdescriptionB\v\n" +
 	"\t_altitude\"M\n" +
 	"\x0eZonedTimestamp\x125\n" +
-	"\butc_time\x18\x01 \x01(\v2\x1a.google.protobuf.TimestampR\autcTime:\x04\x90\xb5\x18\x01B\x1eZ\x1cgeneratedtest/gen;genexampleb\x06proto3"
+	"\butc_time\x18\x01 \x01(\v2\x1a.google.protobuf.TimestampR\autcTime:\x04\x90\xb5\x18\x01\"\x8b\n" +
+	"\n" +
+	"\n" +
+	"HashRecord\x12\x1a\n" +
+	"\x05label\x18\x01 \x01(\tB\x04\x88\xb5\x18\x01R\x05label\x12\x18\n" +
+	"\aenabled\x18\x02 \x01(\bR\aenabled\x12@\n" +
+	"\x06detail\x18\x03 \x01(\v2(.generatedtest.example.HashRecord.DetailR\x06detail\x12\x12\n" +
+	"\x04tags\x18\x04 \x03(\tR\x04tags\x12K\n" +
+	"\bcounters\x18\x05 \x03(\v2/.generatedtest.example.HashRecord.CountersEntryR\bcounters\x12*\n" +
+	"\x0eoptional_value\x18\x06 \x01(\x05H\x00R\roptionalValue\x88\x01\x01\x1a;\n" +
+	"\rCountersEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\x03R\x05value:\x028\x01\x1a\x9d\x06\n" +
+	"\x06Detail\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12\x16\n" +
+	"\x06values\x18\x02 \x03(\x12R\x06values\x12L\n" +
+	"\x06labels\x18\x03 \x03(\v24.generatedtest.example.HashRecord.Detail.LabelsEntryR\x06labels\x12>\n" +
+	"\x05child\x18\x04 \x01(\v2(.generatedtest.example.HashRecord.DetailR\x05child\x12\x14\n" +
+	"\x04text\x18\x05 \x01(\tH\x00R\x04text\x12\x16\n" +
+	"\x05count\x18\x06 \x01(\x03H\x00R\x05count\x12\x14\n" +
+	"\x05score\x18\a \x01(\x01R\x05score\x12\x14\n" +
+	"\x05ratio\x18\b \x01(\x02R\x05ratio\x12\x18\n" +
+	"\apayload\x18\t \x01(\fR\apayload\x12%\n" +
+	"\x0eunsigned_value\x18\n" +
+	" \x01(\x04R\runsignedValue\x12#\n" +
+	"\rfixed32_value\x18\v \x01(\aR\ffixed32Value\x12#\n" +
+	"\rfixed64_value\x18\f \x01(\x06R\ffixed64Value\x12%\n" +
+	"\x0esfixed32_value\x18\r \x01(\x0fR\rsfixed32Value\x12%\n" +
+	"\x0esfixed64_value\x18\x0e \x01(\x10R\rsfixed64Value\x12!\n" +
+	"\fsint32_value\x18\x0f \x01(\x11R\vsint32Value\x12\x1f\n" +
+	"\vint32_value\x18\x10 \x01(\x05R\n" +
+	"int32Value\x12!\n" +
+	"\fuint32_value\x18\x11 \x01(\rR\vuint32Value\x12D\n" +
+	"\x05state\x18\x12 \x01(\x0e2..generatedtest.example.HashRecord.Detail.StateR\x05state\x1a9\n" +
+	"\vLabelsEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\x05R\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"+\n" +
+	"\x05State\x12\x11\n" +
+	"\rSTATE_UNKNOWN\x10\x00\x12\x0f\n" +
+	"\vSTATE_READY\x10\x01:\x04\x90\xb5\x18\x01B\v\n" +
+	"\tselection:\x87\x01\xa8\xb5\x18\x01ڵ\x18\x12\n" +
+	"\asupport\x1a\asupportڵ\x18\x14\n" +
+	"\x05mixed\x12\x05label\x1a\x04name\xe2\xb5\x18:\n" +
+	"\asupport\x12\aenabled\x12\x06detail\x12\x04tags\x12\bcounters\x12\x0eoptional_value\xe2\xb5\x18\x13\n" +
+	"\x04name\x12\vdetail.nameB\x11\n" +
+	"\x0f_optional_valueB\x1eZ\x1cgeneratedtest/gen;genexampleb\x06proto3"
 
 var (
 	file_system_proto_rawDescOnce sync.Once
@@ -574,29 +959,40 @@ func file_system_proto_rawDescGZIP() []byte {
 	return file_system_proto_rawDescData
 }
 
-var file_system_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
+var file_system_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
+var file_system_proto_msgTypes = make([]protoimpl.MessageInfo, 11)
 var file_system_proto_goTypes = []any{
-	(*Person)(nil),                // 0: generatedtest.example.Person
-	(*Note)(nil),                  // 1: generatedtest.example.Note
-	(*Choice)(nil),                // 2: generatedtest.example.Choice
-	(*Hidden)(nil),                // 3: generatedtest.example.Hidden
-	(*Photo)(nil),                 // 4: generatedtest.example.Photo
-	(*Location)(nil),              // 5: generatedtest.example.Location
-	(*ZonedTimestamp)(nil),        // 6: generatedtest.example.ZonedTimestamp
-	(*timestamppb.Timestamp)(nil), // 7: google.protobuf.Timestamp
+	(HashRecord_Detail_State)(0),  // 0: generatedtest.example.HashRecord.Detail.State
+	(*Person)(nil),                // 1: generatedtest.example.Person
+	(*Note)(nil),                  // 2: generatedtest.example.Note
+	(*Choice)(nil),                // 3: generatedtest.example.Choice
+	(*Hidden)(nil),                // 4: generatedtest.example.Hidden
+	(*Photo)(nil),                 // 5: generatedtest.example.Photo
+	(*Location)(nil),              // 6: generatedtest.example.Location
+	(*ZonedTimestamp)(nil),        // 7: generatedtest.example.ZonedTimestamp
+	(*HashRecord)(nil),            // 8: generatedtest.example.HashRecord
+	nil,                           // 9: generatedtest.example.HashRecord.CountersEntry
+	(*HashRecord_Detail)(nil),     // 10: generatedtest.example.HashRecord.Detail
+	nil,                           // 11: generatedtest.example.HashRecord.Detail.LabelsEntry
+	(*timestamppb.Timestamp)(nil), // 12: google.protobuf.Timestamp
 }
 var file_system_proto_depIdxs = []int32{
-	5, // 0: generatedtest.example.Photo.location:type_name -> generatedtest.example.Location
-	6, // 1: generatedtest.example.Photo.exif_create:type_name -> generatedtest.example.ZonedTimestamp
-	6, // 2: generatedtest.example.Photo.exif_modify:type_name -> generatedtest.example.ZonedTimestamp
-	5, // 3: generatedtest.example.Photo.selected_location:type_name -> generatedtest.example.Location
-	5, // 4: generatedtest.example.Location.next:type_name -> generatedtest.example.Location
-	7, // 5: generatedtest.example.ZonedTimestamp.utc_time:type_name -> google.protobuf.Timestamp
-	6, // [6:6] is the sub-list for method output_type
-	6, // [6:6] is the sub-list for method input_type
-	6, // [6:6] is the sub-list for extension type_name
-	6, // [6:6] is the sub-list for extension extendee
-	0, // [0:6] is the sub-list for field type_name
+	6,  // 0: generatedtest.example.Photo.location:type_name -> generatedtest.example.Location
+	7,  // 1: generatedtest.example.Photo.exif_create:type_name -> generatedtest.example.ZonedTimestamp
+	7,  // 2: generatedtest.example.Photo.exif_modify:type_name -> generatedtest.example.ZonedTimestamp
+	6,  // 3: generatedtest.example.Photo.selected_location:type_name -> generatedtest.example.Location
+	6,  // 4: generatedtest.example.Location.next:type_name -> generatedtest.example.Location
+	12, // 5: generatedtest.example.ZonedTimestamp.utc_time:type_name -> google.protobuf.Timestamp
+	10, // 6: generatedtest.example.HashRecord.detail:type_name -> generatedtest.example.HashRecord.Detail
+	9,  // 7: generatedtest.example.HashRecord.counters:type_name -> generatedtest.example.HashRecord.CountersEntry
+	11, // 8: generatedtest.example.HashRecord.Detail.labels:type_name -> generatedtest.example.HashRecord.Detail.LabelsEntry
+	10, // 9: generatedtest.example.HashRecord.Detail.child:type_name -> generatedtest.example.HashRecord.Detail
+	0,  // 10: generatedtest.example.HashRecord.Detail.state:type_name -> generatedtest.example.HashRecord.Detail.State
+	11, // [11:11] is the sub-list for method output_type
+	11, // [11:11] is the sub-list for method input_type
+	11, // [11:11] is the sub-list for extension type_name
+	11, // [11:11] is the sub-list for extension extendee
+	0,  // [0:11] is the sub-list for field type_name
 }
 
 func init() { file_system_proto_init() }
@@ -616,18 +1012,24 @@ func file_system_proto_init() {
 		(*Location_Label)(nil),
 		(*Location_Code)(nil),
 	}
+	file_system_proto_msgTypes[7].OneofWrappers = []any{}
+	file_system_proto_msgTypes[9].OneofWrappers = []any{
+		(*HashRecord_Detail_Text)(nil),
+		(*HashRecord_Detail_Count)(nil),
+	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_system_proto_rawDesc), len(file_system_proto_rawDesc)),
-			NumEnums:      0,
-			NumMessages:   7,
+			NumEnums:      1,
+			NumMessages:   11,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
 		GoTypes:           file_system_proto_goTypes,
 		DependencyIndexes: file_system_proto_depIdxs,
+		EnumInfos:         file_system_proto_enumTypes,
 		MessageInfos:      file_system_proto_msgTypes,
 	}.Build()
 	File_system_proto = out.File

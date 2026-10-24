@@ -155,6 +155,7 @@ final class GeneratedCRUDTests: XCTestCase {
                 GeneratedTableDescriptor(tableName: NoteTableName, typeName: NoteTypeName, isCore: false, syncEnabled: false, changeListenersEnabled: true),
                 GeneratedTableDescriptor(tableName: ChoiceTableName, typeName: ChoiceTypeName, isCore: false, syncEnabled: true),
                 GeneratedTableDescriptor(tableName: PhotoTableName, typeName: PhotoTypeName, isCore: false, syncEnabled: true),
+                GeneratedTableDescriptor(tableName: HashRecordTableName, typeName: HashRecordTypeName, isCore: false, syncEnabled: true),
                 GeneratedTableDescriptor(tableName: coreTableDeletedName, typeName: "", isCore: true, syncEnabled: false),
                 GeneratedTableDescriptor(tableName: coreTableSyncName, typeName: "", isCore: true, syncEnabled: false),
                 GeneratedTableDescriptor(tableName: coreTableSchemaStateName, typeName: "", isCore: true, syncEnabled: false),

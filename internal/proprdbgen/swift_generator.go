@@ -137,7 +137,7 @@ func (e swiftEmitter) emitModel(file *protogen.File, model messageModel) {
 	}
 	g.P("\tprojectedColumns: [")
 	for _, projectedField := range model.ProjectedFields {
-		protoKind := strings.TrimPrefix(strings.TrimSuffix(projectedField.SchemaSignature, projectionOptionalFlag), projectedField.ColumnName+":")
+		protoKind := strings.Split(projectedField.SchemaSignature, ":")[1]
 		g.P("\t\tProjectedColumnDescriptor(name: ", strconv.Quote(projectedField.ColumnName), ", protoKind: ", strconv.Quote(protoKind), ", sqliteType: ", strconv.Quote(projectedField.SQLiteType), ", defaultSQL: ", strconv.Quote(projectedField.SQLiteDefault), ", nullable: ", strconv.FormatBool(projectedField.IsOptional), ", legacyOneofPresenceRepair: ", strconv.FormatBool(projectedField.LegacyOneofPresenceRepair), "),")
 	}
 	g.P("\t],")
@@ -161,6 +161,10 @@ func (e swiftEmitter) emitModel(file *protogen.File, model messageModel) {
 	g.P("\t\tguard let data = message as? ", swiftTypeName, " else { throw ProprDBError(\"expected ", swiftTypeName, "\") }")
 	g.P("\t\tvar values: [SQLiteBindValue] = []")
 	for _, projectedField := range model.ProjectedFields {
+		if projectedField.HashSchema != "" {
+			g.P("values.append(.data(try projectHash(data, schema: ", strconv.Quote(projectedField.HashSchema), ")))")
+			continue
+		}
 		if len(projectedField.Path) > 0 {
 			expression := "data"
 			conditions := make([]string, 0)

@@ -1,0 +1,83 @@
+#!/bin/sh
+
+set -eu
+
+if [ "$#" -eq 0 ]; then
+    echo "Usage: $0 swift|swiftc|protoc-gen-swift [arguments...]" >&2
+    exit 2
+fi
+
+tool=$1
+shift
+case "$tool" in
+swift|swiftc|protoc-gen-swift) ;;
+*)
+    echo "Unsupported Swift tool: $tool" >&2
+    exit 2
+    ;;
+esac
+
+repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)
+plugin_path="$repo_root/test/swift/.build/checkouts/swift-protobuf/.build/debug/protoc-gen-swift"
+
+case "$(uname -s)" in
+Darwin)
+    use_container=false
+    ;;
+Linux)
+    if command -v swift >/dev/null 2>&1; then
+        use_container=false
+    else
+        use_container=true
+    fi
+    ;;
+*)
+    echo "Swift tools are supported on macOS and Linux." >&2
+    exit 1
+    ;;
+esac
+
+executable=$tool
+if [ "$tool" = protoc-gen-swift ]; then
+    executable=$plugin_path
+fi
+
+if [ "$use_container" = false ]; then
+    exec "$executable" "$@"
+fi
+
+if ! command -v podman >/dev/null 2>&1; then
+    echo "Install Swift or Podman to run Swift tools on Linux." >&2
+    exit 1
+fi
+
+working_directory=$(pwd -P)
+case "$working_directory/" in
+"$repo_root/"*) ;;
+*)
+    echo "Run containerized Swift tools from within $repo_root." >&2
+    exit 1
+    ;;
+esac
+
+repo_checksum=$(printf '%s' "$repo_root" | cksum)
+repo_key=${repo_checksum%% *}
+volume_prefix="proprdb-swift-$repo_key"
+image=localhost/proprdb-swift-tools:6.2
+cache_directory=/root/.cache
+
+podman build --quiet --file "$repo_root/scripts/Containerfile.swift" \
+    --tag "$image" "$repo_root/scripts" >&2
+
+exec podman run --rm --interactive \
+    --volume "$repo_root:$repo_root" \
+    --volume "$volume_prefix-build:$repo_root/test/swift/.build:nocopy" \
+    --volume "$volume_prefix-cache:$cache_directory:nocopy" \
+    --workdir "$working_directory" \
+    --env "SWIFTPM_MODULECACHE_OVERRIDE=$cache_directory/swift-module-cache" \
+    --env "CLANG_MODULE_CACHE_PATH=$cache_directory/clang-module-cache" \
+    --env "GOCACHE=$cache_directory/go-build" \
+    --env "GOMODCACHE=$cache_directory/go-mod" \
+    --env PROPRDB_INIT_BENCHMARK \
+    --env CI \
+    "$image" "$executable" "$@"

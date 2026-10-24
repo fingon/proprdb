@@ -16,6 +16,7 @@ import (
 )
 
 type projectedField struct {
+	HashSchema                string
 	Path                      []*protogen.Field
 	ColumnName                string
 	ProtoFieldName            string
@@ -337,6 +338,22 @@ func (c modelCollector) buildModel(message *protogen.Message) (messageModel, err
 		signatures = append(signatures, signature)
 	}
 
+	hashFields, err := c.hashProjections(message)
+	if err != nil {
+		return messageModel{}, fmt.Errorf("message %s hash_projections: %w", message.Desc.FullName(), err)
+	}
+	hashColumns := map[string]string{}
+	for _, field := range hashFields {
+		column := strings.ToLower(field.ColumnName)
+		if projectedByName[column] || swiftProjectedByName[field.SwiftPropertyName] {
+			return messageModel{}, fmt.Errorf("hash projection column collision %s", column)
+		}
+		projectedByName[column] = true
+		swiftProjectedByName[field.SwiftPropertyName] = true
+		hashColumns[field.ProtoFieldName] = field.ColumnName
+		projected = append(projected, field)
+		signatures = append(signatures, field.SchemaSignature)
+	}
 	indexes, err := c.messageOptionIndexes(message, fieldsByName, projectedColumnsByPath)
 	if err != nil {
 		return messageModel{}, fmt.Errorf("message %s indexes option: %w", message.Desc.FullName(), err)
@@ -345,7 +362,7 @@ func (c modelCollector) buildModel(message *protogen.Message) (messageModel, err
 	if err != nil {
 		return messageModel{}, fmt.Errorf("message %s dirty_windows option: %w", message.Desc.FullName(), err)
 	}
-	dirtyKeys, err := c.messageDirtyKeys(message, projectedColumnsByPath)
+	dirtyKeys, err := c.messageDirtyKeys(message, projectedColumnsByPath, hashColumns)
 	if err != nil {
 		return messageModel{}, fmt.Errorf("message %s dirty_keys option: %w", message.Desc.FullName(), err)
 	}
@@ -370,7 +387,7 @@ func (c modelCollector) buildModel(message *protogen.Message) (messageModel, err
 	}, nil
 }
 
-func (c modelCollector) messageDirtyKeys(message *protogen.Message, columns map[string]string) (trackers []messageDirtyKeys, err error) {
+func (c modelCollector) messageDirtyKeys(message *protogen.Message, columns, hashes map[string]string) (trackers []messageDirtyKeys, err error) {
 	options := message.Desc.Options()
 	if !proto.HasExtension(options, proprdbpb.E_DirtyKeys) {
 		return nil, nil
@@ -398,6 +415,18 @@ func (c modelCollector) messageDirtyKeys(message *protogen.Message, columns map[
 			column := columns[path]
 			if column == "" {
 				return nil, fmt.Errorf("dirty keys field %q must already be projected", path)
+			}
+			tracker.WatchedColumns = append(tracker.WatchedColumns, column)
+		}
+		watchedHashes := map[string]bool{}
+		for _, name := range declaration.WatchedHashes {
+			if watchedHashes[name] {
+				return nil, fmt.Errorf("duplicate watched hash %q", name)
+			}
+			watchedHashes[name] = true
+			column := hashes[name]
+			if column == "" {
+				return nil, fmt.Errorf("unknown watched hash %q", name)
 			}
 			tracker.WatchedColumns = append(tracker.WatchedColumns, column)
 		}
@@ -630,7 +659,7 @@ func (c modelCollector) projectedFieldFromProto(field *protogen.Field) (projecte
 
 	switch field.Desc.Kind() {
 	case protoreflect.BoolKind:
-		return projectedField{nil, columnName, protoFieldName, getterName, "INTEGER", "0", signature, isOptional, legacyOneofPresenceRepair, swiftFieldName(protoFieldName), swiftPresenceName(protoFieldName), swiftOneofPropertyName}, nil
+		return projectedField{"", nil, columnName, protoFieldName, getterName, "INTEGER", "0", signature, isOptional, legacyOneofPresenceRepair, swiftFieldName(protoFieldName), swiftPresenceName(protoFieldName), swiftOneofPropertyName}, nil
 	case protoreflect.Int32Kind,
 		protoreflect.Sint32Kind,
 		protoreflect.Sfixed32Kind,
@@ -640,15 +669,15 @@ func (c modelCollector) projectedFieldFromProto(field *protogen.Field) (projecte
 		protoreflect.Uint32Kind,
 		protoreflect.Fixed32Kind,
 		protoreflect.EnumKind:
-		return projectedField{nil, columnName, protoFieldName, getterName, "INTEGER", "0", signature, isOptional, legacyOneofPresenceRepair, swiftFieldName(protoFieldName), swiftPresenceName(protoFieldName), swiftOneofPropertyName}, nil
+		return projectedField{"", nil, columnName, protoFieldName, getterName, "INTEGER", "0", signature, isOptional, legacyOneofPresenceRepair, swiftFieldName(protoFieldName), swiftPresenceName(protoFieldName), swiftOneofPropertyName}, nil
 	case protoreflect.Uint64Kind, protoreflect.Fixed64Kind:
 		return projectedField{}, errors.New("uint64 and fixed64 fields cannot be projected")
 	case protoreflect.FloatKind, protoreflect.DoubleKind:
-		return projectedField{nil, columnName, protoFieldName, getterName, "REAL", "0", signature, isOptional, legacyOneofPresenceRepair, swiftFieldName(protoFieldName), swiftPresenceName(protoFieldName), swiftOneofPropertyName}, nil
+		return projectedField{"", nil, columnName, protoFieldName, getterName, "REAL", "0", signature, isOptional, legacyOneofPresenceRepair, swiftFieldName(protoFieldName), swiftPresenceName(protoFieldName), swiftOneofPropertyName}, nil
 	case protoreflect.StringKind:
-		return projectedField{nil, columnName, protoFieldName, getterName, "TEXT", "''", signature, isOptional, legacyOneofPresenceRepair, swiftFieldName(protoFieldName), swiftPresenceName(protoFieldName), swiftOneofPropertyName}, nil
+		return projectedField{"", nil, columnName, protoFieldName, getterName, "TEXT", "''", signature, isOptional, legacyOneofPresenceRepair, swiftFieldName(protoFieldName), swiftPresenceName(protoFieldName), swiftOneofPropertyName}, nil
 	case protoreflect.BytesKind:
-		return projectedField{nil, columnName, protoFieldName, getterName, "BLOB", "X''", signature, isOptional, legacyOneofPresenceRepair, swiftFieldName(protoFieldName), swiftPresenceName(protoFieldName), swiftOneofPropertyName}, nil
+		return projectedField{"", nil, columnName, protoFieldName, getterName, "BLOB", "X''", signature, isOptional, legacyOneofPresenceRepair, swiftFieldName(protoFieldName), swiftPresenceName(protoFieldName), swiftOneofPropertyName}, nil
 	default:
 		return projectedField{}, fmt.Errorf("unsupported external field kind %s", field.Desc.Kind())
 	}
@@ -726,6 +755,10 @@ func (e generatorEmitter) emitShared() {
 
 func (e generatorEmitter) emitProjectedFieldAppend(argsName, dataName string, projectedField projectedField, indent string) {
 	g := e.g
+	if projectedField.HashSchema != "" {
+		g.P(indent, "{ value, err := rt.ProjectHash(", dataName, ", ", strconv.Quote(projectedField.HashSchema), "); if err != nil { return nil, err }; ", argsName, " = append(", argsName, ", value) }")
+		return
+	}
 	if len(projectedField.Path) > 0 {
 		numbers := make([]string, len(projectedField.Path))
 		for index, field := range projectedField.Path {
@@ -809,7 +842,7 @@ func (e generatorEmitter) emitModel(model messageModel) {
 	}
 	g.P("\tProjectedColumns: []rt.ProjectedColumnDescriptor{")
 	for _, projectedField := range model.ProjectedFields {
-		protoKind := strings.TrimPrefix(strings.TrimSuffix(projectedField.SchemaSignature, projectionOptionalFlag), projectedField.ColumnName+":")
+		protoKind := strings.Split(projectedField.SchemaSignature, ":")[1]
 		g.P("\t\t{Name: ", strconv.Quote(projectedField.ColumnName), ", ProtoKind: ", strconv.Quote(protoKind), ", SQLiteType: ", strconv.Quote(projectedField.SQLiteType), ", DefaultSQL: ", strconv.Quote(projectedField.SQLiteDefault), ", Nullable: ", strconv.FormatBool(projectedField.IsOptional), ", LegacyOneofPresenceRepair: ", strconv.FormatBool(projectedField.LegacyOneofPresenceRepair), "},")
 	}
 	g.P("\t},")

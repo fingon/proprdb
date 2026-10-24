@@ -653,11 +653,173 @@ struct PhotoTable {
 
 }
 
+let HashRecordTableName = "generatedtest_example_hashrecord"
+private let HashRecordTableNameQuoted = quoteSQLiteIdentifier(HashRecordTableName)
+let HashRecordTypeName = "generatedtest.example.HashRecord"
+let HashRecordProjectionSchema = "label:string;_proprdb_hash_name:bytes:hash=xxh3-64-v1-c721cde79675be85c60d08d4694ba8e2ca460a5546fa69ddeae7c9daef560b77;_proprdb_hash_support:bytes:hash=xxh3-64-v1-258a3a237f8bf6d5f9b347de99a0416a34ba63a93d9de052366542fbfb5a20ea"
+private let HashRecordCreateTableSQL = "CREATE TABLE IF NOT EXISTS \"generatedtest_example_hashrecord\" (\"id\" TEXT PRIMARY KEY, \"at_ns\" INTEGER NOT NULL, \"data\" BLOB NOT NULL, \"label\" TEXT NOT NULL DEFAULT '', \"_proprdb_hash_name\" BLOB NOT NULL DEFAULT X'', \"_proprdb_hash_support\" BLOB NOT NULL DEFAULT X'')"
+private let HashRecordInsertSQL = "INSERT INTO \"generatedtest_example_hashrecord\" (\"id\", \"at_ns\", \"data\", \"label\", \"_proprdb_hash_name\", \"_proprdb_hash_support\") VALUES (?, ?, ?, ?, ?, ?)"
+private let HashRecordUpsertSQL = "INSERT INTO \"generatedtest_example_hashrecord\" (\"id\", \"at_ns\", \"data\", \"label\", \"_proprdb_hash_name\", \"_proprdb_hash_support\") VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET \"at_ns\" = excluded.\"at_ns\", \"data\" = excluded.\"data\", \"label\" = excluded.\"label\", \"_proprdb_hash_name\" = excluded.\"_proprdb_hash_name\", \"_proprdb_hash_support\" = excluded.\"_proprdb_hash_support\""
+private let HashRecordGeneratedIndexPrefix = "idx_generatedtest_example_hashrecord__"
+
+private let HashRecordGeneratedBinding = GeneratedTableBinding(
+	descriptor: GeneratedTableDescriptor(tableName: HashRecordTableName, typeName: HashRecordTypeName, isCore: false, syncEnabled: true, changeListenersEnabled: false, queryStatisticsEnabled: false),
+	insertSQL: HashRecordInsertSQL,
+	upsertSQL: HashRecordUpsertSQL,
+	createTableSQL: HashRecordCreateTableSQL,
+	projectionSchema: HashRecordProjectionSchema,
+dirtyKeys: [
+DirtyKeysDescriptor(name: "mixed", watchedColumns: [
+"_proprdb_hash_name",
+"label",
+]),
+DirtyKeysDescriptor(name: "support", watchedColumns: [
+"_proprdb_hash_support",
+]),
+],
+	projectedColumns: [
+		ProjectedColumnDescriptor(name: "label", protoKind: "string", sqliteType: "TEXT", defaultSQL: "''", nullable: false, legacyOneofPresenceRepair: false),
+		ProjectedColumnDescriptor(name: "_proprdb_hash_name", protoKind: "bytes", sqliteType: "BLOB", defaultSQL: "X''", nullable: false, legacyOneofPresenceRepair: false),
+		ProjectedColumnDescriptor(name: "_proprdb_hash_support", protoKind: "bytes", sqliteType: "BLOB", defaultSQL: "X''", nullable: false, legacyOneofPresenceRepair: false),
+	],
+	generatedIndexes: [
+	],
+	generatedIndexPrefix: HashRecordGeneratedIndexPrefix,
+	decodeAnyJSON: { try decodeAnyJSON($0, as: Generatedtest_Example_HashRecord.self) },
+	decodeBinary: { try Generatedtest_Example_HashRecord(serializedBytes: $0) },
+	encodeAnyJSON: { message in
+		guard let data = message as? Generatedtest_Example_HashRecord else { throw ProprDBError("expected Generatedtest_Example_HashRecord") }
+		return try marshalAnyJSON(data, typeName: HashRecordTypeName)
+	},
+	messagesEqual: { left, right in
+		guard let left = left as? Generatedtest_Example_HashRecord, let right = right as? Generatedtest_Example_HashRecord else { return false }
+		return left == right
+	},
+	projectedValues: { message in
+		guard let data = message as? Generatedtest_Example_HashRecord else { throw ProprDBError("expected Generatedtest_Example_HashRecord") }
+		var values: [SQLiteBindValue] = []
+		values.append(sqliteBindValue(data.label))
+values.append(.data(try projectHash(data, schema: "{\"p\":[{\"p\":[3,1],\"f\":[1,9,0,-1]}],\"m\":[]}")))
+values.append(.data(try projectHash(data, schema: "{\"o\":[\"generatedtest.example.HashRecord.Detail.count=[5 6]\",\"generatedtest.example.HashRecord.Detail.text=[5 6]\"],\"p\":[{\"p\":[2],\"f\":[2,8,0,-1]},{\"p\":[3],\"f\":[3,11,1,1]},{\"p\":[4],\"f\":[4,9,2,-1]},{\"p\":[5],\"f\":[5,11,3,0]},{\"p\":[6],\"f\":[6,5,1,-1]}],\"m\":[[[1,9,0,-1],[2,3,0,-1]],[[1,9,0,-1],[2,18,2,-1],[3,11,3,2],[4,11,1,1],[5,9,1,-1],[6,3,1,-1],[7,1,0,-1],[8,2,0,-1],[9,12,0,-1],[10,4,0,-1],[11,7,0,-1],[12,6,0,-1],[13,15,0,-1],[14,16,0,-1],[15,17,0,-1],[16,5,0,-1],[17,13,0,-1],[18,14,0,-1]],[[1,5,0,-1],[2,9,0,-1]]]}")))
+		return values
+	}
+)
+
+public struct HashRecordRow: Equatable, Sendable {
+	public var id: String
+	public var atNs: Int64
+	public var data: Generatedtest_Example_HashRecord
+	public init(id: String, atNs: Int64, data: Generatedtest_Example_HashRecord) {
+		self.id = id
+		self.atNs = atNs
+		self.data = data
+	}
+}
+
+struct HashRecordTable {
+	fileprivate let q: any DBTX
+	init(_ q: any DBTX) {
+		self.q = q
+	}
+
+	func initialize() throws {
+		try initializeGeneratedTables(q, bindings: [HashRecordGeneratedBinding])
+	}
+
+	func select(where whereClause: String = "", arguments: [SQLiteBindValue] = []) throws -> [HashRecordRow] {
+		var query = "SELECT id, at_ns, data FROM " + HashRecordTableNameQuoted
+		if !whereClause.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+			query += " WHERE " + whereClause
+		}
+		return try q.withRows(query, bindValues: arguments) { rows in
+			var result: [HashRecordRow] = []
+			while let row = try rows.next() {
+				let id = try row.string(at: 0)
+				let atNs = try row.int64(at: 1)
+				let dataBytes = try row.data(at: 2)
+				let data = try Generatedtest_Example_HashRecord(serializedBytes: dataBytes)
+				result.append(HashRecordRow(id: id, atNs: atNs, data: data))
+			}
+			return result
+		}
+	}
+
+	func insert(_ data: Generatedtest_Example_HashRecord) throws -> HashRecordRow {
+		let id = try uuidV7()
+		try validateUUID(id)
+		return try insertWithIDInternal(id: id, data: data)
+	}
+
+	func insertWithID(_ id: String, data: Generatedtest_Example_HashRecord) throws -> HashRecordRow {
+		return try insertWithIDInternal(id: id, data: data)
+	}
+
+	private func insertWithIDInternal(id: String, data: Generatedtest_Example_HashRecord) throws -> HashRecordRow {
+		if id.isEmpty {
+			throw ProprDBError("empty id")
+		}
+		try validateUUID(id)
+		let atNs = try writeLocalObject(q, binding: HashRecordGeneratedBinding, id: id, message: data, insert: true)
+		return HashRecordRow(id: id, atNs: atNs, data: data)
+	}
+
+	func updateByID(_ id: String, data: Generatedtest_Example_HashRecord) throws -> HashRecordRow {
+		if id.isEmpty {
+			throw ProprDBError("empty id")
+		}
+		try validateUUID(id)
+		let atNs = try writeLocalObject(q, binding: HashRecordGeneratedBinding, id: id, message: data, insert: false)
+		return HashRecordRow(id: id, atNs: atNs, data: data)
+	}
+
+	func updateRow(_ row: HashRecordRow) throws -> HashRecordRow {
+		return try updateByID(row.id, data: row.data)
+	}
+
+	func deleteByID(_ id: String) throws {
+		if id.isEmpty {
+			throw ProprDBError("empty id")
+		}
+		try deleteLocalObject(q, binding: HashRecordGeneratedBinding, id: id)
+	}
+
+	func deleteRow(_ row: HashRecordRow) throws {
+		try deleteByID(row.id)
+	}
+
+	fileprivate func upsertWithAtNs(id: String, atNs: Int64, data: Generatedtest_Example_HashRecord) throws {
+		if id.isEmpty {
+			throw ProprDBError("empty id")
+		}
+		let dataJSON = try marshalAnyJSON(data, typeName: HashRecordTypeName)
+		try applyIncomingObject(q, binding: HashRecordGeneratedBinding, record: JSONLRecord(id: id, deleted: false, atNs: atNs, data: dataJSON))
+	}
+
+	fileprivate func tombstoneWithAtNs(id: String, atNs: Int64) throws {
+		if id.isEmpty {
+			throw ProprDBError("empty id")
+		}
+		let dataJSON = try marshalTypeOnlyAnyJSON(typeName: HashRecordTypeName)
+		try applyIncomingObject(q, binding: HashRecordGeneratedBinding, record: JSONLRecord(id: id, deleted: true, atNs: atNs, data: dataJSON))
+	}
+
+	fileprivate func drainUnknownRows(_ typeName: String) throws {
+		guard typeName == HashRecordTypeName else { throw ProprDBError("unexpected type name \(typeName)") }
+		try drainBoundUnknown(q, bindings: [HashRecordGeneratedBinding])
+	}
+
+	func drainUnknownRows() throws {
+		try drainUnknownRows(HashRecordTypeName)
+	}
+
+}
+
 private let crudGeneratedBindings = [
 	PersonGeneratedBinding,
 	NoteGeneratedBinding,
 	ChoiceGeneratedBinding,
 	PhotoGeneratedBinding,
+	HashRecordGeneratedBinding,
 ]
 
 struct CRUD {
@@ -665,12 +827,14 @@ struct CRUD {
 	let note: NoteTable
 	let choice: ChoiceTable
 	let photo: PhotoTable
+	let hashrecord: HashRecordTable
 	init(_ q: any DBTX) {
 		let tracked = withChangeListeners(q)
 		self.person = PersonTable(tracked)
 		self.note = NoteTable(tracked)
 		self.choice = ChoiceTable(tracked)
 		self.photo = PhotoTable(tracked)
+		self.hashrecord = HashRecordTable(tracked)
 	}
 	private func dbtx() -> any DBTX { person.q }
 	func tableDescriptors() -> [GeneratedTableDescriptor] { crudGeneratedBindings.map(\.descriptor) + coreTableDescriptors() }
@@ -748,6 +912,20 @@ public struct PhotoTableProxy: Sendable {
 	public func drainUnknownRows() async throws { try await actor._photoDrainUnknownRows() }
 }
 
+public struct HashRecordTableProxy: Sendable {
+	fileprivate let actor: ProprDBActor
+
+	public func initialize() async throws { try await actor._hashrecordInitialize() }
+	public func select(where whereClause: String = "", arguments: [SQLiteBindValue] = []) async throws -> [HashRecordRow] { try await actor._hashrecordSelect(where: whereClause, arguments: arguments) }
+	public func insert(_ data: Generatedtest_Example_HashRecord) async throws -> HashRecordRow { try await actor._hashrecordInsert(data) }
+	public func insertWithID(_ id: String, data: Generatedtest_Example_HashRecord) async throws -> HashRecordRow { try await actor._hashrecordInsertWithID(id, data: data) }
+	public func updateByID(_ id: String, data: Generatedtest_Example_HashRecord) async throws -> HashRecordRow { try await actor._hashrecordUpdateByID(id, data: data) }
+	public func updateRow(_ row: HashRecordRow) async throws -> HashRecordRow { try await actor._hashrecordUpdateRow(row) }
+	public func deleteByID(_ id: String) async throws { try await actor._hashrecordDeleteByID(id) }
+	public func deleteRow(_ row: HashRecordRow) async throws { try await actor._hashrecordDeleteRow(row) }
+	public func drainUnknownRows() async throws { try await actor._hashrecordDrainUnknownRows() }
+}
+
 extension ProprDBActor {
 	public func initialize() throws { try withDatabase { try CRUD($0).initialize() } }
 	public func tableDescriptors() throws -> [GeneratedTableDescriptor] { try withDatabase { CRUD($0).tableDescriptors() } }
@@ -790,6 +968,16 @@ extension ProprDBActor {
 	fileprivate func _photoDeleteByID(_ id: String) throws { try withDatabase { try CRUD($0).photo.deleteByID(id) } }
 	fileprivate func _photoDeleteRow(_ row: PhotoRow) throws { try withDatabase { try CRUD($0).photo.deleteRow(row) } }
 	fileprivate func _photoDrainUnknownRows() throws { try withDatabase { try CRUD($0).photo.drainUnknownRows() } }
+	public nonisolated var hashrecord: HashRecordTableProxy { HashRecordTableProxy(actor: self) }
+	fileprivate func _hashrecordInitialize() throws { try withDatabase { try CRUD($0).hashrecord.initialize() } }
+	fileprivate func _hashrecordSelect(where whereClause: String, arguments: [SQLiteBindValue]) throws -> [HashRecordRow] { try withDatabase { try CRUD($0).hashrecord.select(where: whereClause, arguments: arguments) } }
+	fileprivate func _hashrecordInsert(_ data: Generatedtest_Example_HashRecord) throws -> HashRecordRow { try withDatabase { try CRUD($0).hashrecord.insert(data) } }
+	fileprivate func _hashrecordInsertWithID(_ id: String, data: Generatedtest_Example_HashRecord) throws -> HashRecordRow { try withDatabase { try CRUD($0).hashrecord.insertWithID(id, data: data) } }
+	fileprivate func _hashrecordUpdateByID(_ id: String, data: Generatedtest_Example_HashRecord) throws -> HashRecordRow { try withDatabase { try CRUD($0).hashrecord.updateByID(id, data: data) } }
+	fileprivate func _hashrecordUpdateRow(_ row: HashRecordRow) throws -> HashRecordRow { try withDatabase { try CRUD($0).hashrecord.updateRow(row) } }
+	fileprivate func _hashrecordDeleteByID(_ id: String) throws { try withDatabase { try CRUD($0).hashrecord.deleteByID(id) } }
+	fileprivate func _hashrecordDeleteRow(_ row: HashRecordRow) throws { try withDatabase { try CRUD($0).hashrecord.deleteRow(row) } }
+	fileprivate func _hashrecordDrainUnknownRows() throws { try withDatabase { try CRUD($0).hashrecord.drainUnknownRows() } }
 	public func prepareJSONL(remote: String) throws -> PreparedJSONLExport { try withDatabase { try CRUD($0).prepareJSONL(remote: remote) } }
 	public func prepareJSONL(remote: String, write: @Sendable (Data) throws -> Void) throws -> JSONLCheckpoint { try withDatabase { try CRUD($0).prepareJSONL(remote: remote, write: write) } }
 	public func acknowledgeJSONL(_ checkpoint: JSONLCheckpoint) throws { try withDatabase { try CRUD($0).acknowledgeJSONL(checkpoint) } }

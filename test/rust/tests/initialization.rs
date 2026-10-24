@@ -87,7 +87,7 @@ fn unchanged_initialization_only_inspects_metadata() -> Result<()> {
                     "SELECT id, at_ns, deleted, data_json FROM _unknown_types WHERE type_name = ?"
                 ))
                 .count(),
-            if full_init { 3 } else { 1 }
+            if full_init { 4 } else { 1 }
         );
         for statement in statements {
             for prefix in ["INSERT ", "UPDATE ", "CREATE INDEX ", "DROP INDEX "] {

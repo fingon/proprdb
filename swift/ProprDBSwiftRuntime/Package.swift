@@ -12,6 +12,7 @@ let package = Package(
         .library(name: "ProprDBSwiftRuntime", targets: ["ProprDBSwiftRuntime"]),
     ],
     dependencies: [
+        .package(url: "https://github.com/swift-cloud/swift-xxh3", exact: "1.0.3"),
         .package(url: "https://github.com/apple/swift-log.git", from: "1.6.0"),
         .package(url: "https://github.com/apple/swift-protobuf.git", from: "1.31.0"),
     ],
@@ -21,6 +22,7 @@ let package = Package(
             name: "ProprDBSwiftRuntime",
             dependencies: [
                 "CSQLite",
+                .product(name: "XXH3", package: "swift-xxh3"),
                 .product(name: "Logging", package: "swift-log"),
                 .product(name: "SwiftProtobuf", package: "swift-protobuf"),
             ],

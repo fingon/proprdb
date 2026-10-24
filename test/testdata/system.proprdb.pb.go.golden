@@ -715,11 +715,186 @@ func (t *PhotoTable) DrainUnknownRowsContext(ctx context.Context) error {
 	return t.runtimeTable().DrainUnknownRowsContext(ctx)
 }
 
+const HashRecordTableName = "generatedtest_example_hashrecord"
+const HashRecordTypeName = "generatedtest.example.HashRecord"
+const HashRecordProjectionSchema = "label:string;_proprdb_hash_name:bytes:hash=xxh3-64-v1-c721cde79675be85c60d08d4694ba8e2ca460a5546fa69ddeae7c9daef560b77;_proprdb_hash_support:bytes:hash=xxh3-64-v1-258a3a237f8bf6d5f9b347de99a0416a34ba63a93d9de052366542fbfb5a20ea"
+const HashRecordCreateTableSQL = "CREATE TABLE IF NOT EXISTS \"generatedtest_example_hashrecord\" (\"id\" TEXT PRIMARY KEY, \"at_ns\" INTEGER NOT NULL, \"data\" BLOB NOT NULL, \"label\" TEXT NOT NULL DEFAULT '', \"_proprdb_hash_name\" BLOB NOT NULL DEFAULT X'', \"_proprdb_hash_support\" BLOB NOT NULL DEFAULT X'')"
+const HashRecordInsertSQL = "INSERT INTO \"generatedtest_example_hashrecord\" (\"id\", \"at_ns\", \"data\", \"label\", \"_proprdb_hash_name\", \"_proprdb_hash_support\") VALUES (?, ?, ?, ?, ?, ?)"
+const HashRecordUpsertSQL = "INSERT INTO \"generatedtest_example_hashrecord\" (\"id\", \"at_ns\", \"data\", \"label\", \"_proprdb_hash_name\", \"_proprdb_hash_support\") VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET \"at_ns\" = excluded.\"at_ns\", \"data\" = excluded.\"data\", \"label\" = excluded.\"label\", \"_proprdb_hash_name\" = excluded.\"_proprdb_hash_name\", \"_proprdb_hash_support\" = excluded.\"_proprdb_hash_support\""
+const HashRecordGeneratedIndexPrefix = "idx_generatedtest_example_hashrecord__"
+
+type HashRecordRow = rt.Row[*HashRecord]
+
+type HashRecordTable struct {
+	q DBTX
+}
+
+var HashRecordGeneratedBinding = rt.GeneratedTableBinding{
+	Descriptor:        rt.GeneratedTableDescriptor{TableName: HashRecordTableName, TypeName: HashRecordTypeName, SyncEnabled: true, ChangeListenersEnabled: false, QueryStatisticsEnabled: false},
+	NewMessage:        func() proto.Message { return &HashRecord{} },
+	InsertSQL:         HashRecordInsertSQL,
+	UpsertSQL:         HashRecordUpsertSQL,
+	CreateTableSQL:    HashRecordCreateTableSQL,
+	ProjectionSchema:  HashRecordProjectionSchema,
+	GeneratedIndexKey: HashRecordGeneratedIndexPrefix,
+	DirtyKeys: []rt.DirtyKeysDescriptor{
+		{Name: "mixed", WatchedColumns: []string{
+			"_proprdb_hash_name",
+			"label",
+		}},
+		{Name: "support", WatchedColumns: []string{
+			"_proprdb_hash_support",
+		}},
+	},
+	ProjectedColumns: []rt.ProjectedColumnDescriptor{
+		{Name: "label", ProtoKind: "string", SQLiteType: "TEXT", DefaultSQL: "''", Nullable: false, LegacyOneofPresenceRepair: false},
+		{Name: "_proprdb_hash_name", ProtoKind: "bytes", SQLiteType: "BLOB", DefaultSQL: "X''", Nullable: false, LegacyOneofPresenceRepair: false},
+		{Name: "_proprdb_hash_support", ProtoKind: "bytes", SQLiteType: "BLOB", DefaultSQL: "X''", Nullable: false, LegacyOneofPresenceRepair: false},
+	},
+	GeneratedIndexes: []rt.GeneratedIndexDescriptor{},
+	ProjectedValues: func(message proto.Message) ([]any, error) {
+		data, ok := message.(*HashRecord)
+		if !ok {
+			return nil, fmt.Errorf("expected *HashRecord, got %T", message)
+		}
+		values := []any{}
+		values = append(values, data.GetLabel())
+		{
+			value, err := rt.ProjectHash(data, "{\"p\":[{\"p\":[3,1],\"f\":[1,9,0,-1]}],\"m\":[]}")
+			if err != nil {
+				return nil, err
+			}
+			values = append(values, value)
+		}
+		{
+			value, err := rt.ProjectHash(data, "{\"o\":[\"generatedtest.example.HashRecord.Detail.count=[5 6]\",\"generatedtest.example.HashRecord.Detail.text=[5 6]\"],\"p\":[{\"p\":[2],\"f\":[2,8,0,-1]},{\"p\":[3],\"f\":[3,11,1,1]},{\"p\":[4],\"f\":[4,9,2,-1]},{\"p\":[5],\"f\":[5,11,3,0]},{\"p\":[6],\"f\":[6,5,1,-1]}],\"m\":[[[1,9,0,-1],[2,3,0,-1]],[[1,9,0,-1],[2,18,2,-1],[3,11,3,2],[4,11,1,1],[5,9,1,-1],[6,3,1,-1],[7,1,0,-1],[8,2,0,-1],[9,12,0,-1],[10,4,0,-1],[11,7,0,-1],[12,6,0,-1],[13,15,0,-1],[14,16,0,-1],[15,17,0,-1],[16,5,0,-1],[17,13,0,-1],[18,14,0,-1]],[[1,5,0,-1],[2,9,0,-1]]]}")
+			if err != nil {
+				return nil, err
+			}
+			values = append(values, value)
+		}
+		return values, nil
+	},
+}
+
+func NewHashRecordTable(q DBTX) *HashRecordTable {
+	return &HashRecordTable{q: q}
+}
+
+func (t *HashRecordTable) runtimeTable() rt.Table {
+	return rt.NewTable(t.q, HashRecordGeneratedBinding)
+}
+
+func (t *HashRecordTable) Init() error {
+	return t.runtimeTable().Init(true)
+}
+
+func (t *HashRecordTable) InitContext(ctx context.Context) error {
+	return t.runtimeTable().InitContext(ctx, true)
+}
+
+func (t *HashRecordTable) init(ensureCore bool) error {
+	return t.runtimeTable().Init(ensureCore)
+}
+
+func (t *HashRecordTable) initContext(ctx context.Context, ensureCore bool) error {
+	return t.runtimeTable().InitContext(ctx, ensureCore)
+}
+
+func (t *HashRecordTable) Select(where string, args ...any) ([]HashRecordRow, error) {
+	return t.runtimeTable().Select[HashRecord, *HashRecord](where, args...)
+}
+
+func (t *HashRecordTable) SelectContext(ctx context.Context, where string, args ...any) ([]HashRecordRow, error) {
+	return t.runtimeTable().SelectContext[HashRecord, *HashRecord](ctx, where, args...)
+}
+
+func (t *HashRecordTable) Insert(data *HashRecord) (HashRecordRow, error) {
+	return t.runtimeTable().Insert[HashRecord, *HashRecord](data)
+}
+
+func (t *HashRecordTable) InsertContext(ctx context.Context, data *HashRecord) (HashRecordRow, error) {
+	return t.runtimeTable().InsertContext[HashRecord, *HashRecord](ctx, data)
+}
+
+func (t *HashRecordTable) insertWithID(id string, data *HashRecord) (HashRecordRow, error) {
+	return t.runtimeTable().InsertWithID[HashRecord, *HashRecord](id, data)
+}
+
+func (t *HashRecordTable) insertWithIDContext(ctx context.Context, id string, data *HashRecord) (HashRecordRow, error) {
+	return t.runtimeTable().InsertWithIDContext[HashRecord, *HashRecord](ctx, id, data)
+}
+
+func (t *HashRecordTable) UpdateByID(id string, data *HashRecord) (HashRecordRow, error) {
+	return t.runtimeTable().UpdateByID[HashRecord, *HashRecord](id, data)
+}
+
+func (t *HashRecordTable) UpdateByIDContext(ctx context.Context, id string, data *HashRecord) (HashRecordRow, error) {
+	return t.runtimeTable().UpdateByIDContext[HashRecord, *HashRecord](ctx, id, data)
+}
+
+func (t *HashRecordTable) UpdateRow(row HashRecordRow) (HashRecordRow, error) {
+	return t.runtimeTable().UpdateRow[HashRecord, *HashRecord](row)
+}
+
+func (t *HashRecordTable) UpdateRowContext(ctx context.Context, row HashRecordRow) (HashRecordRow, error) {
+	return t.runtimeTable().UpdateRowContext[HashRecord, *HashRecord](ctx, row)
+}
+
+func (t *HashRecordTable) DeleteByID(id string) error {
+	return t.runtimeTable().DeleteByID(id)
+}
+
+func (t *HashRecordTable) DeleteByIDContext(ctx context.Context, id string) error {
+	return t.runtimeTable().DeleteByIDContext(ctx, id)
+}
+
+func (t *HashRecordTable) DeleteRow(row HashRecordRow) error {
+	return t.runtimeTable().DeleteRow(row)
+}
+
+func (t *HashRecordTable) DeleteRowContext(ctx context.Context, row HashRecordRow) error {
+	return t.runtimeTable().DeleteRowContext(ctx, row)
+}
+
+func (t *HashRecordTable) upsertWithAtNs(id string, atNs int64, data *HashRecord) error {
+	return t.runtimeTable().UpsertWithAtNs[HashRecord, *HashRecord](id, atNs, data)
+}
+
+func (t *HashRecordTable) upsertWithAtNsContext(ctx context.Context, id string, atNs int64, data *HashRecord) error {
+	return t.runtimeTable().UpsertWithAtNsContext[HashRecord, *HashRecord](ctx, id, atNs, data)
+}
+
+func (t *HashRecordTable) tombstoneWithAtNs(id string, atNs int64) error {
+	return t.runtimeTable().TombstoneWithAtNs(id, atNs)
+}
+
+func (t *HashRecordTable) tombstoneWithAtNsContext(ctx context.Context, id string, atNs int64) error {
+	return t.runtimeTable().TombstoneWithAtNsContext(ctx, id, atNs)
+}
+
+func (t *HashRecordTable) DrainUnknownRows() error {
+	return t.runtimeTable().DrainUnknownRows()
+}
+
+func (t *HashRecordTable) DrainUnknownRowsContext(ctx context.Context) error {
+	return t.runtimeTable().DrainUnknownRowsContext(ctx)
+}
+
+func (t *HashRecordTable) InsertWithID(id string, data *HashRecord) (HashRecordRow, error) {
+	return t.runtimeTable().InsertWithID[HashRecord, *HashRecord](id, data)
+}
+
+func (t *HashRecordTable) InsertWithIDContext(ctx context.Context, id string, data *HashRecord) (HashRecordRow, error) {
+	return t.runtimeTable().InsertWithIDContext[HashRecord, *HashRecord](ctx, id, data)
+}
+
 type CRUD struct {
-	Person *PersonTable
-	Note   *NoteTable
-	Choice *ChoiceTable
-	Photo  *PhotoTable
+	Person     *PersonTable
+	Note       *NoteTable
+	Choice     *ChoiceTable
+	Photo      *PhotoTable
+	HashRecord *HashRecordTable
 }
 
 var crudGeneratedBindings = []rt.GeneratedTableBinding{
@@ -727,15 +902,17 @@ var crudGeneratedBindings = []rt.GeneratedTableBinding{
 	NoteGeneratedBinding,
 	ChoiceGeneratedBinding,
 	PhotoGeneratedBinding,
+	HashRecordGeneratedBinding,
 }
 
 func NewCRUD(q DBTX) *CRUD {
 	q = rt.WithChangeListeners(q)
 	return &CRUD{
-		Person: NewPersonTable(q),
-		Note:   NewNoteTable(q),
-		Choice: NewChoiceTable(q),
-		Photo:  NewPhotoTable(q),
+		Person:     NewPersonTable(q),
+		Note:       NewNoteTable(q),
+		Choice:     NewChoiceTable(q),
+		Photo:      NewPhotoTable(q),
+		HashRecord: NewHashRecordTable(q),
 	}
 }
 
@@ -763,6 +940,9 @@ func (c *CRUD) dbtx() (DBTX, error) {
 	if c.Photo != nil && c.Photo.q != nil {
 		return c.Photo.q, nil
 	}
+	if c.HashRecord != nil && c.HashRecord.q != nil {
+		return c.HashRecord.q, nil
+	}
 	return nil, errors.New("nil DBTX")
 }
 
@@ -789,6 +969,9 @@ func (c *CRUD) InitContext(ctx context.Context) error {
 	}
 	if err := c.Photo.initContext(ctx, false); err != nil {
 		return fmt.Errorf("init Photo table: %w", err)
+	}
+	if err := c.HashRecord.initContext(ctx, false); err != nil {
+		return fmt.Errorf("init HashRecord table: %w", err)
 	}
 	return nil
 }

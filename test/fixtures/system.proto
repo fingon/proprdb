@@ -105,3 +105,61 @@ message ZonedTimestamp {
   option (com.github.fingon.proprdb.omit_table) = true;
   google.protobuf.Timestamp utc_time = 1;
 }
+
+message HashRecord {
+  option (com.github.fingon.proprdb.allow_custom_id_insert) = true;
+  option (com.github.fingon.proprdb.hash_projections) = {
+    name: "support"
+    fields: "enabled"
+    fields: "detail"
+    fields: "tags"
+    fields: "counters"
+    fields: "optional_value"
+  };
+  option (com.github.fingon.proprdb.hash_projections) = {
+    name: "name"
+    fields: "detail.name"
+  };
+  option (com.github.fingon.proprdb.dirty_keys) = {
+    name: "support"
+    watched_hashes: "support"
+  };
+  option (com.github.fingon.proprdb.dirty_keys) = {
+    name: "mixed"
+    watched_fields: "label"
+    watched_hashes: "name"
+  };
+  string label = 1 [(com.github.fingon.proprdb.external) = true];
+  bool enabled = 2;
+  Detail detail = 3;
+  repeated string tags = 4;
+  map<string, int64> counters = 5;
+  optional int32 optional_value = 6;
+  message Detail {
+    option (com.github.fingon.proprdb.omit_table) = true;
+    string name = 1;
+    repeated sint64 values = 2;
+    map<int32, string> labels = 3;
+    Detail child = 4;
+    oneof selection {
+      string text = 5;
+      int64 count = 6;
+    }
+    double score = 7;
+    float ratio = 8;
+    bytes payload = 9;
+    uint64 unsigned_value = 10;
+    fixed32 fixed32_value = 11;
+    fixed64 fixed64_value = 12;
+    sfixed32 sfixed32_value = 13;
+    sfixed64 sfixed64_value = 14;
+    sint32 sint32_value = 15;
+    int32 int32_value = 16;
+    uint32 uint32_value = 17;
+    State state = 18;
+    enum State {
+      STATE_UNKNOWN = 0;
+      STATE_READY = 1;
+    }
+  }
+}

@@ -26,6 +26,11 @@ into indexed SQL columns in Go, Swift, and Rust. Missing parents remain SQL NULL
 initialization backfills existing objects without changing their protobuf
 payloads or sync timestamps. See [projection options](doc/code-generation.md).
 
+Named hash projections fingerprint selected protobuf fields, including complete
+nested messages, repeated values, and maps, without exposing their contents as
+SQL columns. Dirty-key trackers can watch these eight-byte XXH3-64 fingerprints
+to skip metadata-only edits. See [hash projections](doc/code-generation.md#hash-projections).
+
 ## Getting started
 
 Prerequisites:
@@ -33,6 +38,19 @@ Prerequisites:
 - Go `1.27+`
 - SQLite `3.35+` for projection removal
 - Rust (edition 2024), Cargo, and `protoc` for the Rust target
+- Swift `6.2+` on macOS; Swift `6.2+` or Podman on Linux
+- SQLite development headers when using native Swift on Linux
+
+The Makefile routes Swift tools through `scripts/swift-tool`. It uses an
+installed toolchain when available and otherwise builds and runs a Podman image
+on Linux. The image includes Swift, SQLite development headers, and Go for the
+interoperability tests. Container build artifacts and caches persist in named
+volumes per checkout, separately from native `.build` artifacts. Native command
+failures are reported directly; they do not trigger a container retry.
+
+The wrapper also supports direct commands, for example
+`./scripts/swift-tool swift --version` or `./scripts/swift-tool swiftc --version`.
+Protobuf generation uses `scripts/protoc-gen-swift` through the same wrapper.
 
 Commands:
 

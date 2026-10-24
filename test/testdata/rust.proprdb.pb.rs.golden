@@ -32,7 +32,7 @@ const COLUMNS: &[::proprdb_runtime::Column] = &[
 ];
 const INDEXES: &[&str] = &[
 ];
-fn projected_values(data: &Self::Data) -> Vec<::proprdb_runtime::Value> { vec![
+fn projected_values(data: &Self::Data) -> ::proprdb_runtime::Result<Vec<::proprdb_runtime::Value>> { Ok(vec![
 data.nick.as_ref().map_or(::proprdb_runtime::Value::Null, |value| ::proprdb_runtime::Value::Text(value.clone())),
 ::proprdb_runtime::Value::Integer(i64::from(data.enabled)),
 ::proprdb_runtime::Value::Blob(data.payload.clone()),
@@ -40,7 +40,7 @@ data.nick.as_ref().map_or(::proprdb_runtime::Value::Null, |value| ::proprdb_runt
 ::proprdb_runtime::Value::Integer(i64::from(data.amount)),
 ::proprdb_runtime::Value::Integer(i64::from(data.state)),
 ::proprdb_runtime::Value::Text(data.r#type.clone()),
-] }
+]) }
 }
 pub struct OuterInnerModel;
 pub type OuterInnerRow = ::proprdb_runtime::Row<crate::rusttest::outer::Inner>;
@@ -64,10 +64,10 @@ const COLUMNS: &[::proprdb_runtime::Column] = &[
 ];
 const INDEXES: &[&str] = &[
 ];
-fn projected_values(data: &Self::Data) -> Vec<::proprdb_runtime::Value> { vec![
+fn projected_values(data: &Self::Data) -> ::proprdb_runtime::Result<Vec<::proprdb_runtime::Value>> { Ok(vec![
 match &data.selection { Some(crate::rusttest::outer::inner::Selection::Blob(value)) => ::proprdb_runtime::Value::Blob(value.clone()), _ => ::proprdb_runtime::Value::Null },
 match &data.selection { Some(crate::rusttest::outer::inner::Selection::Number(value)) => ::proprdb_runtime::Value::Real(*value), _ => ::proprdb_runtime::Value::Null },
-] }
+]) }
 }
 pub struct SyncPayloadModel;
 pub type SyncPayloadRow = ::proprdb_runtime::Row<crate::rusttest::SyncPayload>;
@@ -90,9 +90,9 @@ const COLUMNS: &[::proprdb_runtime::Column] = &[
 ];
 const INDEXES: &[&str] = &[
 ];
-fn projected_values(data: &Self::Data) -> Vec<::proprdb_runtime::Value> { vec![
+fn projected_values(data: &Self::Data) -> ::proprdb_runtime::Result<Vec<::proprdb_runtime::Value>> { Ok(vec![
 ::proprdb_runtime::Value::Text(data.title.clone()),
-] }
+]) }
 }
 impl ::proprdb_runtime::CustomIdModel for SyncPayloadModel {}
 pub struct Crud<'a> {

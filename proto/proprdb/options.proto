@@ -17,6 +17,12 @@ message Index {
 message DirtyKeys {
   string name = 1;
   repeated string watched_fields = 2;
+  repeated string watched_hashes = 3;
+}
+
+message HashProjection {
+  string name = 1;
+  repeated string fields = 2;
 }
 
 message DirtyWindow {
@@ -36,4 +42,5 @@ extend google.protobuf.MessageOptions {
   repeated string external_paths = 50009;
   repeated DirtyWindow dirty_windows = 50010;
   repeated DirtyKeys dirty_keys = 50011;
+  repeated HashProjection hash_projections = 50012;
 }

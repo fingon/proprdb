@@ -32,7 +32,6 @@ private func keysPerson() -> Generatedtest_Example_Person {
     return person
 }
 
-@MainActor
 final class DirtyKeysTests: XCTestCase {
     func testConsumersRepeatedMutationsAndDeletionReinsertion() throws {
         let db = try SQLiteDatabase(path: keysMemoryPath)

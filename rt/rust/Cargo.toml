@@ -13,3 +13,4 @@ prost-reflect = { version = "0.16", features = ["serde"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["arbitrary_precision"] }
 log = "0.4"
+xxhash-rust = { version = "0.8.15", features = ["xxh3"] }

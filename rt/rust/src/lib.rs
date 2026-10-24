@@ -9,6 +9,7 @@ pub use rusqlite::types::Value;
 
 mod connection;
 mod dirty_keys;
+mod hash_projection;
 mod introspection;
 mod mutation;
 mod sync;
@@ -17,6 +18,7 @@ pub use dirty_keys::{
     DirtyKeysDescriptor, DirtyKeysState, DirtyKeysToken, acknowledge_dirty_keys, read_dirty_keys,
     register_dirty_keys, remove_dirty_keys_consumer,
 };
+pub use hash_projection::{canonical_hash_bytes, project_hash};
 pub use introspection::{
     QueryStatistic, TableDescriptor, TableIntrospection, clear_query_statistics, query_statistics,
 };
@@ -99,7 +101,7 @@ pub trait Model {
     const DIRTY_WINDOWS: &[DirtyWindowDescriptor] = &[];
     const DIRTY_KEYS: &[DirtyKeysDescriptor] = &[];
     fn descriptor() -> Result<MessageDescriptor>;
-    fn projected_values(data: &Self::Data) -> Vec<Value>;
+    fn projected_values(data: &Self::Data) -> Result<Vec<Value>>;
     fn validate(_data: &Self::Data) -> Result<()> {
         Ok(())
     }
@@ -303,7 +305,11 @@ impl<'a, M: Model> Table<'a, M> {
             };
             for current in M::PROJECTION_SCHEMA.split(';') {
                 if let Some((current_name, new_kind)) = current.split_once(':') {
-                    if name != current_name || old_kind == new_kind {
+                    if name != current_name
+                        || old_kind == new_kind
+                        || (old_kind.starts_with("bytes:hash=")
+                            && new_kind.starts_with("bytes:hash="))
+                    {
                         continue;
                     }
                     let repair = M::COLUMNS
@@ -422,7 +428,7 @@ impl<'a, M: Model> Table<'a, M> {
                     break;
                 };
                 let data = M::Data::decode(bytes.as_slice())?;
-                let mut values = M::projected_values(&data);
+                let mut values = M::projected_values(&data)?;
                 if !M::COLUMNS.is_empty() {
                     values.push(Value::Text(id.clone()));
                     self.connection
@@ -437,14 +443,14 @@ impl<'a, M: Model> Table<'a, M> {
         Ok(())
     }
 
-    fn values(&self, id: &str, at_ns: i64, data: &M::Data) -> Vec<Value> {
+    fn values(&self, id: &str, at_ns: i64, data: &M::Data) -> Result<Vec<Value>> {
         let mut values = vec![
             Value::Text(id.into()),
             Value::Integer(at_ns),
             Value::Blob(data.encode_to_vec()),
         ];
-        values.extend(M::projected_values(data));
-        values
+        values.extend(M::projected_values(data)?);
+        Ok(values)
     }
 
     pub fn insert(&self, data: &M::Data) -> Result<Row<M::Data>> {
@@ -457,7 +463,7 @@ impl<'a, M: Model> Table<'a, M> {
             let at_ns = self.next_at_ns(id)?;
             self.connection.execute(
                 M::INSERT_SQL,
-                params_from_iter(self.values(id, at_ns, data)),
+                params_from_iter(self.values(id, at_ns, data)?),
             )?;
             self.clear_tombstone(id)?;
             Ok(Row {
@@ -494,7 +500,7 @@ impl<'a, M: Model> Table<'a, M> {
             let at_ns = self.next_at_ns(id)?;
             self.connection.execute(
                 M::UPSERT_SQL,
-                params_from_iter(self.values(id, at_ns, data)),
+                params_from_iter(self.values(id, at_ns, data)?),
             )?;
             self.clear_tombstone(id)?;
             Ok(Some(Row {

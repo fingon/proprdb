@@ -220,7 +220,7 @@ impl<M: Model> SyncTable for Table<'_, M> {
         if let Some(message) = message {
             let bytes = message.encode_to_vec();
             let data = M::Data::decode(bytes.as_slice())?;
-            let mut values = self.values(&record.id, record.at_ns, &data);
+            let mut values = self.values(&record.id, record.at_ns, &data)?;
             values[crate::DATA_COLUMN_INDEX] = crate::Value::Blob(bytes);
             self.connection
                 .execute(M::UPSERT_SQL, params_from_iter(values))?;

@@ -301,8 +301,12 @@ func (e rustEmitter) emitModel(model rustModel) {
 	if len(m.ProjectedFields) == 0 {
 		dataName = "_data"
 	}
-	g.P("fn projected_values(", dataName, ": &Self::Data) -> Vec<", rustRuntime, "::Value> { vec![")
+	g.P("fn projected_values(", dataName, ": &Self::Data) -> ", rustRuntime, "::Result<Vec<", rustRuntime, "::Value>> { Ok(vec![")
 	for _, projection := range m.ProjectedFields {
+		if projection.HashSchema != "" {
+			g.P(rustRuntime, "::Value::Blob(", rustRuntime, "::project_hash(data, ", strconv.Quote(projection.HashSchema), ")?),")
+			continue
+		}
 		if len(projection.Path) > 0 {
 			e.emitPathProjection(model.message, projection.Path, "data")
 			g.P(",")
@@ -314,7 +318,7 @@ func (e rustEmitter) emitModel(model rustModel) {
 			}
 		}
 	}
-	g.P("] }")
+	g.P("]) }")
 	g.P("}")
 	if m.AllowCustomIDInsert {
 		g.P("impl ", rustRuntime, "::CustomIdModel for ", m.GoName, "Model {}")

@@ -1,7 +1,7 @@
 import CSQLite
+import CoreFoundation
 import Foundation
 import Logging
-import Security
 import SwiftProtobuf
 
 public let coreTableDeletedName = "_deleted"
@@ -1213,9 +1213,9 @@ public func nowNs() -> Int64 {
 
 public func uuidV7() throws -> String {
     var bytes = [UInt8](repeating: 0, count: 16)
-    let result = SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes)
-    if result != errSecSuccess {
-        throw ProprDBError("generate random bytes for uuidv7: \(result)")
+    var random = SystemRandomNumberGenerator()
+    for index in bytes.indices {
+        bytes[index] = UInt8.random(in: .min ... .max, using: &random)
     }
     let milliseconds = UInt64(Date().timeIntervalSince1970 * 1_000)
     bytes[0] = UInt8((milliseconds >> 40) & 0xff)

@@ -60,7 +60,7 @@ final class InitializationTests: XCTestCase {
             }
             XCTAssertEqual(try scalarInt(db, sql: totalChangesSQL, arguments: []), before)
             XCTAssertEqual(statements.filter { $0.hasPrefix("CREATE TABLE IF NOT EXISTS \(_deletedTableName) ") }.count, 1)
-            XCTAssertEqual(statements.filter { $0.hasPrefix("SELECT id, at_ns, deleted, data_json FROM \(_unknownTypesTableName) WHERE type_name = ?") }.count, fullInit ? 3 : 1)
+            XCTAssertEqual(statements.filter { $0.hasPrefix("SELECT id, at_ns, deleted, data_json FROM \(_unknownTypesTableName) WHERE type_name = ?") }.count, fullInit ? 4 : 1)
             for statement in statements {
                 for prefix in ["INSERT ", "UPDATE ", "CREATE INDEX ", "DROP INDEX "] {
                     XCTAssertFalse(statement.hasPrefix(prefix), statement)

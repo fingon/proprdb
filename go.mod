@@ -9,6 +9,7 @@ tool (
 )
 
 require (
+	github.com/zeebo/xxh3 v1.0.2
 	google.golang.org/protobuf v1.36.12
 	gotest.tools/v3 v3.5.2
 )
@@ -166,6 +167,7 @@ require (
 	github.com/kisielk/errcheck v1.20.0 // indirect
 	github.com/kkHAIKE/contextcheck v1.1.6 // indirect
 	github.com/klauspost/compress v1.18.4 // indirect
+	github.com/klauspost/cpuid/v2 v2.0.9 // indirect
 	github.com/klauspost/pgzip v1.2.6 // indirect
 	github.com/kulti/thelper v0.7.1 // indirect
 	github.com/kunwardeep/paralleltest v1.0.15 // indirect

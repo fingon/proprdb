@@ -10,12 +10,12 @@
 #
 
 BINARIES=protoc-gen-proprdb protoc-gen-proprdb-swift protoc-gen-proprdb-rust
-SWIFT_ENV=HOME=/tmp SWIFTPM_MODULECACHE_OVERRIDE=/tmp/swiftpm-module-cache CLANG_MODULE_CACHE_PATH=/tmp/clang-module-cache
+SWIFT=$(CURDIR)/scripts/swift-tool swift
 SWIFT_ARGS?=--disable-sandbox
 GOLANGCI_LINT=$(shell go tool -n golangci-lint)
 PROTOC_GEN_GO=$(shell go tool -n protoc-gen-go)
 STRIP_PROTO_VERSIONS=perl -i -ne 'print unless /^\/\/ (?:versions:|\tprotoc(?:-gen-go)?\s+v\S+)$$/'
-PROTOC_GEN_SWIFT=test/swift/.build/checkouts/swift-protobuf/.build/debug/protoc-gen-swift
+PROTOC_GEN_SWIFT=$(CURDIR)/scripts/protoc-gen-swift
 
 .PHONY: all
 all: lint verify-generated test build
@@ -31,8 +31,8 @@ protoc-gen-proprdb-rust: options $(wildcard **/*.go)
 
 .PHONY: protoc-gen-swift
 protoc-gen-swift: test/swift/Package.resolved
-	cd test/swift && $(SWIFT_ENV) swift package resolve $(SWIFT_ARGS)
-	$(SWIFT_ENV) swift build --package-path test/swift/.build/checkouts/swift-protobuf --product protoc-gen-swift $(SWIFT_ARGS)
+	cd test/swift && $(SWIFT) package resolve $(SWIFT_ARGS)
+	$(SWIFT) build --package-path test/swift/.build/checkouts/swift-protobuf --product protoc-gen-swift $(SWIFT_ARGS)
 
 .PHONY: protoc-gen-proprdb protoc-gen-proprdb-swift protoc-gen-proprdb-rust build
 build: go-build swift-build rust-build
@@ -59,11 +59,11 @@ swift-bindings: protoc-gen-proprdb-swift
 
 .PHONY: swift-test
 swift-test: swift-fixtures
-	cd test/swift && $(SWIFT_ENV) swift test $(SWIFT_ARGS)
+	cd test/swift && $(SWIFT) test $(SWIFT_ARGS)
 
 .PHONY: swift-build
 swift-build: swift-fixtures
-	cd test/swift && $(SWIFT_ENV) swift build $(SWIFT_ARGS)
+	cd test/swift && $(SWIFT) build $(SWIFT_ARGS)
 
 .PHONY: rust-fixtures rust-test rust-build rust-lint
 rust-fixtures: protoc-gen-proprdb-rust
@@ -97,7 +97,7 @@ benchmark-init-go: go-fixtures
 	cd test/system && go test -run '^$$' -bench '^BenchmarkInitialization$$' -benchtime=10x -count=1
 
 benchmark-init-swift: swift-fixtures
-	cd test/swift && PROPRDB_INIT_BENCHMARK=1 $(SWIFT_ENV) swift test $(SWIFT_ARGS) --filter InitializationBenchmarkTests
+	cd test/swift && PROPRDB_INIT_BENCHMARK=1 $(SWIFT) test $(SWIFT_ARGS) --filter InitializationBenchmarkTests
 
 benchmark-init-rust: rust-fixtures
 	cargo bench -p proprdb-rust-tests --bench initialization --locked
