@@ -3,6 +3,22 @@
 [Project overview](../README.md) · [Design and data model](design.md) ·
 [Protobuf options and code generation](code-generation.md)
 
+## Connections and concurrency
+
+Go's `rt.WrapDB` sets the supplied `*sql.DB` pool's maximum open connections
+to one, including pools previously configured for more connections. Concurrent
+reads and writes queue for that connection. Share one database handle per file,
+wrap it before starting database work, and retain this connection limit.
+Separate handles and processes can still contend for SQLite's writer lock.
+
+Inside `WithTransaction` callbacks, use the supplied transaction adapter for
+all database operations, including nested transactions. Using the outer pool
+while its only connection is held by the transaction can deadlock. Likewise,
+close query rows before starting another operation through the pool.
+
+Swift and Rust database wrappers each hold an individual SQLite connection.
+For Swift, share one actor instance to serialize access to a database.
+
 ## JSONL sync API semantics
 
 Generated CRUD wrappers include:

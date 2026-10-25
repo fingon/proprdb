@@ -29,7 +29,6 @@ func openRuntimeTestDB(t *testing.T) (*sql.DB, rt.DBTX) {
 	t.Helper()
 	db, err := sql.Open(sqliteDriverName, ":memory:")
 	assert.NilError(t, err)
-	db.SetMaxOpenConns(1)
 	t.Cleanup(func() { assert.NilError(t, db.Close()) })
 	return db, rt.WrapDB(db)
 }

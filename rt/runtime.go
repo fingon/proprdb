@@ -60,6 +60,9 @@ type TxAdapter struct {
 var savepointSequence atomic.Uint64
 
 func WrapDB(db *sql.DB) DBTX {
+	if db != nil {
+		db.SetMaxOpenConns(1)
+	}
 	return &DBAdapter{db: db}
 }
 
