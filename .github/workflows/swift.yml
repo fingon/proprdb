@@ -11,7 +11,7 @@ jobs:
   swift:
     strategy:
       matrix:
-        os: [macos-latest, ubuntu-24.04]
+        os: [avrea-macos-latest-8-vcpu, avrea-ubuntu-24.04-2-vcpu]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
